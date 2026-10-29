@@ -62,7 +62,7 @@ export const CheckoutScreen: React.FC<Props> = ({ navigation }) => {
   const { data: addresses, isLoading: addressLoading } = useAddresses();
   const createOrderMutation = useCreateOrder();
 
-  const [selectedAddressId, setSelectedAddressId] = useState<string | null>(null);
+  const [selectedAddressId] = useState<string | null>(null);
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('COD');
   const [selectedVoucher, setSelectedVoucher] = useState<VoucherItem | null>({
     id: 'v1',
@@ -77,15 +77,11 @@ export const CheckoutScreen: React.FC<Props> = ({ navigation }) => {
   const [note, setNote] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Chọn địa chỉ mặc định đầu tiên nếu có
-  React.useEffect(() => {
-    if (addresses && addresses.length > 0 && !selectedAddressId) {
-      const def = addresses.find((a) => a.isDefault) || addresses[0];
-      setSelectedAddressId(def.id);
-    }
-  }, [addresses, selectedAddressId]);
+  // Tự động xác định địa chỉ mặc định đầu tiên nếu người dùng chưa chủ động chọn địa chỉ khác
+  const activeAddressId =
+    selectedAddressId || addresses?.find((a) => a.isDefault)?.id || addresses?.[0]?.id || null;
 
-  const activeAddr = addresses?.find((a) => a.id === selectedAddressId) || addresses?.[0];
+  const activeAddr = addresses?.find((a) => a.id === activeAddressId) || addresses?.[0];
   const userLat = activeAddr?.latitude || coords.latitude;
   const userLng = activeAddr?.longitude || coords.longitude;
   const restLat = restaurant?.latitude || DEFAULT_COORDS.latitude;
@@ -118,7 +114,7 @@ export const CheckoutScreen: React.FC<Props> = ({ navigation }) => {
   const handlePlaceOrder = async () => {
     if (!restaurant) return;
 
-    if (!selectedAddressId && (!addresses || addresses.length === 0)) {
+    if (!activeAddressId && (!addresses || addresses.length === 0)) {
       Alert.alert('Chưa có địa chỉ', 'Vui lòng thêm địa chỉ nhận hàng trước khi đặt đơn.');
       navigation.navigate('AddressManagement');
       return;
@@ -126,7 +122,7 @@ export const CheckoutScreen: React.FC<Props> = ({ navigation }) => {
 
     try {
       setIsSubmitting(true);
-      const selectedAddr = addresses?.find((a) => a.id === selectedAddressId);
+      const selectedAddr = addresses?.find((a) => a.id === activeAddressId);
 
       const orderPayload = {
         restaurantId: restaurant.id,
@@ -137,7 +133,7 @@ export const CheckoutScreen: React.FC<Props> = ({ navigation }) => {
             .filter(Boolean)
             .join(' | ') || undefined,
         })),
-        addressId: selectedAddressId || undefined,
+        addressId: activeAddressId || undefined,
         deliveryAddress: selectedAddr?.addressLine || 'Địa chỉ giao hàng',
         deliveryLat: selectedAddr?.latitude || coords.latitude,
         deliveryLng: selectedAddr?.longitude || coords.longitude,

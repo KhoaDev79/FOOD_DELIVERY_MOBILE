@@ -25,6 +25,7 @@ type Props = NativeStackScreenProps<RootStackParamList, 'AddressPicker'>;
 
 let NativeMapView: any = null;
 if (Platform.OS !== 'web') {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
   NativeMapView = require('react-native-maps').default;
 }
 
@@ -104,8 +105,15 @@ export const AddressPickerScreen: React.FC<Props> = ({ navigation, route }) => {
 
   // Khởi tạo lấy tên địa chỉ khi vừa mở màn hình
   useEffect(() => {
-    reverseGeocode(initialCoords.latitude, initialCoords.longitude);
+    let isMounted = true;
+    const fetchInitial = async () => {
+      if (isMounted) {
+        await reverseGeocode(initialCoords.latitude, initialCoords.longitude);
+      }
+    };
+    fetchInitial();
     return () => {
+      isMounted = false;
       if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
     };
   }, []);
@@ -339,31 +347,27 @@ export const AddressPickerScreen: React.FC<Props> = ({ navigation, route }) => {
             showsMyLocationButton={false}
           />
         ) : (
-          <View style={styles.webMapContainer}>
-            <iframe
-              title="map"
-              width="100%"
-              height="100%"
-              style={{ border: 0 }}
-              src={`https://www.openstreetmap.org/export/embed.html?bbox=${
-                currentRegion.longitude - 0.005
-              }%2C${currentRegion.latitude - 0.005}%2C${currentRegion.longitude + 0.005}%2C${
-                currentRegion.latitude + 0.005
-              }&layer=mapnik&marker=${currentRegion.latitude}%2C${currentRegion.longitude}`}
-            />
+          <View style={styles.webMapNoticeBox}>
+            <Ionicons name="map-outline" size={44} color={colors.primary} />
+            <Text style={styles.webMapNoticeTitle}>Chế độ xem bản đồ trên Web</Text>
+            <Text style={styles.webMapNoticeSub}>
+              Bản đồ kéo ghim tương tác tối ưu trên điện thoại di động (Expo Go trên iPhone / Android). Trên trình duyệt web, bạn có thể tìm kiếm địa điểm ở ô trên hoặc tự gõ địa chỉ bên dưới.
+            </Text>
           </View>
         )}
 
-        {/* Ghim trung tâm */}
-        <View style={styles.centerMarkerWrapper} pointerEvents="none">
-          <View style={styles.markerBubble}>
-            <Text style={styles.markerBubbleText} numberOfLines={1}>
-              {isGeocoding ? 'Đang định vị...' : 'Giao đến đây'}
-            </Text>
+        {/* Ghim trung tâm (chỉ trên thiết bị di động) */}
+        {Platform.OS !== 'web' && (
+          <View style={styles.centerMarkerWrapper} pointerEvents="none">
+            <View style={styles.markerBubble}>
+              <Text style={styles.markerBubbleText} numberOfLines={1}>
+                {isGeocoding ? 'Đang định vị...' : 'Giao đến đây'}
+              </Text>
+            </View>
+            <Ionicons name="location" size={44} color="#EE4D2D" style={styles.pinIcon} />
+            <View style={styles.markerShadow} />
           </View>
-          <Ionicons name="location" size={44} color="#EE4D2D" style={styles.pinIcon} />
-          <View style={styles.markerShadow} />
-        </View>
+        )}
 
         {/* Nút GPS định vị tôi */}
         <TouchableOpacity
@@ -546,10 +550,18 @@ const styles = StyleSheet.create({
     position: 'relative',
   },
   fullMap: {
-    ...StyleSheet.absoluteFillObject,
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
   },
   webMapContainer: {
-    ...StyleSheet.absoluteFillObject,
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
   },
   centerMarkerWrapper: {
     position: 'absolute',
@@ -679,5 +691,27 @@ const styles = StyleSheet.create({
   },
   confirmBtnDisabled: {
     backgroundColor: '#CBD5E1',
+  },
+  webMapNoticeBox: {
+    flex: 1,
+    backgroundColor: '#F1F5F9',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  webMapNoticeTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: colors.text,
+    marginTop: 12,
+    marginBottom: 6,
+    textAlign: 'center',
+  },
+  webMapNoticeSub: {
+    fontSize: 13,
+    color: colors.textMuted,
+    textAlign: 'center',
+    lineHeight: 20,
+    maxWidth: 420,
   },
 });

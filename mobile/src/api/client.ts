@@ -12,10 +12,10 @@ export const apiClient = axios.create({
 });
 
 let isRefreshing = false;
-let failedQueue: Array<{
+let failedQueue: {
   resolve: (value?: unknown) => void;
   reject: (reason?: unknown) => void;
-}> = [];
+}[] = [];
 
 const processQueue = (error: Error | null) => {
   failedQueue.forEach((prom) => {

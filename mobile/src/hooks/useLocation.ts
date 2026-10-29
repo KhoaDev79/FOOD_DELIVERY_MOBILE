@@ -32,7 +32,7 @@ export function useLocation() {
           });
           setIsLoading(false);
         }
-      } catch (err) {
+      } catch {
         if (isMounted) {
           setErrorMsg('Không thể lấy vị trí hiện tại');
           setIsLoading(false);

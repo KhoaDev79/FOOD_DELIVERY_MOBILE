@@ -70,7 +70,7 @@ export const ChatScreen: React.FC<Props> = ({ navigation, route }) => {
   const [inputText, setInputText] = useState('');
   const flatListRef = useRef<FlatList>(null);
 
-  const handleSendText = (textToSend?: string) => {
+  const handleSendText = useCallback((textToSend?: string) => {
     const text = (textToSend || inputText).trim();
     if (!text) return;
 
@@ -99,9 +99,9 @@ export const ChatScreen: React.FC<Props> = ({ navigation, route }) => {
       setMessages((prev) => [...prev, replyMsg]);
       flatListRef.current?.scrollToEnd({ animated: true });
     }, 2000);
-  };
+  }, [inputText]);
 
-  const handlePickImage = async () => {
+  const handlePickImage = useCallback(async () => {
     try {
       const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (!permission.granted) return;
@@ -128,7 +128,7 @@ export const ChatScreen: React.FC<Props> = ({ navigation, route }) => {
     } catch {
       // Ignored
     }
-  };
+  }, []);
 
   const handleOpenCall = () => {
     navigation.navigate('DriverCall', {
