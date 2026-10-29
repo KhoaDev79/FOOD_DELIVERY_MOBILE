@@ -33,3 +33,4 @@ export const appStorage = {
     await AsyncStorage.removeItem(key);
   },
 };
+
