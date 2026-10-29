@@ -1,0 +1,29 @@
+node_modules/
+.expo/
+dist/
+web-build/
+expo-env.d.ts
+
+# Native (prebuild)
+/ios
+/android
+
+# Env
+.env
+.env.local
+.env*.local
+
+# Credentials
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+google-services.json
+GoogleService-Info.plist
+
+# Misc
+.DS_Store
+npm-debug.*
+yarn-error.*
+*.tsbuildinfo

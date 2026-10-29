@@ -1,0 +1,46 @@
+{
+  "expo": {
+    "name": "Food Delivery",
+    "slug": "food-delivery",
+    "scheme": "fooddelivery",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "ios": {
+      "bundleIdentifier": "com.fooddelivery.app",
+      "supportsTablet": false,
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "Ứng dụng cần vị trí của bạn để tìm nhà hàng gần và ghim địa chỉ giao hàng."
+      }
+    },
+    "android": {
+      "package": "com.fooddelivery.app",
+      "permissions": [
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_FINE_LOCATION",
+        "POST_NOTIFICATIONS"
+      ]
+    },
+    "plugins": [
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Ứng dụng cần vị trí của bạn để tìm nhà hàng gần và ghim địa chỉ giao hàng."
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "color": "#EE4D2D"
+        }
+      ],
+      "expo-secure-store"
+    ],
+    "extra": {
+      "eas": {
+        "projectId": ""
+      }
+    }
+  }
+}

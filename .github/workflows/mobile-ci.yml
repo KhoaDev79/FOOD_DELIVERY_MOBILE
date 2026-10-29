@@ -1,0 +1,32 @@
+name: Mobile CI
+
+on:
+  push:
+    branches: [main]
+    paths: ["mobile/**", ".github/workflows/mobile-ci.yml"]
+  pull_request:
+    paths: ["mobile/**", ".github/workflows/mobile-ci.yml"]
+
+defaults:
+  run:
+    working-directory: mobile
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Skip until the Expo app is initialized (phase 2)
+        id: guard
+        run: |
+          if [ -f package.json ]; then echo "ready=true" >> "$GITHUB_OUTPUT"; else echo "ready=false" >> "$GITHUB_OUTPUT"; fi
+      - uses: actions/setup-node@v4
+        if: steps.guard.outputs.ready == 'true'
+        with:
+          node-version: 20
+      - if: steps.guard.outputs.ready == 'true'
+        run: npm ci
+      - if: steps.guard.outputs.ready == 'true'
+        run: npx tsc --noEmit
+      - if: steps.guard.outputs.ready == 'true'
+        run: npm run lint --if-present

@@ -1,0 +1,307 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+}
+
+// ============================ ENUMS ============================
+
+enum Role {
+  CUSTOMER
+  RESTAURANT_OWNER
+  DRIVER
+  ADMIN
+}
+
+enum OrderStatus {
+  PENDING           // Khách vừa đặt, chờ quán xác nhận
+  CONFIRMED         // Quán đã nhận đơn
+  PREPARING         // Quán đang chế biến
+  READY_FOR_PICKUP  // Món đã sẵn sàng, chờ tài xế lấy
+  PICKED_UP         // Tài xế đã lấy món, đang giao
+  DELIVERED         // Giao thành công
+  CANCELLED
+}
+
+enum PaymentMethod {
+  COD
+  VNPAY
+}
+
+enum PaymentStatus {
+  UNPAID
+  PAID
+  FAILED
+  REFUNDED
+}
+
+enum PaymentTransactionStatus {
+  PENDING
+  SUCCESS
+  FAILED
+}
+
+enum VoucherType {
+  FIXED_AMOUNT
+  PERCENTAGE
+  FREE_SHIP
+}
+
+// ============================ MODELS ============================
+
+model User {
+  id               String    @id @default(uuid()) @db.Uuid
+  email            String    @unique
+  phone            String?   @unique
+  passwordHash     String
+  fullName         String
+  role             Role      @default(CUSTOMER)
+  avatarUrl        String?
+  /// Argon2 hash của refresh token hiện hành (rotation + revoke khi logout)
+  refreshTokenHash String?
+  expoPushToken    String?
+  isActive         Boolean   @default(true)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  addresses        Address[]
+  restaurants      Restaurant[]  @relation("RestaurantOwner")
+  orders           Order[]       @relation("CustomerOrders")
+  deliveries       Order[]       @relation("DriverOrders")
+  reviews          Review[]
+
+  @@map("users")
+}
+
+model Address {
+  id                String   @id @default(uuid()) @db.Uuid
+  userId            String   @db.Uuid
+  label             String   // "Nhà", "Công ty"...
+  addressLine       String
+  latitude          Float
+  longitude         Float
+  isDefault         Boolean  @default(false)
+  /// Đánh dấu địa chỉ do người dùng tự nhập tay thay vì chọn từ geocoding
+  isManual          Boolean  @default(false)
+  /// Đánh dấu địa chỉ toạ độ cũ cần người dùng mở ra xác nhận lại
+  needsConfirmation Boolean  @default(false)
+  createdAt         DateTime @default(now())
+
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("addresses")
+}
+
+model Restaurant {
+  id               String     @id @default(uuid()) @db.Uuid
+  ownerId          String     @db.Uuid
+  name             String
+  description      String?
+  imageUrl         String?
+  address          String
+  latitude         Float
+  longitude        Float
+  /// Bán kính giao hàng tối đa của quán (km)
+  deliveryRadiusKm Float      @default(5)
+  isOpen           Boolean    @default(true)
+  rating           Float      @default(0)
+  openTime         String     @default("07:00")
+  closeTime        String     @default("22:00")
+  priceRange       String     @default("25.000đ - 85.000đ")
+  /// Cờ đánh dấu nhà hàng thuộc bộ dữ liệu mẫu (không hiển thị thô trong tên quán)
+  isSample         Boolean    @default(false)
+  createdAt        DateTime   @default(now())
+  updatedAt        DateTime   @updatedAt
+
+  owner            User       @relation("RestaurantOwner", fields: [ownerId], references: [id])
+  categories       Category[]
+  menuItems        MenuItem[]
+  orders           Order[]
+  reviews          Review[]
+
+  @@index([latitude, longitude])
+  @@index([ownerId])
+  @@map("restaurants")
+}
+
+model Category {
+  id           String     @id @default(uuid()) @db.Uuid
+  restaurantId String     @db.Uuid
+  name         String
+  sortOrder    Int        @default(0)
+
+  restaurant   Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  menuItems    MenuItem[]
+
+  @@unique([restaurantId, name])
+  @@map("categories")
+}
+
+model MenuItem {
+  id           String      @id @default(uuid()) @db.Uuid
+  restaurantId String      @db.Uuid
+  categoryId   String?     @db.Uuid
+  name         String
+  description  String?
+  /// Giá tính bằng VND (số nguyên, tránh sai số float)
+  price        Int
+  discountPrice Int?
+  imageUrl     String?
+  options      Json?
+  isAvailable  Boolean     @default(true)
+  /// Soft delete: giữ lại để OrderItem cũ vẫn tham chiếu được
+  isArchived   Boolean     @default(false)
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  restaurant   Restaurant  @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  category     Category?   @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  orderItems   OrderItem[]
+
+  @@index([restaurantId])
+  @@map("menu_items")
+}
+
+model Order {
+  id              String        @id @default(uuid()) @db.Uuid
+  customerId      String        @db.Uuid
+  restaurantId    String        @db.Uuid
+  driverId        String?       @db.Uuid
+  status          OrderStatus   @default(PENDING)
+  paymentMethod   PaymentMethod @default(COD)
+  paymentStatus   PaymentStatus @default(UNPAID)
+  subtotal        Int
+  deliveryFee     Int
+  discountAmount  Int           @default(0)
+  total           Int
+  voucherId       String?       @db.Uuid
+  distanceKm      Float
+  deliveryAddress String
+  deliveryLat     Float
+  deliveryLng     Float
+  note            String?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  customer        User          @relation("CustomerOrders", fields: [customerId], references: [id])
+  driver          User?         @relation("DriverOrders", fields: [driverId], references: [id])
+  restaurant      Restaurant    @relation(fields: [restaurantId], references: [id])
+  voucher         Voucher?      @relation(fields: [voucherId], references: [id])
+  items           OrderItem[]
+  statusHistory   OrderStatusHistory[]
+  transactions    PaymentTransaction[]
+
+  @@index([customerId, createdAt])
+  @@index([restaurantId, status])
+  @@index([driverId, status])
+  @@map("orders")
+}
+
+model OrderItem {
+  id         String   @id @default(uuid()) @db.Uuid
+  orderId    String   @db.Uuid
+  menuItemId String   @db.Uuid
+  /// Snapshot tên & giá tại thời điểm đặt (giá món có thể đổi sau này)
+  name       String
+  unitPrice  Int
+  quantity   Int
+  lineTotal  Int
+  options    Json?
+  note       String?
+
+  order      Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  menuItem   MenuItem @relation(fields: [menuItemId], references: [id], onDelete: Restrict)
+
+  @@index([orderId])
+  @@map("order_items")
+}
+
+model Voucher {
+  id                String      @id @default(uuid()) @db.Uuid
+  code              String      @unique
+  title             String
+  description       String?
+  discountType      VoucherType @default(FIXED_AMOUNT)
+  discountValue     Int
+  maxDiscountAmount Int?
+  minOrderAmount    Int         @default(0)
+  maxUsage          Int         @default(100)
+  usedCount         Int         @default(0)
+  startDate         DateTime    @default(now())
+  endDate           DateTime
+  isActive          Boolean     @default(true)
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+
+  orders            Order[]
+
+  @@map("vouchers")
+}
+
+model Banner {
+  id          String   @id @default(uuid()) @db.Uuid
+  title       String
+  imageUrl    String
+  actionType  String?  @default("RESTAURANT")
+  actionValue String?
+  sortOrder   Int      @default(0)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  @@map("banners")
+}
+
+model Review {
+  id           String     @id @default(uuid()) @db.Uuid
+  restaurantId String     @db.Uuid
+  customerId   String     @db.Uuid
+  rating       Int        @default(5)
+  comment      String?
+  createdAt    DateTime   @default(now())
+
+  restaurant   Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  customer     User       @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@index([restaurantId])
+  @@map("reviews")
+}
+
+model OrderStatusHistory {
+  id        String      @id @default(uuid()) @db.Uuid
+  orderId   String      @db.Uuid
+  status    OrderStatus
+  changedBy String?     @db.Uuid
+  createdAt DateTime    @default(now())
+
+  order     Order       @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId, createdAt])
+  @@map("order_status_history")
+}
+
+
+/// Mỗi lần khách bấm "Thanh toán VNPay" sinh 1 giao dịch với txnRef duy nhất.
+/// IPN được xử lý idempotent dựa trên trạng thái của bản ghi này.
+model PaymentTransaction {
+  id            String                   @id @default(uuid()) @db.Uuid
+  orderId       String                   @db.Uuid
+  provider      PaymentMethod
+  txnRef        String                   @unique
+  amount        Int
+  status        PaymentTransactionStatus @default(PENDING)
+  responseCode  String?
+  providerTxnNo String?
+  bankCode      String?
+  rawPayload    Json?
+  createdAt     DateTime                 @default(now())
+  updatedAt     DateTime                 @updatedAt
+
+  order         Order                    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId])
+  @@map("payment_transactions")
+}
