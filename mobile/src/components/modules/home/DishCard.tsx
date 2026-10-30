@@ -20,7 +20,7 @@ export const DishTile = memo<{ dish: NearbyDish; onPress: (d: NearbyDish) => voi
         className={cn('w-32 gap-1.5 active:opacity-80', className)}
       >
         <AppImage uri={dish.imageUrl} className="h-32 w-32 rounded-lg" fallbackIcon="fast-food-outline">
-          <Badge label={formatVND(dish.price)} tone="scrim" className="absolute bottom-2 left-2" />
+          <Badge label={formatVND(dish.price)} tone="scrim" size="sm" className="absolute bottom-1.5 left-1.5" />
           {!dish.restaurant.isOpen && (
             <View className="absolute inset-0 items-center justify-center bg-scrim">
               <Badge label="Quán đã đóng" tone="neutral" />

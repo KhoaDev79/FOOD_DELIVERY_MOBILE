@@ -40,13 +40,22 @@ export interface BadgeProps {
   label: string;
   tone?: BadgeTone;
   icon?: IconName;
+  /** sm: chữ 11, đệm nhỏ – dùng cho nhãn đè trên ảnh nhỏ. */
+  size?: 'sm' | 'md';
   className?: string;
 }
 
-export const Badge: React.FC<BadgeProps> = ({ label, tone = 'neutral', icon, className }) => (
-  <View className={cn('flex-row items-center gap-1 self-start rounded-sm px-2 py-0.5', BOX[tone], className)}>
-    {icon && <Icon name={icon} size="xs" tone={ICON[tone]} />}
-    <Text variant="caption" weight="semibold" tone={LABEL[tone]} numberOfLines={1}>
+export const Badge: React.FC<BadgeProps> = ({ label, tone = 'neutral', icon, size = 'md', className }) => (
+  <View
+    className={cn(
+      'flex-row items-center self-start',
+      size === 'sm' ? 'gap-0.5 rounded-md px-1.5 py-0.5' : 'gap-1 rounded-sm px-2 py-0.5',
+      BOX[tone],
+      className,
+    )}
+  >
+    {icon && <Icon name={icon} size={size === 'sm' ? 12 : 'xs'} tone={ICON[tone]} />}
+    <Text variant={size === 'sm' ? 'micro' : 'caption'} weight="semibold" tone={LABEL[tone]} numberOfLines={1}>
       {label}
     </Text>
   </View>
