@@ -16,6 +16,7 @@ import {
 } from 'react-native';
 import { usersApi } from '../../api/users';
 import { colors } from '../../constants/colors';
+import { queryKeys } from '../../constants/queryKeys';
 import { useLocation } from '../../hooks/useLocation';
 import {
   AddressTag,
@@ -23,6 +24,7 @@ import {
   useAddressDraftStore,
 } from '../../store/useAddressDraftStore';
 import { useAuthStore } from '../../store/useAuthStore';
+import { useDeliveryAddressStore } from '../../store/useDeliveryAddressStore';
 import { RootStackParamList } from '../../types/navigation';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'AddAddress'>;
@@ -80,8 +82,11 @@ export const AddAddressScreen: React.FC<Props> = ({ navigation, route }) => {
 
   const createMutation = useMutation({
     mutationFn: (data: any) => usersApi.createAddress(data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['addresses'] });
+    onSuccess: (newAddr: any) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.user.addresses });
+      if (newAddr?.id) {
+        useDeliveryAddressStore.getState().setSelectedAddressId(newAddr.id);
+      }
       resetDraft();
       Alert.alert('Thành công', 'Đã lưu địa chỉ giao hàng mới!');
       navigation.goBack();

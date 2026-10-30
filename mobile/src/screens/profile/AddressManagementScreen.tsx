@@ -1,6 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import React, { useState } from 'react';
 import {
   Alert,
@@ -12,53 +11,43 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { usersApi } from '../../api/users';
 import { Button } from '../../components/common/Button';
 import { Card } from '../../components/common/Card';
 import { LoadingSpinner } from '../../components/common/LoadingSpinner';
 import { colors } from '../../constants/colors';
 import { useLocation } from '../../hooks/useLocation';
+import { useAddresses, useDeleteAddress, useSetDefaultAddress } from '../../services/useUser';
 import { useAuthStore } from '../../store/useAuthStore';
+import { useDeliveryAddressStore } from '../../store/useDeliveryAddressStore';
 import { Address } from '../../types/api';
 import { RootStackParamList } from '../../types/navigation';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'AddressManagement'>;
 
 export const AddressManagementScreen: React.FC<Props> = ({ navigation }) => {
-  const queryClient = useQueryClient();
   const user = useAuthStore((s) => s.user);
   const { coords } = useLocation();
 
   const [searchQuery, setSearchQuery] = useState('');
 
-  // Lấy danh sách địa chỉ đã lưu
-  const { data: addresses, isLoading } = useQuery({
-    queryKey: ['addresses'],
-    queryFn: () => usersApi.getAddresses(),
-  });
+  // 1. Lấy danh sách địa chỉ chuẩn qua hook useAddresses (được đồng bộ cache queryKeys.user.addresses)
+  const { data: addresses, isLoading } = useAddresses();
+  const setDefaultMutation = useSetDefaultAddress();
+  const deleteMutation = useDeleteAddress();
 
-  // Đặt làm địa chỉ giao hàng mặc định
-  const setDefaultMutation = useMutation({
-    mutationFn: (id: string) => usersApi.setDefaultAddress(id),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['addresses'] });
-      Alert.alert('Thành công', 'Đã chọn làm địa chỉ giao hàng mặc định!');
-    },
-    onError: (err: any) => {
-      Alert.alert('Lỗi', err.response?.data?.message || 'Không thể đổi địa chỉ mặc định.');
-    },
-  });
+  const selectedAddressId = useDeliveryAddressStore((s) => s.selectedAddressId);
+  const setSelectedAddressId = useDeliveryAddressStore((s) => s.setSelectedAddressId);
 
-  // Xoá địa chỉ
-  const deleteMutation = useMutation({
-    mutationFn: (id: string) => usersApi.deleteAddress(id),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['addresses'] });
-    },
-    onError: (err: any) => {
-      Alert.alert('Lỗi', err.response?.data?.message || 'Không thể xoá địa chỉ.');
-    },
-  });
+  // Địa chỉ đang chọn hiệu lực: nếu có selectedAddressId hợp lệ thì dùng, nếu không thì dùng isDefault
+  const activeSelectedId =
+    selectedAddressId && addresses?.some((a) => a.id === selectedAddressId)
+      ? selectedAddressId
+      : addresses?.find((a) => a.isDefault)?.id || addresses?.[0]?.id || null;
+
+  const handleSelectAddress = async (addr: Address) => {
+    await setSelectedAddressId(addr.id);
+    navigation.goBack();
+  };
 
   const handleDeleteAddress = (id: string, label: string) => {
     Alert.alert('Xoá địa chỉ', `Bạn có chắc muốn xoá địa chỉ "${label}" này không?`, [
@@ -71,18 +60,15 @@ export const AddressManagementScreen: React.FC<Props> = ({ navigation }) => {
     ]);
   };
 
-  const defaultAddress = addresses?.find((a) => a.isDefault) || addresses?.[0];
-  const otherAddresses = (addresses || [])
-    .filter((a) => a.id !== defaultAddress?.id)
-    .filter(
-      (a) =>
-        a.addressLine.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        a.label.toLowerCase().includes(searchQuery.toLowerCase()),
-    );
+  const filteredAddresses = (addresses || []).filter(
+    (a) =>
+      a.addressLine.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      a.label.toLowerCase().includes(searchQuery.toLowerCase()),
+  );
 
   return (
     <SafeAreaView style={styles.container}>
-      {/* Top Header ShopeeFood Style (Ảnh 2) */}
+      {/* Top Header ShopeeFood Style */}
       <View style={styles.topHeader}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.headerBtn}>
           <Ionicons name="arrow-back" size={24} color="#EE4D2D" />
@@ -100,7 +86,7 @@ export const AddressManagementScreen: React.FC<Props> = ({ navigation }) => {
       <View style={styles.searchContainer}>
         <Ionicons name="search" size={18} color={colors.textMuted} style={styles.searchIcon} />
         <TextInput
-          placeholder="Tìm vị trí"
+          placeholder="Tìm kiếm địa chỉ đã lưu..."
           value={searchQuery}
           onChangeText={setSearchQuery}
           style={styles.searchInput}
@@ -112,35 +98,8 @@ export const AddressManagementScreen: React.FC<Props> = ({ navigation }) => {
         <LoadingSpinner message="Đang tải danh sách địa chỉ..." />
       ) : (
         <ScrollView contentContainerStyle={styles.scrollContent}>
-          {/* Địa chỉ hiện tại / đang chọn (Ảnh 2) */}
-          {defaultAddress && (
-            <Card style={styles.selectedAddressCard}>
-              <View style={styles.selectedRow}>
-                <Ionicons name="location-sharp" size={24} color="#EE4D2D" style={styles.pinIcon} />
-                <View style={styles.addressInfoCol}>
-                  <View style={styles.titleRow}>
-                    <Text style={styles.mainAddressText} numberOfLines={1}>
-                      {defaultAddress.label}
-                    </Text>
-                    <TouchableOpacity
-                      onPress={() => navigation.navigate('AddAddress', { initialTag: defaultAddress.label as any })}
-                    >
-                      <Text style={styles.editLink}>Sửa</Text>
-                    </TouchableOpacity>
-                  </View>
-                  <Text style={styles.fullAddressText} numberOfLines={2}>
-                    {defaultAddress.addressLine}
-                  </Text>
-                  <Text style={styles.userContactText}>
-                    {user?.fullName || 'Khách hàng'} {user?.phone ? `(${user.phone})` : ''}
-                  </Text>
-                </View>
-              </View>
-            </Card>
-          )}
-
-          {/* Nhóm shortcut ShopeeFood: Địa chỉ đã lưu */}
-          <Text style={styles.sectionHeading}>Địa chỉ đã lưu</Text>
+          {/* Nhóm shortcut ShopeeFood: Thêm nhanh Nhà / Công ty */}
+          <Text style={styles.sectionHeading}>Thêm nhanh địa chỉ</Text>
           <Card style={styles.savedGroupCard}>
             <TouchableOpacity
               style={styles.quickAddRow}
@@ -167,38 +126,77 @@ export const AddressManagementScreen: React.FC<Props> = ({ navigation }) => {
             </TouchableOpacity>
           </Card>
 
-          {/* Danh sách các địa chỉ khác - Chạm để chọn làm địa chỉ giao hàng */}
-          {otherAddresses.length > 0 && (
-            <View style={{ marginTop: 14 }}>
-              <Text style={styles.sectionHeading}>Địa chỉ khác (Chạm để chọn giao hàng)</Text>
-              {otherAddresses.map((addr: Address) => (
+          {/* Danh sách địa chỉ đã lưu */}
+          <Text style={styles.sectionHeading}>Địa chỉ của bạn (Chạm để chọn giao đến)</Text>
+          {filteredAddresses.length === 0 ? (
+            <Card style={styles.emptyCard}>
+              <Ionicons name="location-outline" size={36} color={colors.textMuted} />
+              <Text style={styles.emptyText}>Chưa có địa chỉ nào phù hợp</Text>
+            </Card>
+          ) : (
+            filteredAddresses.map((addr) => {
+              const isSelected = addr.id === activeSelectedId;
+              return (
                 <TouchableOpacity
                   key={addr.id}
-                  activeOpacity={0.7}
-                  onPress={() => setDefaultMutation.mutate(addr.id)}
+                  activeOpacity={0.8}
+                  onPress={() => handleSelectAddress(addr)}
                 >
-                  <Card style={styles.otherAddressCard}>
-                    <View style={styles.otherRow}>
-                      <View style={styles.tagBadge}>
-                        <Text style={styles.tagBadgeText}>{addr.label}</Text>
+                  <Card style={[styles.addressCard, isSelected && styles.addressCardSelected]}>
+                    <View style={styles.cardHeaderRow}>
+                      <View style={styles.labelRow}>
+                        <View style={[styles.tagBadge, isSelected && styles.tagBadgeSelected]}>
+                          <Text style={[styles.tagBadgeText, isSelected && styles.tagBadgeTextSelected]}>
+                            {addr.label}
+                          </Text>
+                        </View>
+                        {addr.isDefault && (
+                          <View style={styles.defaultBadge}>
+                            <Text style={styles.defaultBadgeText}>Mặc định</Text>
+                          </View>
+                        )}
+                        {isSelected && (
+                          <View style={styles.selectedBadge}>
+                            <Ionicons name="checkmark-circle" size={14} color="#EE4D2D" />
+                            <Text style={styles.selectedBadgeText}>Đang chọn</Text>
+                          </View>
+                        )}
                       </View>
-                      <TouchableOpacity
-                        onPress={() => handleDeleteAddress(addr.id, addr.label)}
-                        style={styles.deleteIcon}
-                      >
-                        <Ionicons name="trash-outline" size={18} color={colors.danger} />
-                      </TouchableOpacity>
+
+                      <View style={styles.actionsRow}>
+                        {!addr.isDefault && (
+                          <TouchableOpacity
+                            onPress={() => setDefaultMutation.mutate(addr.id)}
+                            style={styles.actionBtn}
+                          >
+                            <Text style={styles.setDefaultText}>Đặt mặc định</Text>
+                          </TouchableOpacity>
+                        )}
+                        <TouchableOpacity
+                          onPress={() => handleDeleteAddress(addr.id, addr.label)}
+                          style={styles.actionIconBtn}
+                        >
+                          <Ionicons name="trash-outline" size={18} color={colors.danger} />
+                        </TouchableOpacity>
+                      </View>
                     </View>
-                    <Text style={styles.otherAddressLine}>{addr.addressLine}</Text>
+
+                    <Text style={styles.addressLineText} numberOfLines={2}>
+                      {addr.addressLine}
+                    </Text>
+
+                    <Text style={styles.contactInfoText}>
+                      {user?.fullName || 'Khách hàng'} {user?.phone ? `• ${user.phone}` : ''}
+                    </Text>
                   </Card>
                 </TouchableOpacity>
-              ))}
-            </View>
+              );
+            })
           )}
         </ScrollView>
       )}
 
-      {/* Nút cam nổi bật phía dưới: Thêm địa chỉ mới (Ảnh 2) */}
+      {/* Nút cam nổi bật phía dưới: Thêm địa chỉ mới */}
       <View style={styles.bottomBar}>
         <Button
           title="Thêm địa chỉ mới"
@@ -224,10 +222,10 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     backgroundColor: colors.white,
     borderBottomWidth: 1,
-    borderBottomColor: '#EEEEEE',
+    borderBottomColor: '#EAEAEA',
   },
   headerBtn: {
-    padding: 6,
+    padding: 4,
   },
   headerTitle: {
     fontSize: 18,
@@ -237,91 +235,47 @@ const styles = StyleSheet.create({
   searchContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#EEEEEE',
+    backgroundColor: colors.white,
     marginHorizontal: 16,
-    marginVertical: 10,
+    marginTop: 12,
+    marginBottom: 8,
     borderRadius: 8,
     paddingHorizontal: 12,
-    height: 40,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
   },
   searchIcon: {
     marginRight: 8,
   },
   searchInput: {
     flex: 1,
+    height: 40,
     fontSize: 14,
     color: colors.text,
   },
   scrollContent: {
-    padding: 16,
-    paddingBottom: 32,
-  },
-  selectedAddressCard: {
-    padding: 14,
-    backgroundColor: colors.white,
-    borderRadius: 10,
-    marginBottom: 16,
-    borderLeftWidth: 4,
-    borderLeftColor: '#EE4D2D',
-  },
-  selectedRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-  },
-  pinIcon: {
-    marginRight: 10,
-    marginTop: 2,
-  },
-  addressInfoCol: {
-    flex: 1,
-  },
-  titleRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 4,
-  },
-  mainAddressText: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: colors.text,
-    flex: 1,
-  },
-  editLink: {
-    fontSize: 14,
-    color: '#0088FF',
-    fontWeight: '600',
-    marginLeft: 8,
-  },
-  fullAddressText: {
-    fontSize: 13,
-    color: colors.textSecondary,
-    lineHeight: 18,
-    marginBottom: 6,
-  },
-  userContactText: {
-    fontSize: 13,
-    color: colors.textMuted,
+    paddingHorizontal: 16,
+    paddingBottom: 90,
   },
   sectionHeading: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: colors.textSecondary,
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.textMuted,
+    marginTop: 14,
     marginBottom: 8,
-    marginTop: 4,
+    textTransform: 'uppercase',
   },
   savedGroupCard: {
     padding: 0,
     borderRadius: 10,
-    backgroundColor: colors.white,
     overflow: 'hidden',
   },
   quickAddRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 16,
     paddingVertical: 14,
+    paddingHorizontal: 16,
   },
   quickAddLeft: {
     flexDirection: 'row',
@@ -329,55 +283,130 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   quickAddText: {
-    fontSize: 15,
+    fontSize: 14,
+    fontWeight: '600',
     color: colors.text,
-    fontWeight: '500',
   },
   innerDivider: {
     height: 1,
-    backgroundColor: '#F0F0F0',
-    marginLeft: 48,
+    backgroundColor: '#F1F5F9',
+    marginHorizontal: 16,
   },
-  otherAddressCard: {
-    padding: 14,
-    backgroundColor: colors.white,
-    borderRadius: 10,
-    marginBottom: 10,
-  },
-  otherRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
+  emptyCard: {
     alignItems: 'center',
-    marginBottom: 6,
+    justifyContent: 'center',
+    padding: 24,
+    borderRadius: 10,
+  },
+  emptyText: {
+    marginTop: 8,
+    fontSize: 14,
+    color: colors.textMuted,
+  },
+  addressCard: {
+    borderRadius: 10,
+    padding: 14,
+    marginBottom: 10,
+    borderWidth: 1.5,
+    borderColor: 'transparent',
+  },
+  addressCardSelected: {
+    borderColor: '#EE4D2D',
+    backgroundColor: '#FFFBF9',
+  },
+  cardHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  labelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
   },
   tagBadge: {
-    backgroundColor: '#F3F4F6',
+    backgroundColor: '#F1F5F9',
     paddingHorizontal: 8,
-    paddingVertical: 2,
+    paddingVertical: 3,
     borderRadius: 4,
+  },
+  tagBadgeSelected: {
+    backgroundColor: '#FEE2E2',
   },
   tagBadgeText: {
     fontSize: 12,
-    color: colors.textSecondary,
+    fontWeight: '700',
+    color: '#475569',
+  },
+  tagBadgeTextSelected: {
+    color: '#EE4D2D',
+  },
+  defaultBadge: {
+    backgroundColor: '#E0F2FE',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  defaultBadgeText: {
+    fontSize: 11,
+    color: '#0284C7',
+    fontWeight: '700',
+  },
+  selectedBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#FFF0ED',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  selectedBadgeText: {
+    fontSize: 11,
+    color: '#EE4D2D',
+    fontWeight: '700',
+  },
+  actionsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  actionBtn: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  setDefaultText: {
+    fontSize: 12,
+    color: '#64748B',
     fontWeight: '600',
   },
-  deleteIcon: {
+  actionIconBtn: {
     padding: 4,
   },
-  otherAddressLine: {
+  addressLineText: {
     fontSize: 14,
+    fontWeight: '600',
     color: colors.text,
     lineHeight: 20,
+    marginBottom: 4,
+  },
+  contactInfoText: {
+    fontSize: 12,
+    color: colors.textMuted,
   },
   bottomBar: {
-    padding: 16,
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
     backgroundColor: colors.white,
+    padding: 12,
     borderTopWidth: 1,
-    borderTopColor: '#EEEEEE',
+    borderTopColor: '#EAEAEA',
   },
   addAddressBtn: {
     backgroundColor: '#EE4D2D',
     borderRadius: 8,
-    paddingVertical: 14,
   },
 });

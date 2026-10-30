@@ -1,26 +1,64 @@
 import { Ionicons } from '@expo/vector-icons';
 import React from 'react';
-import { Image, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { colors } from '../../constants/colors';
 import { Restaurant } from '../../types/api';
+import { estimateDeliveryTime, isFreeDelivery } from '../../utils/fee';
+import { AppImage } from '../common/AppImage';
 import { Card } from '../common/Card';
 
 interface RestaurantCardProps {
   restaurant: Restaurant;
   onPress: () => void;
+  isFavorite?: boolean;
+  onToggleFavorite?: () => void;
 }
 
-export const RestaurantCard: React.FC<RestaurantCardProps> = ({ restaurant, onPress }) => {
+export const RestaurantCard: React.FC<RestaurantCardProps> = ({
+  restaurant,
+  onPress,
+  isFavorite = false,
+  onToggleFavorite,
+}) => {
+  const deliveryTime = estimateDeliveryTime(restaurant.distanceKm);
+  const freeship = isFreeDelivery(restaurant.distanceKm || 1.5);
+
   return (
     <Card onPress={onPress} style={styles.card}>
-      <Image
-        source={{
-          uri:
-            restaurant.imageUrl ||
-            'https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?w=600',
-        }}
-        style={styles.image}
-      />
+      <View style={styles.imageContainer}>
+        <AppImage
+          uri={restaurant.imageUrl}
+          style={styles.image}
+          fallbackTitle={restaurant.name}
+          fallbackIcon="restaurant-outline"
+        />
+
+        {/* Nút yêu thích ở góc ảnh */}
+        {onToggleFavorite && (
+          <TouchableOpacity
+            style={styles.favButton}
+            onPress={(e) => {
+              e.stopPropagation();
+              onToggleFavorite();
+            }}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            <Ionicons
+              name={isFavorite ? 'heart' : 'heart-outline'}
+              size={20}
+              color={isFavorite ? '#EE4D2D' : colors.white}
+            />
+          </TouchableOpacity>
+        )}
+
+        {/* Nhãn Freeship chỉ hiển thị khi thỏa mãn điều kiện */}
+        {freeship && (
+          <View style={styles.freeshipBadge}>
+            <Text style={styles.freeshipText}>Freeship</Text>
+          </View>
+        )}
+      </View>
+
       <View style={styles.content}>
         <View style={styles.headerRow}>
           <Text style={styles.name} numberOfLines={1}>
@@ -39,15 +77,22 @@ export const RestaurantCard: React.FC<RestaurantCardProps> = ({ restaurant, onPr
         )}
 
         <View style={styles.footerRow}>
-          <View style={styles.infoItem}>
-            <Ionicons name="location-outline" size={14} color={colors.textMuted} />
-            <Text style={styles.infoText}>
-              {restaurant.distanceKm !== undefined ? `${restaurant.distanceKm} km` : restaurant.address}
-            </Text>
+          <View style={styles.infoGroup}>
+            <View style={styles.infoItem}>
+              <Ionicons name="time-outline" size={13} color={colors.textMuted} />
+              <Text style={styles.infoText}>{deliveryTime}</Text>
+            </View>
+            <Text style={styles.dot}>•</Text>
+            <View style={styles.infoItem}>
+              <Ionicons name="location-outline" size={13} color={colors.textMuted} />
+              <Text style={styles.infoText}>
+                {restaurant.distanceKm !== undefined ? `${restaurant.distanceKm} km` : restaurant.address}
+              </Text>
+            </View>
           </View>
 
           <Text style={[styles.statusText, restaurant.isOpen ? styles.open : styles.closed]}>
-            {restaurant.isOpen ? 'Đang mở cửa' : 'Đã đóng cửa'}
+            {restaurant.isOpen ? 'Mở cửa' : 'Đã đóng'}
           </Text>
         </View>
       </View>
@@ -60,11 +105,43 @@ const styles = StyleSheet.create({
     padding: 0,
     overflow: 'hidden',
     marginBottom: 14,
+    borderRadius: 12,
   },
-  image: {
+  imageContainer: {
+    position: 'relative',
     width: '100%',
     height: 140,
     backgroundColor: colors.borderLight,
+  },
+  image: {
+    width: '100%',
+    height: '100%',
+  },
+  favButton: {
+    position: 'absolute',
+    top: 10,
+    right: 10,
+    backgroundColor: 'rgba(0, 0, 0, 0.4)',
+    borderRadius: 20,
+    width: 32,
+    height: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 2,
+  },
+  freeshipBadge: {
+    position: 'absolute',
+    bottom: 8,
+    left: 8,
+    backgroundColor: '#059669',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 4,
+  },
+  freeshipText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: colors.white,
   },
   content: {
     padding: 12,
@@ -107,11 +184,20 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginTop: 4,
   },
+  infoGroup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    flex: 1,
+  },
   infoItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
-    flex: 1,
+    gap: 3,
+  },
+  dot: {
+    fontSize: 12,
+    color: colors.textMuted,
   },
   infoText: {
     fontSize: 12,
@@ -124,4 +210,3 @@ const styles = StyleSheet.create({
   open: { color: colors.success },
   closed: { color: colors.danger },
 });
-

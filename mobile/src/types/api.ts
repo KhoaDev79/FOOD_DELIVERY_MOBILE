@@ -44,6 +44,8 @@ export interface Address {
   latitude: number;
   longitude: number;
   isDefault: boolean;
+  isManual?: boolean;
+  needsConfirmation?: boolean;
   createdAt: string;
 }
 

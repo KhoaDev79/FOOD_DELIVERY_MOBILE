@@ -57,3 +57,35 @@ export const calculateDeliveryFee = (
   return { fee, isPeak: peak, ratePerKm };
 };
 
+/**
+ * Ước tính thời gian giao hàng dựa trên khoảng cách thực tế (km):
+ * - Thời gian chuẩn bị món của quán: ~10 - 15 phút
+ * - Vận tốc di chuyển tài xế nội thành: ~3 - 4 phút / km
+ */
+export const estimateDeliveryTime = (distanceKm?: number): string => {
+  if (distanceKm === undefined || distanceKm <= 0) return '15 - 20 phút';
+  if (distanceKm <= 1.5) return '15 - 20 phút';
+  if (distanceKm <= 3) return '20 - 25 phút';
+  if (distanceKm <= 5) return '25 - 35 phút';
+  if (distanceKm <= 8) return '35 - 45 phút';
+  const minTime = Math.round(15 + distanceKm * 3);
+  const maxTime = Math.round(20 + distanceKm * 4);
+  return `${minTime} - ${maxTime} phút`;
+};
+
+/**
+ * Kiểm tra xem đơn hàng có được Freeship hay không.
+ * BẮT BUỘC: Nhãn "Freeship" chỉ được phép hiển thị khi phí giao hàng thật sự bằng 0
+ * hoặc quán có chương trình Freeship rõ ràng.
+ */
+export const isFreeDelivery = (
+  distanceKm: number,
+  options?: { hasFreeShipPromo?: boolean; freeShipThresholdKm?: number },
+): boolean => {
+  if (options?.hasFreeShipPromo) return true;
+  if (options?.freeShipThresholdKm && distanceKm <= options.freeShipThresholdKm) return true;
+  const { fee } = calculateDeliveryFee(distanceKm);
+  return fee === 0;
+};
+
+
