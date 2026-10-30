@@ -1,6 +1,7 @@
 import React, { memo } from 'react';
 import { Pressable, View } from 'react-native';
-import { AppImage, Badge, cn, Icon, InfoChip, Text } from '../../ui';
+import { AppImage, Badge, cn, Icon, IconButton, InfoChip, Text } from '../../ui';
+import { useFavoritesStore } from '../../../store/useFavoritesStore';
 import { Restaurant } from '../../../types/api';
 import { calculateDeliveryFee, estimateDeliveryTime } from '../../../utils/fee';
 import { formatDistance, formatVND } from '../../../utils/format';
@@ -111,68 +112,82 @@ RestaurantCardVertical.displayName = 'RestaurantCardVertical';
 /** Thẻ ngang thumbnail + thông tin (ảnh mẫu 6, 7 – "Quán gần tôi"). */
 export const RestaurantRow = memo<CardProps>(({ restaurant: r, onPress, className }) => {
   const m = useMeta(r);
+  const liked = useFavoritesStore((s) => s.restaurants.some((x) => x.id === r.id));
+  const toggleFavorite = useFavoritesStore((s) => s.toggle);
   return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={m.a11y}
-      onPress={() => onPress(r)}
-      // Viền xanh nhạt; rê chuột (web) hoặc chạm (điện thoại) thì viền và nền chuyển xanh ngọc.
-      className={cn(
-        'flex-row gap-3 rounded-lg border border-brand-100 bg-surface p-3 shadow-card',
-        'hover:border-brand-400 hover:bg-brand-50 active:border-brand-500 active:bg-brand-100',
-        className,
-      )}
-    >
-      <AppImage uri={r.imageUrl} className="h-28 w-28 rounded-md">
-        {!r.isOpen && <ClosedOverlay />}
-      </AppImage>
-      <View className="flex-1 justify-center gap-2">
-        <Text variant="body-lg" weight="semibold" numberOfLines={2}>
-          {r.name}
-        </Text>
-        <View className="gap-1.5">
-          <View className="flex-row flex-wrap items-center gap-x-3 gap-y-1">
-            {m.rating && (
-              <View className="flex-row items-center gap-1">
-                <Icon name="star" size="xs" tone="rating" />
-                <Text variant="caption" weight="medium">
-                  {m.rating}
-                </Text>
-              </View>
-            )}
-            {m.distance && (
-              <View className="flex-row items-center gap-1">
-                <Icon name="navigate-outline" size="xs" tone="brand" />
-                <Text variant="caption" weight="regular" tone="secondary">
-                  {m.distance}
-                </Text>
-              </View>
-            )}
-            {m.time && (
-              <View className="flex-row items-center gap-1" accessibilityLabel={`Giao khoảng ${m.time}`}>
-                <Icon name="bicycle-outline" size="xs" tone="brand" />
-                <Text variant="caption" weight="regular" tone="secondary">
-                  {m.time}
-                </Text>
-              </View>
-            )}
-          </View>
-          {/* Khung giờ hoạt động của quán (openTime – closeTime từ API) */}
-          {r.openTime && r.closeTime && (
-            <View className="flex-row items-center gap-1">
-              <Icon name="time-outline" size="xs" tone={r.isOpen ? 'success' : 'danger'} />
-              <Text variant="caption" weight="medium" tone={r.isOpen ? 'success' : 'danger'}>
-                {r.isOpen ? 'Mở cửa' : 'Đã đóng'}
-              </Text>
-              <Text variant="caption" weight="regular" tone="secondary">
-                · {r.openTime} - {r.closeTime}
-              </Text>
+    // Nút tim là phần tử ngang hàng, không lồng trong nút của thẻ.
+    <View className={className}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={m.a11y}
+        onPress={() => onPress(r)}
+        // Viền xanh nhạt; rê chuột (web) hoặc chạm (điện thoại) thì viền và nền chuyển xanh ngọc.
+        className={cn(
+          'flex-row gap-3 rounded-lg border border-brand-100 bg-surface p-3 pr-12 shadow-card',
+          'hover:border-brand-400 hover:bg-brand-50 active:border-brand-500 active:bg-brand-100',
+        )}
+      >
+        <AppImage uri={r.imageUrl} className="h-28 w-28 rounded-md">
+          {!r.isOpen && <ClosedOverlay />}
+        </AppImage>
+        <View className="flex-1 justify-center gap-2">
+          <Text variant="body-lg" weight="semibold" numberOfLines={2}>
+            {r.name}
+          </Text>
+          <View className="gap-1.5">
+            <View className="flex-row flex-wrap items-center gap-x-3 gap-y-1">
+              {m.rating && (
+                <View className="flex-row items-center gap-1">
+                  <Icon name="star" size="xs" tone="rating" />
+                  <Text variant="caption" weight="medium">
+                    {m.rating}
+                  </Text>
+                </View>
+              )}
+              {m.distance && (
+                <View className="flex-row items-center gap-1">
+                  <Icon name="navigate-outline" size="xs" tone="brand" />
+                  <Text variant="caption" weight="regular" tone="secondary">
+                    {m.distance}
+                  </Text>
+                </View>
+              )}
+              {m.time && (
+                <View className="flex-row items-center gap-1" accessibilityLabel={`Giao khoảng ${m.time}`}>
+                  <Icon name="bicycle-outline" size="xs" tone="brand" />
+                  <Text variant="caption" weight="regular" tone="secondary">
+                    {m.time}
+                  </Text>
+                </View>
+              )}
             </View>
-          )}
-          {m.fee !== null && <InfoChip label={`Ship ${formatVND(m.fee)}`} tone="freeship" icon="cube-outline" />}
+            {/* Khung giờ hoạt động của quán (openTime – closeTime từ API) */}
+            {r.openTime && r.closeTime && (
+              <View className="flex-row items-center gap-1">
+                <Icon name="time-outline" size="xs" tone={r.isOpen ? 'success' : 'danger'} />
+                <Text variant="caption" weight="medium" tone={r.isOpen ? 'success' : 'danger'}>
+                  {r.isOpen ? 'Mở cửa' : 'Đã đóng'}
+                </Text>
+                <Text variant="caption" weight="regular" tone="secondary">
+                  · {r.openTime} - {r.closeTime}
+                </Text>
+              </View>
+            )}
+            {m.fee !== null && <InfoChip label={`Ship ${formatVND(m.fee)}`} tone="freeship" icon="cube-outline" />}
+          </View>
         </View>
-      </View>
-    </Pressable>
+      </Pressable>
+      <IconButton
+        icon={liked ? 'heart' : 'heart-outline'}
+        tone={liked ? 'danger' : 'muted'}
+        variant="ghost"
+        size="sm"
+        accessibilityLabel={liked ? `Bỏ ${r.name} khỏi yêu thích` : `Thêm ${r.name} vào yêu thích`}
+        accessibilityState={{ selected: liked }}
+        className="absolute right-2 top-2"
+        onPress={() => toggleFavorite(r)}
+      />
+    </View>
   );
 });
 RestaurantRow.displayName = 'RestaurantRow';

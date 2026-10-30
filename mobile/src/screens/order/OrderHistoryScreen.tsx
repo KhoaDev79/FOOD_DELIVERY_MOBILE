@@ -1,29 +1,127 @@
-import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import React, { useState } from 'react';
+import { StatusBar } from 'expo-status-bar';
+import React, { memo, useMemo, useState } from 'react';
+import { FlatList, Pressable, RefreshControl, View } from 'react-native';
+import { useIsFocused } from '@react-navigation/native';
 import {
-  FlatList,
-  RefreshControl,
-  SafeAreaView,
-  StyleSheet,
+  AppImage,
+  cn,
+  EmptyState,
+  ErrorState,
+  FilterBar,
+  Icon,
+  OrderStatusBadge,
+  Skeleton,
+  TabHeader,
+  TAB_BAR_CLEARANCE,
   Text,
-  View,
-} from 'react-native';
-import { Badge } from '../../components/common/Badge';
-import { Card } from '../../components/common/Card';
-import { EmptyState } from '../../components/common/EmptyState';
-import { LoadingSpinner } from '../../components/common/LoadingSpinner';
-import { colors } from '../../constants/colors';
+} from '../../components/ui';
 import { useMyOrders } from '../../services/useOrders';
+import { palette } from '../../theme';
+import { OrderStatus, OrderSummary } from '../../types/api';
 import { RootStackParamList } from '../../types/navigation';
 import { formatDateTime, formatVND } from '../../utils/format';
-import { ORDER_STATUS_CONFIG } from '../../utils/orderStatus';
+
+type FilterKey = 'all' | 'active' | 'done' | 'cancelled';
+
+const ACTIVE: OrderStatus[] = ['PENDING', 'CONFIRMED', 'PREPARING', 'READY_FOR_PICKUP', 'PICKED_UP'];
+
+const FILTERS: { value: FilterKey; label: string }[] = [
+  { value: 'all', label: 'Tất cả' },
+  { value: 'active', label: 'Đang xử lý' },
+  { value: 'done', label: 'Hoàn thành' },
+  { value: 'cancelled', label: 'Đã huỷ' },
+];
+
+const matches = (o: OrderSummary, f: FilterKey) =>
+  f === 'all' ||
+  (f === 'active' && ACTIVE.includes(o.status)) ||
+  (f === 'done' && o.status === 'DELIVERED') ||
+  (f === 'cancelled' && o.status === 'CANCELLED');
+
+const OrderCard = memo<{ order: OrderSummary; onOpen: (o: OrderSummary) => void }>(({ order, onOpen }) => {
+  const active = ACTIVE.includes(order.status);
+  const itemCount = order.items.reduce((s, i) => s + i.quantity, 0);
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={`Đơn từ ${order.restaurant.name}, ${formatVND(order.total)}, ${formatDateTime(order.createdAt)}`}
+      onPress={() => onOpen(order)}
+      className={cn(
+        'gap-3 rounded-lg border bg-surface p-3 shadow-card',
+        'hover:border-brand-400 active:bg-brand-50',
+        active ? 'border-brand-200' : 'border-line-subtle',
+      )}
+    >
+      <View className="flex-row items-center gap-3">
+        <AppImage uri={order.restaurant.imageUrl} className="h-14 w-14 rounded-md" fallbackIcon="storefront-outline" />
+        <View className="flex-1 gap-0.5">
+          <Text variant="body-lg" weight="semibold" numberOfLines={1}>
+            {order.restaurant.name}
+          </Text>
+          <View className="flex-row items-center gap-1">
+            <Icon name="calendar-clear-outline" size={12} tone="muted" />
+            <Text variant="caption" weight="regular" tone="secondary">
+              {formatDateTime(order.createdAt)}
+            </Text>
+          </View>
+        </View>
+        <OrderStatusBadge status={order.status} />
+      </View>
+
+      <View className="rounded-md bg-canvas-subtle px-3 py-2">
+        <Text variant="body" tone="secondary" numberOfLines={2}>
+          {order.items.map((i) => `${i.quantity}× ${i.name}`).join(' · ')}
+        </Text>
+      </View>
+
+      <View className="flex-row items-center justify-between">
+        <Text variant="caption" weight="regular" tone="secondary">
+          {itemCount} món · {order.paymentMethod === 'VNPAY' ? 'VNPAY' : 'Tiền mặt'}
+        </Text>
+        <Text variant="body-lg" weight="bold" tone="brand">
+          {formatVND(order.total)}
+        </Text>
+      </View>
+
+      {/* Chỉ là nhãn hiển thị: cả thẻ đã là nút mở trang theo dõi (tránh nút lồng nút). */}
+      {active && (
+        <View
+          accessible={false}
+          className="h-button-sm flex-row items-center justify-center gap-1 rounded-sm border border-brand-100 bg-brand-50"
+        >
+          <Text variant="caption" weight="semibold" tone="brand">
+            Theo dõi đơn
+          </Text>
+          <Icon name="chevron-forward" size="sm" tone="brand" />
+        </View>
+      )}
+    </Pressable>
+  );
+});
+OrderCard.displayName = 'OrderCard';
+
+const OrderSkeleton: React.FC = () => (
+  <View className="gap-3 rounded-lg bg-surface p-3">
+    <View className="flex-row items-center gap-3">
+      <Skeleton className="h-14 w-14 rounded-md" />
+      <View className="flex-1 gap-2">
+        <Skeleton className="h-4 w-3/5" />
+        <Skeleton className="h-3 w-2/5" />
+      </View>
+    </View>
+    <Skeleton className="h-9 w-full" />
+    <Skeleton className="h-4 w-1/3 self-end" />
+  </View>
+);
 
 export const OrderHistoryScreen: React.FC = () => {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+  const isFocused = useIsFocused();
   const [refreshing, setRefreshing] = useState(false);
-  const { data, isLoading, refetch } = useMyOrders();
+  const [filter, setFilter] = useState<FilterKey>('all');
+  const { data, isLoading, isError, refetch } = useMyOrders();
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -31,105 +129,60 @@ export const OrderHistoryScreen: React.FC = () => {
     setRefreshing(false);
   };
 
-  const orders = data?.items || [];
+  const orders = useMemo(() => data?.items ?? [], [data]);
+  const visible = useMemo(() => orders.filter((o) => matches(o, filter)), [orders, filter]);
+  const activeCount = orders.filter((o) => ACTIVE.includes(o.status)).length;
+  const openOrder = (o: OrderSummary) => navigation.navigate('OrderTracking', { orderId: o.id });
 
   return (
-    <SafeAreaView style={styles.container}>
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>Đơn hàng của tôi</Text>
-      </View>
+    <View className="flex-1 bg-canvas-subtle">
+      {isFocused && <StatusBar style="light" />}
+      <TabHeader
+        title="Đơn hàng của tôi"
+        subtitle={
+          isLoading ? 'Đang tải…' : activeCount > 0 ? `${activeCount} đơn đang xử lý` : `${orders.length} đơn đã đặt`
+        }
+      />
+      <FilterBar options={FILTERS} value={filter} onChange={setFilter} className="mt-1" />
 
       {isLoading ? (
-        <LoadingSpinner message="Đang tải lịch sử đơn hàng..." />
+        <View className="gap-3 px-4 pt-2">
+          <OrderSkeleton />
+          <OrderSkeleton />
+          <OrderSkeleton />
+        </View>
+      ) : isError ? (
+        <ErrorState onRetry={onRefresh} />
       ) : (
         <FlatList
-          data={orders}
-          keyExtractor={(item) => item.id}
-          contentContainerStyle={styles.list}
+          data={visible}
+          keyExtractor={(o) => o.id}
+          contentContainerClassName={cn('flex-grow gap-3 px-4 pt-2', TAB_BAR_CLEARANCE)}
+          renderItem={({ item }) => <OrderCard order={item} onOpen={openOrder} />}
           refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[colors.primary]} />
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[palette.brand['500']]} />
           }
-          renderItem={({ item }) => {
-            const statusConfig = ORDER_STATUS_CONFIG[item.status];
-            return (
-              <Card
-                style={styles.orderCard}
-                onPress={() => navigation.navigate('OrderTracking', { orderId: item.id })}
-              >
-                <View style={styles.orderCardHeader}>
-                  <Text style={styles.restaurantName} numberOfLines={1}>
-                    {item.restaurant.name}
-                  </Text>
-                  <Badge
-                    label={statusConfig.label}
-                    color={statusConfig.color}
-                    bgColor={statusConfig.bgColor}
-                  />
-                </View>
-
-                <Text style={styles.orderDate}>{formatDateTime(item.createdAt)}</Text>
-
-                <View style={styles.itemsSummary}>
-                  <Text style={styles.itemsText} numberOfLines={2}>
-                    {item.items.map((i) => `${i.quantity}x ${i.name}`).join(', ')}
-                  </Text>
-                </View>
-
-                <View style={styles.orderCardFooter}>
-                  <Text style={styles.totalLabel}>Tổng tiền:</Text>
-                  <Text style={styles.totalValue}>{formatVND(item.total)}</Text>
-                </View>
-              </Card>
-            );
-          }}
           ListEmptyComponent={
-            <EmptyState
-              icon={<Ionicons name="receipt-outline" size={48} color={colors.textMuted} />}
-              title="Chưa có đơn hàng nào"
-              description="Những đơn hàng bạn đã đặt sẽ xuất hiện tại đây."
-              actionTitle="Đặt món ngay"
-              onAction={() => navigation.navigate('MainTabs', { screen: 'HomeTab' })}
-            />
+            orders.length === 0 ? (
+              <EmptyState
+                icon="receipt-outline"
+                title="Chưa có đơn hàng nào"
+                description="Những đơn hàng bạn đã đặt sẽ xuất hiện tại đây."
+                actionLabel="Đặt món ngay"
+                onAction={() => navigation.navigate('MainTabs', { screen: 'HomeTab' })}
+              />
+            ) : (
+              <EmptyState
+                icon="funnel-outline"
+                title="Không có đơn phù hợp"
+                description="Thử chọn bộ lọc khác."
+                actionLabel="Xem tất cả"
+                onAction={() => setFilter('all')}
+              />
+            )
           }
         />
       )}
-    </SafeAreaView>
+    </View>
   );
 };
-
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.background },
-  header: {
-    padding: 16,
-    backgroundColor: colors.white,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.borderLight,
-  },
-  headerTitle: { fontSize: 18, fontWeight: '700', color: colors.text },
-  list: { padding: 16 },
-  orderCard: { marginBottom: 12 },
-  orderCardHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 6,
-  },
-  restaurantName: { fontSize: 16, fontWeight: '700', color: colors.text, flex: 1, marginRight: 8 },
-  orderDate: { fontSize: 12, color: colors.textMuted, marginBottom: 10 },
-  itemsSummary: {
-    backgroundColor: colors.background,
-    padding: 10,
-    borderRadius: 6,
-    marginBottom: 10,
-  },
-  itemsText: { fontSize: 13, color: colors.textSecondary },
-  orderCardFooter: {
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-    alignItems: 'center',
-    gap: 6,
-  },
-  totalLabel: { fontSize: 13, color: colors.textMuted },
-  totalValue: { fontSize: 15, fontWeight: '800', color: colors.primary },
-});
-

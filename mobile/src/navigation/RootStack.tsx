@@ -41,7 +41,7 @@ export const RootStack: React.FC = () => {
       <Stack.Screen
         name="Cart"
         component={CartScreen}
-        options={{ title: 'Giỏ hàng của bạn' }}
+        options={{ title: 'Giỏ hàng của bạn', headerShown: false }}
       />
       <Stack.Screen
         name="Checkout"

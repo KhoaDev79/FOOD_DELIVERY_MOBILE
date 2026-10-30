@@ -18,5 +18,6 @@ export * from './SearchBar';
 export * from './SectionHeader';
 export * from './Skeleton';
 export * from './States';
+export * from './TabHeader';
 export * from './Text';
 export * from './TopBar';

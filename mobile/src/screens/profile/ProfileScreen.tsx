@@ -1,159 +1,177 @@
-import { Ionicons } from '@expo/vector-icons';
-import { useNavigation } from '@react-navigation/native';
+import { useIsFocused, useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { StatusBar } from 'expo-status-bar';
 import React, { useState } from 'react';
+import { Modal, Pressable, ScrollView, View } from 'react-native';
 import {
-  Alert,
-  Modal,
-  SafeAreaView,
-  ScrollView,
-  StyleSheet,
+  Avatar,
+  cn,
+  ConfirmDialog,
+  Divider,
+  ListRow,
+  Skeleton,
+  TabHeader,
+  TAB_BAR_CLEARANCE,
   Text,
-  TouchableOpacity,
-  View,
-} from 'react-native';
-import { ListRow } from '../../components/ui';
-import { colors } from '../../constants/colors';
+} from '../../components/ui';
 import { DevGallery } from '../../dev/DevGallery';
-import { useMe } from '../../services/useUser';
+import { useMyOrders } from '../../services/useOrders';
+import { useAddresses, useMe } from '../../services/useUser';
 import { useAuthStore } from '../../store/useAuthStore';
+import { useFavoritesStore } from '../../store/useFavoritesStore';
 import { RootStackParamList } from '../../types/navigation';
+
+/** Ô số liệu trong đầu trang. Hiện "—" khi chưa tải được, không hiện số giả. */
+const Stat: React.FC<{ label: string; value?: number; onPress: () => void }> = ({ label, value, onPress }) => (
+  <Pressable
+    accessibilityRole="button"
+    accessibilityLabel={`${label}: ${value ?? 'chưa tải'}`}
+    onPress={onPress}
+    className="flex-1 items-center gap-0.5 rounded-md bg-surface/15 py-2.5 active:bg-surface/25"
+  >
+    <Text variant="headline" weight="bold" tone="inverse">
+      {value === undefined ? '—' : String(value)}
+    </Text>
+    <Text variant="caption" weight="regular" tone="inverse" className="opacity-85">
+      {label}
+    </Text>
+  </Pressable>
+);
+
+const Group: React.FC<{ title: string; children: React.ReactNode; className?: string }> = ({
+  title,
+  children,
+  className,
+}) => (
+  <View className={cn('gap-2', className)}>
+    <Text variant="caption" weight="semibold" tone="muted" className="px-1 uppercase">
+      {title}
+    </Text>
+    <View className="rounded-lg bg-surface px-3 shadow-card">{children}</View>
+  </View>
+);
 
 export const ProfileScreen: React.FC = () => {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
-  const { data: user } = useMe();
+  const isFocused = useIsFocused();
+  const { data: user, isLoading } = useMe();
+  const { data: orders } = useMyOrders();
+  const { data: addresses } = useAddresses();
+  const favoriteCount = useFavoritesStore((s) => s.restaurants.length);
   const logout = useAuthStore((s) => s.logout);
+  const [confirmLogout, setConfirmLogout] = useState(false);
   const [galleryOpen, setGalleryOpen] = useState(false);
 
-  const handleLogout = () => {
-    Alert.alert('Đăng xuất', 'Bạn có chắc chắn muốn đăng xuất khỏi tài khoản?', [
-      { text: 'Hủy', style: 'cancel' },
-      {
-        text: 'Đăng xuất',
-        style: 'destructive',
-        onPress: () => logout(),
-      },
-    ]);
-  };
+  const goOrders = () => navigation.navigate('MainTabs', { screen: 'OrdersTab' });
+  const goFavorites = () => navigation.navigate('MainTabs', { screen: 'FavoritesTab' });
+  const goAddresses = () => navigation.navigate('AddressManagement');
 
   return (
-    <SafeAreaView style={styles.container}>
-      <ScrollView contentContainerStyle={styles.scroll}>
-        {/* User Card */}
-        <View style={styles.userCard}>
-          <View style={styles.avatar}>
-            <Ionicons name="person" size={36} color={colors.primary} />
-          </View>
-          <View style={styles.userInfo}>
-            <Text style={styles.userName}>{user?.fullName || 'Khách hàng'}</Text>
-            <Text style={styles.userEmail}>{user?.email}</Text>
-            {user?.phone ? <Text style={styles.userPhone}>{user.phone}</Text> : null}
-          </View>
-        </View>
-
-        {/* Menu Options */}
-        <View style={styles.menuSection}>
-          <TouchableOpacity
-            style={styles.menuItem}
+    <View className="flex-1 bg-canvas-subtle">
+      {isFocused && <StatusBar style="light" />}
+      <ScrollView contentContainerClassName={TAB_BAR_CLEARANCE}>
+        <TabHeader title="Tài khoản">
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Sửa hồ sơ"
             onPress={() => navigation.navigate('EditProfile')}
+            className="flex-row items-center gap-3 active:opacity-80"
           >
-            <View style={styles.menuItemLeft}>
-              <Ionicons name="person-outline" size={22} color={colors.primary} />
-              <Text style={styles.menuItemText}>Thông tin tài khoản & Mật khẩu</Text>
+            <Avatar uri={user?.avatarUrl} name={user?.fullName} size="lg" className="border-2 border-surface/60" />
+            <View className="flex-1 gap-0.5">
+              {isLoading ? (
+                <>
+                  <Skeleton className="h-5 w-40 bg-surface/30" />
+                  <Skeleton className="h-4 w-52 bg-surface/30" />
+                </>
+              ) : (
+                <>
+                  <Text variant="headline" tone="inverse" numberOfLines={1}>
+                    {user?.fullName || 'Khách hàng'}
+                  </Text>
+                  <Text variant="body" tone="inverse" className="opacity-85" numberOfLines={1}>
+                    {user?.email}
+                  </Text>
+                  {!!user?.phone && (
+                    <Text variant="caption" weight="regular" tone="inverse" className="opacity-85">
+                      {user.phone}
+                    </Text>
+                  )}
+                </>
+              )}
             </View>
-            <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
-          </TouchableOpacity>
+            <View className="rounded-full bg-surface/20 px-3 py-1.5">
+              <Text variant="caption" weight="semibold" tone="inverse">
+                Sửa
+              </Text>
+            </View>
+          </Pressable>
+          <View className="mt-1 flex-row gap-2">
+            <Stat label="Đơn hàng" value={orders?.items.length} onPress={goOrders} />
+            <Stat label="Yêu thích" value={favoriteCount} onPress={goFavorites} />
+            <Stat label="Địa chỉ" value={addresses?.length} onPress={goAddresses} />
+          </View>
+        </TabHeader>
 
-          <TouchableOpacity
-            style={styles.menuItem}
-            onPress={() => navigation.navigate('AddressManagement')}
-          >
-            <View style={styles.menuItemLeft}>
-              <Ionicons name="location-outline" size={22} color={colors.primary} />
-              <Text style={styles.menuItemText}>Địa chỉ đã lưu</Text>
-            </View>
-            <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
-          </TouchableOpacity>
+        <View className="gap-5 px-4 pt-5">
+          <Group title="Tài khoản">
+            <ListRow
+              icon="person-outline"
+              iconTone="brand"
+              title="Thông tin cá nhân & mật khẩu"
+              onPress={() => navigation.navigate('EditProfile')}
+            />
+            <Divider inset />
+            <ListRow icon="location-outline" iconTone="brand" title="Địa chỉ đã lưu" onPress={goAddresses} />
+          </Group>
 
-          <TouchableOpacity
-            style={styles.menuItem}
-            onPress={() => navigation.navigate('MainTabs', { screen: 'OrdersTab' })}
-          >
-            <View style={styles.menuItemLeft}>
-              <Ionicons name="receipt-outline" size={22} color={colors.secondary} />
-              <Text style={styles.menuItemText}>Lịch sử đơn hàng</Text>
-            </View>
-            <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
-          </TouchableOpacity>
+          <Group title="Hoạt động">
+            <ListRow icon="receipt-outline" iconTone="brand" title="Lịch sử đơn hàng" onPress={goOrders} />
+            <Divider inset />
+            <ListRow icon="heart-outline" iconTone="danger" title="Quán yêu thích" onPress={goFavorites} />
+          </Group>
+
+          {__DEV__ && (
+            <Group title="Phát triển">
+              <ListRow
+                icon="color-palette-outline"
+                title="Thư viện thành phần"
+                subtitle="Chỉ hiện ở chế độ phát triển"
+                onPress={() => setGalleryOpen(true)}
+              />
+            </Group>
+          )}
+
+          <View className="rounded-lg bg-surface px-3 shadow-card">
+            <ListRow
+              icon="log-out-outline"
+              title="Đăng xuất"
+              destructive
+              showChevron={false}
+              onPress={() => setConfirmLogout(true)}
+            />
+          </View>
         </View>
-
-        {/* Logout Button */}
-        <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
-          <Ionicons name="log-out-outline" size={22} color={colors.danger} />
-          <Text style={styles.logoutText}>Đăng xuất</Text>
-        </TouchableOpacity>
-        {__DEV__ && (
-          <ListRow icon="color-palette-outline" title="Thư viện thành phần" subtitle="Chỉ hiện ở chế độ phát triển" onPress={() => setGalleryOpen(true)} />
-        )}
       </ScrollView>
+
+      <ConfirmDialog
+        visible={confirmLogout}
+        title="Đăng xuất?"
+        message="Bạn có chắc chắn muốn đăng xuất khỏi tài khoản?"
+        confirmLabel="Đăng xuất"
+        cancelLabel="Hủy"
+        destructive
+        onCancel={() => setConfirmLogout(false)}
+        onConfirm={() => {
+          setConfirmLogout(false);
+          logout();
+        }}
+      />
       {__DEV__ && (
         <Modal visible={galleryOpen} animationType="slide" onRequestClose={() => setGalleryOpen(false)}>
           <DevGallery onClose={() => setGalleryOpen(false)} />
         </Modal>
       )}
-    </SafeAreaView>
+    </View>
   );
 };
-
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.background },
-  scroll: { padding: 16 },
-  userCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: colors.white,
-    padding: 16,
-    borderRadius: 12,
-    marginBottom: 20,
-    gap: 16,
-  },
-  avatar: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    backgroundColor: colors.primaryLight,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  userInfo: { flex: 1 },
-  userName: { fontSize: 18, fontWeight: '700', color: colors.text, marginBottom: 4 },
-  userEmail: { fontSize: 13, color: colors.textSecondary },
-  userPhone: { fontSize: 13, color: colors.textMuted, marginTop: 2 },
-  menuSection: {
-    backgroundColor: colors.white,
-    borderRadius: 12,
-    overflow: 'hidden',
-    marginBottom: 24,
-  },
-  menuItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.borderLight,
-  },
-  menuItemLeft: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  menuItemText: { fontSize: 15, fontWeight: '600', color: colors.text },
-  logoutButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colors.white,
-    padding: 16,
-    borderRadius: 12,
-    gap: 8,
-  },
-  logoutText: { fontSize: 15, fontWeight: '700', color: colors.danger },
-});
-

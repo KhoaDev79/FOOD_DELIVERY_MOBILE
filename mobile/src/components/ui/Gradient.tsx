@@ -14,6 +14,8 @@ const PRESETS = {
   dealFrame: `linear-gradient(160deg, ${palette.accent['50']} 0%, ${palette.canvas.DEFAULT} 55%, ${palette.accent['100']} 100%)`,
   /** Dải tiêu đề "Quán gần tôi": xanh ngọc nhạt dần vào nền danh sách brand-50. */
   nearbyBand: `linear-gradient(180deg, ${palette.brand['200']} 0%, ${palette.brand['100']} 45%, ${palette.brand['50']} 100%)`,
+  /** Đầu trang các tab khách hàng (Đơn hàng, Yêu thích, Tài khoản, Giỏ hàng). */
+  tabHeader: `linear-gradient(160deg, ${palette.brand['900']} 0%, ${palette.brand['700']} 55%, ${palette.brand['500']} 100%)`,
   /** Nền khối chủ đề màu cam nhạt (ảnh mẫu 4, 5). */
   sectionAccent: `linear-gradient(180deg, ${palette.accent['50']} 0%, ${palette.canvas.DEFAULT} 70%)`,
   /** Thẻ minh hoạ trạng thái rỗng (ảnh mẫu 8). */

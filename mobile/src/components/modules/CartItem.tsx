@@ -1,91 +1,46 @@
-import { Ionicons } from '@expo/vector-icons';
-import React from 'react';
-import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { colors } from '../../constants/colors';
+import { memo } from 'react';
+import { View } from 'react-native';
 import { CartLineItem } from '../../store/useCartStore';
 import { formatVND } from '../../utils/format';
+import { AppImage, QuantityStepper, Text } from '../ui';
 
 interface CartItemProps {
   item: CartLineItem;
-  onIncrease: () => void;
-  onDecrease: () => void;
+  /** Đổi số lượng; 0 nghĩa là xoá dòng (theo quy tắc của store). */
+  onChangeQuantity: (quantity: number) => void;
 }
 
-export const CartItem: React.FC<CartItemProps> = ({ item, onIncrease, onDecrease }) => {
+/** Một dòng món trong giỏ: ảnh, tên, tuỳ chọn đã chọn, ghi chú, đơn giá và bộ chọn số lượng. */
+export const CartItem = memo<CartItemProps>(({ item, onChangeQuantity }) => {
+  const unit = item.unitPrice || item.menuItem.price;
+  const options = [item.size && `Size ${item.size}`, ...(item.toppings ?? []), item.spiciness].filter(Boolean);
   return (
-    <View style={styles.container}>
-      <View style={styles.info}>
-        <Text style={styles.name}>{item.menuItem.name}</Text>
-        <Text style={styles.price}>{formatVND(item.menuItem.price)}</Text>
-        {item.note ? <Text style={styles.note}>Ghi chú: {item.note}</Text> : null}
-      </View>
-
-      <View style={styles.quantityControl}>
-        <TouchableOpacity style={styles.button} onPress={onDecrease}>
-          <Ionicons
-            name={item.quantity === 1 ? 'trash-outline' : 'remove'}
-            size={16}
-            color={item.quantity === 1 ? colors.danger : colors.text}
-          />
-        </TouchableOpacity>
-
-        <Text style={styles.quantity}>{item.quantity}</Text>
-
-        <TouchableOpacity style={styles.button} onPress={onIncrease}>
-          <Ionicons name="add" size={16} color={colors.text} />
-        </TouchableOpacity>
+    <View className="flex-row gap-3 rounded-lg bg-surface p-3 shadow-card">
+      <AppImage uri={item.menuItem.imageUrl} className="h-20 w-20 rounded-md" fallbackIcon="fast-food-outline" />
+      <View className="flex-1 justify-between gap-1">
+        <View className="gap-0.5">
+          <Text variant="body-lg" weight="semibold" numberOfLines={2}>
+            {item.menuItem.name}
+          </Text>
+          {options.length > 0 && (
+            <Text variant="caption" weight="regular" tone="secondary" numberOfLines={2}>
+              {options.join(' · ')}
+            </Text>
+          )}
+          {!!item.note && (
+            <Text variant="caption" weight="regular" tone="muted" numberOfLines={2}>
+              Ghi chú: {item.note}
+            </Text>
+          )}
+        </View>
+        <View className="flex-row items-center justify-between gap-2">
+          <Text variant="body-lg" weight="bold" tone="brand">
+            {formatVND(unit * item.quantity)}
+          </Text>
+          <QuantityStepper value={item.quantity} onChange={onChangeQuantity} size="sm" max={50} />
+        </View>
       </View>
     </View>
   );
-};
-
-const styles = StyleSheet.create({
-  container: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.borderLight,
-  },
-  info: {
-    flex: 1,
-    marginRight: 12,
-  },
-  name: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: colors.text,
-    marginBottom: 4,
-  },
-  price: {
-    fontSize: 14,
-    color: colors.primary,
-    fontWeight: '600',
-  },
-  note: {
-    fontSize: 12,
-    color: colors.textMuted,
-    fontStyle: 'italic',
-    marginTop: 2,
-  },
-  quantityControl: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: colors.background,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  button: {
-    padding: 8,
-  },
-  quantity: {
-    fontSize: 14,
-    fontWeight: '600',
-    paddingHorizontal: 8,
-    minWidth: 28,
-    textAlign: 'center',
-  },
 });
-
+CartItem.displayName = 'CartItem';

@@ -54,15 +54,17 @@ export function FilterBar<T extends string>({
   className?: string;
 }) {
   return (
-    <ScrollView
-      horizontal
-      showsHorizontalScrollIndicator={false}
-      className={cn('flex-grow-0', className)}
-      contentContainerClassName="gap-2 px-4 py-2"
-    >
-      {options.map((o) => (
-        <FilterChip key={o.value} label={o.label} selected={o.value === value} onPress={() => onChange(o.value)} />
-      ))}
-    </ScrollView>
+    // Khung cao cố định: ScrollView ngang có thể tự co chiều cao (đặc biệt trên web).
+    <View className={cn('h-12 justify-center', className)}>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerClassName="items-center gap-2 px-4"
+      >
+        {options.map((o) => (
+          <FilterChip key={o.value} label={o.label} selected={o.value === value} onPress={() => onChange(o.value)} />
+        ))}
+      </ScrollView>
+    </View>
   );
 }
