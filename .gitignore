@@ -12,3 +12,11 @@ mobile/.expo/
 mobile/web-build/
 mobile/ios/
 mobile/android/
+
+# Local uploads, backups & agent tools
+.agents/
+.aider-desk/
+skills-lock.json
+backend/public/uploads/
+*.dump
+*.old

@@ -1,6 +1,6 @@
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { StatusBar } from 'expo-status-bar';
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ScrollView, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { DishOptionSheet, DishSelection } from '../../components/modules/restaurant/DishOptionSheet';
@@ -22,6 +22,7 @@ import {
 import { useLocation } from '../../hooks/useLocation';
 import { useRestaurantDetail } from '../../services/useRestaurants';
 import { useCartStore } from '../../store/useCartStore';
+import { useToggleFavorite } from '../../hooks/useFavorites';
 import { useFavoritesStore } from '../../store/useFavoritesStore';
 import { MenuItem } from '../../types/api';
 import { RootStackParamList } from '../../types/navigation';
@@ -62,7 +63,7 @@ const DetailSkeleton: React.FC = () => (
 );
 
 export const RestaurantDetailScreen: React.FC<Props> = ({ route, navigation }) => {
-  const { restaurantId } = route.params;
+  const { restaurantId, openDishId } = route.params;
   const { data: restaurant, isLoading, isError, refetch } = useRestaurantDetail(restaurantId);
   const { coords, isLoading: locating, errorMsg } = useLocation();
   const toast = useToast();
@@ -75,13 +76,14 @@ export const RestaurantDetailScreen: React.FC<Props> = ({ route, navigation }) =
   const cartSubtotal = useCartStore((s) => s.getSubtotal());
 
   const liked = useFavoritesStore((s) => s.restaurants.some((r) => r.id === restaurantId));
-  const toggleFavorite = useFavoritesStore((s) => s.toggle);
+  const toggleFavorite = useToggleFavorite();
 
   const [selected, setSelected] = useState<MenuItem | null>(null);
   const [pending, setPending] = useState<PendingAdd | null>(null);
   const [activeCat, setActiveCat] = useState<string | null>(null);
   const scrollRef = useRef<React.ComponentRef<typeof ScrollView>>(null);
   const sectionY = useRef<Record<string, number>>({});
+  const autoOpenedRef = useRef<string | null>(null);
 
   const sections = useMemo(() => {
     if (!restaurant) return [];
@@ -100,6 +102,16 @@ export const RestaurantDetailScreen: React.FC<Props> = ({ route, navigation }) =
     const prices = allItems.filter((i) => i.isAvailable).map((i) => linePrice(i));
     return prices.length ? [Math.min(...prices), Math.max(...prices)] : null;
   }, [allItems]);
+
+  // Tự động mở bảng chọn tuỳ chọn khi điều hướng từ trang chủ vào đúng món
+  useEffect(() => {
+    if (!openDishId || autoOpenedRef.current === openDishId || allItems.length === 0) return;
+    const target = allItems.find((i) => i.id === openDishId);
+    if (target) {
+      autoOpenedRef.current = openDishId;
+      setSelected(target);
+    }
+  }, [openDishId, allItems]);
 
   if (isLoading) return <DetailSkeleton />;
   if (isError || !restaurant) {
@@ -124,6 +136,9 @@ export const RestaurantDetailScreen: React.FC<Props> = ({ route, navigation }) =
     !locating && !errorMsg
       ? calculateDistance(coords.latitude, coords.longitude, restaurant.latitude, restaurant.longitude)
       : undefined;
+  // Theo vị trí hiện tại của khách: quán có giao tới không. Chỉ cảnh báo (không chặn), vì khách có thể
+  // chọn địa chỉ giao khác ở bước thanh toán; backend kiểm tra lại bán kính khi đặt đơn.
+  const outOfRange = distanceKm !== undefined && distanceKm > restaurant.deliveryRadiusKm;
   const rating =
     restaurant.rating > 0
       ? restaurant.rating.toLocaleString('vi-VN', { minimumFractionDigits: 1, maximumFractionDigits: 1 })
@@ -194,6 +209,7 @@ export const RestaurantDetailScreen: React.FC<Props> = ({ route, navigation }) =
                 accessibilityState={{ selected: liked }}
                 onPress={() => {
                   const nowLiked = toggleFavorite(restaurant);
+                  if (nowLiked === null) return; // chưa đăng nhập: đã nhắc và chuyển sang Đăng nhập
                   toast(
                     nowLiked ? 'Đã thêm vào Góc khoái khẩu' : 'Đã bỏ khỏi yêu thích',
                     nowLiked ? 'success' : 'default',
@@ -256,7 +272,21 @@ export const RestaurantDetailScreen: React.FC<Props> = ({ route, navigation }) =
           <View className="mx-4 mt-3 flex-row items-center gap-2 rounded-md bg-danger-soft p-3">
             <Icon name="moon-outline" size="md" tone="danger" />
             <Text variant="body" tone="danger" className="flex-1">
-              Quán đang đóng cửa, bạn có thể xem thực đơn nhưng chưa thể đặt món.
+              Quán đang đóng cửa
+              {restaurant.openTime && restaurant.closeTime
+                ? ` (giờ mở cửa ${restaurant.openTime} – ${restaurant.closeTime})`
+                : ''}
+              . Bạn có thể xem thực đơn nhưng chưa thể đặt món.
+            </Text>
+          </View>
+        )}
+
+        {canOrder && outOfRange && (
+          <View className="mx-4 mt-3 flex-row items-center gap-2 rounded-md bg-warning-soft p-3">
+            <Icon name="alert-circle-outline" size="md" tone="accent" />
+            <Text variant="body" className="flex-1 text-warning-strong">
+              Quán chỉ giao trong {restaurant.deliveryRadiusKm} km, vị trí hiện tại của bạn cách{' '}
+              {formatDistance(distanceKm)}. Hãy chọn địa chỉ giao gần quán hơn khi thanh toán.
             </Text>
           </View>
         )}

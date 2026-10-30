@@ -60,3 +60,13 @@ export function linePrice(
 export function originalLinePrice(item: Pick<MenuItem, 'price' | 'options'>, sel: LineSelection = {}): number {
   return linePrice({ ...item, discountPrice: null }, sel);
 }
+
+/** Các mức giảm giá chủ quán được chọn (%). Phải khớp DISCOUNT_PERCENTS ở backend (menu-discount.ts). */
+export const DISCOUNT_OPTIONS = [0, 5, 7, 10, 15, 20] as const;
+
+/** Giá sau giảm, làm tròn tới 100 ₫ – cùng công thức với backend để xem trước đúng giá sẽ lưu. */
+export function discountPriceFor(price: number, percent: number): number | null {
+  if (!percent) return null;
+  const value = Math.round((price * (100 - percent)) / 100 / 100) * 100;
+  return value > 0 && value < price ? value : null;
+}

@@ -22,6 +22,10 @@ const PRESETS = {
   empty: `linear-gradient(135deg, ${palette.warning.soft} 0%, ${palette.canvas.DEFAULT} 50%, ${palette.brand['100']} 100%)`,
   /** Mục tab đang chọn, nút giỏ hàng (ảnh mẫu 7). */
   brandPill: `linear-gradient(135deg, ${palette.brand['300']} 0%, ${palette.brand['500']} 100%)`,
+  /** Nền màn khởi động: cùng dải màu với đầu trang chủ. */
+  splash: `linear-gradient(180deg, ${palette.brand['900']} 0%, ${palette.brand['700']} 55%, ${palette.brand['700']} 100%)`,
+  /** Quầng sáng sau logo màn khởi động (màu brand-300, mờ dần). */
+  splashGlow: 'radial-gradient(circle at 50% 45%, rgba(127,224,236,0.38) 0%, rgba(127,224,236,0) 48%)',
   /** Lớp tối dưới chữ phủ trên ảnh. */
   imageScrim: 'linear-gradient(180deg, rgba(0,0,0,0) 0%, rgba(0,0,0,0.55) 100%)',
 } as const;

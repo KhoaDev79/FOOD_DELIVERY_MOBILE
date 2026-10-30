@@ -18,6 +18,8 @@ export interface DishSelection {
 interface Props {
   item: MenuItem | null;
   canOrder: boolean;
+  initialSelection?: Partial<DishSelection>;
+  confirmLabel?: string;
   onClose: () => void;
   onConfirm: (item: MenuItem, sel: DishSelection) => void;
 }
@@ -28,15 +30,27 @@ const MAX_TOPPINGS = 10; // trùng giới hạn của backend
  * Bảng chọn tuỳ chọn món: lấy size/topping/mức cay-đường từ dữ liệu thật của món (cột options).
  * Tổng tiền hiển thị tính bằng cùng quy tắc với backend.
  */
-export const DishOptionSheet: React.FC<Props> = ({ item, canOrder, onClose, onConfirm }) => {
-  // Giá trị mặc định lấy từ chính món (size đầu tiên, mức đầu tiên). Màn cha gắn key theo món
-  // nên mỗi món mới tạo lại bảng chọn với mặc định của nó.
+export const DishOptionSheet: React.FC<Props> = ({
+  item,
+  canOrder,
+  initialSelection,
+  confirmLabel,
+  onClose,
+  onConfirm,
+}) => {
+  // Giá trị mặc định lấy từ chính món (size đầu tiên, mức đầu tiên) hoặc từ initialSelection khi sửa món.
   const opts = useMemo(() => parseOptions(item?.options), [item]);
-  const [sizeId, setSizeId] = useState<string | undefined>(() => opts.sizes?.[0]?.id);
-  const [toppingIds, setToppingIds] = useState<string[]>([]);
-  const [level, setLevel] = useState<string | undefined>(() => (opts.spiceLevels ?? opts.sugarLevels)?.[0]);
-  const [quantity, setQuantity] = useState(1);
-  const [note, setNote] = useState('');
+  const [sizeId, setSizeId] = useState<string | undefined>(
+    () => initialSelection?.sizeId ?? opts.sizes?.[0]?.id,
+  );
+  const [toppingIds, setToppingIds] = useState<string[]>(
+    () => initialSelection?.toppingIds ?? [],
+  );
+  const [level, setLevel] = useState<string | undefined>(
+    () => initialSelection?.level ?? (opts.spiceLevels ?? opts.sugarLevels)?.[0],
+  );
+  const [quantity, setQuantity] = useState(() => initialSelection?.quantity ?? 1);
+  const [note, setNote] = useState(() => initialSelection?.note ?? '');
 
   if (!item) return null;
 
@@ -62,6 +76,12 @@ export const DishOptionSheet: React.FC<Props> = ({ item, canOrder, onClose, onCo
       note: note.trim() || undefined,
     });
 
+  const buttonLabel = confirmLabel
+    ? `${confirmLabel} · ${formatVND(unit * quantity)}`
+    : canOrder
+    ? `Thêm vào giỏ · ${formatVND(unit * quantity)}`
+    : 'Quán đang đóng cửa';
+
   return (
     <BottomSheet
       visible
@@ -70,7 +90,7 @@ export const DishOptionSheet: React.FC<Props> = ({ item, canOrder, onClose, onCo
         <View className="flex-row items-center gap-3 pb-2">
           <QuantityStepper value={quantity} onChange={setQuantity} min={1} max={50} />
           <Button
-            label={canOrder ? `Thêm vào giỏ · ${formatVND(unit * quantity)}` : 'Quán đang đóng cửa'}
+            label={buttonLabel}
             disabled={!canOrder}
             onPress={confirm}
             className="flex-1"

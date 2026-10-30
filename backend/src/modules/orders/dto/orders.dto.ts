@@ -117,3 +117,16 @@ export class ListOrdersQueryDto {
   @Max(50)
   limit: number = 20;
 }
+
+export class ReviewOrderDto {
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(5)
+  rating: number;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  comment?: string;
+}

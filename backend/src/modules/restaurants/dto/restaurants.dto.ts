@@ -6,13 +6,16 @@ import {
   IsNumber,
   IsOptional,
   IsString,
-  IsUrl,
   IsUUID,
+  Matches,
   Max,
   MaxLength,
   Min,
   MinLength,
 } from 'class-validator';
+
+/** Giờ dạng HH:mm, 00:00 – 23:59. */
+const TIME_HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
 
 export class NearbyRestaurantsQueryDto {
   @Type(() => Number)
@@ -64,8 +67,10 @@ export class CreateRestaurantDto {
   @MaxLength(1000)
   description?: string;
 
+  // Giống ảnh món (menus.dto): nhận đường dẫn tương đối "/public/..." của dữ liệu mẫu và ảnh
+  // base64 chọn từ máy. @IsUrl cũ từ chối cả hai nên lưu thông tin quán luôn lỗi.
   @IsOptional()
-  @IsUrl()
+  @IsString()
   imageUrl?: string;
 
   @IsString()
@@ -104,8 +109,10 @@ export class UpdateRestaurantDto {
   @MaxLength(1000)
   description?: string;
 
+  // Giống ảnh món (menus.dto): nhận đường dẫn tương đối "/public/..." của dữ liệu mẫu và ảnh
+  // base64 chọn từ máy. @IsUrl cũ từ chối cả hai nên lưu thông tin quán luôn lỗi.
   @IsOptional()
-  @IsUrl()
+  @IsString()
   imageUrl?: string;
 
   @IsOptional()
@@ -133,4 +140,12 @@ export class UpdateRestaurantDto {
   @IsOptional()
   @IsBoolean()
   isOpen?: boolean;
+
+  @IsOptional()
+  @Matches(TIME_HHMM, { message: 'Giờ mở cửa phải có dạng HH:mm' })
+  openTime?: string;
+
+  @IsOptional()
+  @Matches(TIME_HHMM, { message: 'Giờ đóng cửa phải có dạng HH:mm' })
+  closeTime?: string;
 }

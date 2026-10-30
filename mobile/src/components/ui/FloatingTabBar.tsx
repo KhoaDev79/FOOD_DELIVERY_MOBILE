@@ -21,8 +21,8 @@ export const TAB_BAR_CLEARANCE = 'pb-28';
  * Chỉ có icon như mẫu; nhãn đầy đủ được đọc bởi trình đọc màn hình.
  */
 export const FloatingTabBar: React.FC<
-  BottomTabBarProps & { meta: Record<string, TabMeta>; cartCount: number; onCartPress: () => void }
-> = ({ state, navigation, meta, cartCount, onCartPress }) => (
+  BottomTabBarProps & { meta: Record<string, TabMeta>; cartCount?: number; onCartPress?: () => void }
+> = ({ state, navigation, meta, cartCount = 0, onCartPress }) => (
   <SafeAreaView edges={['bottom']} pointerEvents="box-none" className="absolute bottom-0 left-0 right-0">
     {/* SafeAreaView tự đặt padding theo vùng an toàn và bỏ qua padding ngang trong className, nên bố cục nằm ở View con. */}
     <View pointerEvents="box-none" className="flex-row items-center gap-3 px-4 pb-2">
@@ -61,6 +61,8 @@ export const FloatingTabBar: React.FC<
           );
         })}
       </View>
+      {/* Nút giỏ hàng chỉ hiện khi có onCartPress (thanh tab của chủ quán không có giỏ). */}
+      {onCartPress && (
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={cartCount > 0 ? `Giỏ hàng, ${cartCount} món` : 'Giỏ hàng'}
@@ -72,6 +74,7 @@ export const FloatingTabBar: React.FC<
         </Gradient>
         <CountBadge count={cartCount} className={cn('absolute -right-0.5 -top-0.5')} />
       </Pressable>
+      )}
     </View>
   </SafeAreaView>
 );

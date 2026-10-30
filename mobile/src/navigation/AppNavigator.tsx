@@ -1,21 +1,16 @@
-import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import React, { useEffect } from 'react';
-import { LoadingSpinner } from '../components/common/LoadingSpinner';
+import React, { useEffect, useState } from 'react';
+import { useFavoritesSync } from '../hooks/useFavorites';
 import { usePushNotifications } from '../hooks/usePushNotifications';
-import { LoginScreen } from '../screens/auth/LoginScreen';
-import { RegisterScreen } from '../screens/auth/RegisterScreen';
+import { ZomZomSplashScreen } from '../screens/intro/ZomZomSplashScreen';
 import { useAuthStore } from '../store/useAuthStore';
-import { AuthStackParamList } from '../types/navigation';
 import { AdminTabNavigator } from './AdminTabNavigator';
 import { DriverTabNavigator } from './DriverTabNavigator';
 import { OwnerTabNavigator } from './OwnerTabNavigator';
 import { RootStack } from './RootStack';
 
-const AuthStack = createNativeStackNavigator<AuthStackParamList>();
-
 export const AppNavigator: React.FC = () => {
+  const [showSplash, setShowSplash] = useState(true);
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
-  const isLoading = useAuthStore((s) => s.isLoading);
   const user = useAuthStore((s) => s.user);
   const loadStoredAuth = useAuthStore((s) => s.loadStoredAuth);
 
@@ -24,30 +19,29 @@ export const AppNavigator: React.FC = () => {
   }, [loadStoredAuth]);
 
   usePushNotifications();
+  // Yêu thích theo tài khoản: tải khi đăng nhập, xoá khi đăng xuất / đổi tài khoản
+  useFavoritesSync();
 
-  if (isLoading) {
-    return <LoadingSpinner message="Đang khởi tạo ứng dụng..." />;
-  }
-
-  if (!isAuthenticated) {
-    return (
-      <AuthStack.Navigator screenOptions={{ headerShown: false }}>
-        <AuthStack.Screen name="Login" component={LoginScreen} />
-        <AuthStack.Screen name="Register" component={RegisterScreen} />
-      </AuthStack.Navigator>
-    );
+  // Hiển thị màn hình Loading / Intro ZomZom khi vừa mở ứng dụng
+  if (showSplash) {
+    return <ZomZomSplashScreen onFinish={() => setShowSplash(false)} />;
   }
 
   // Điều hướng chính xác theo vai trò đăng nhập
-  switch (user?.role) {
-    case 'RESTAURANT_OWNER':
-      return <OwnerTabNavigator />;
-    case 'DRIVER':
-      return <DriverTabNavigator />;
-    case 'ADMIN':
-      return <AdminTabNavigator />;
-    case 'CUSTOMER':
-    default:
-      return <RootStack />;
+  if (isAuthenticated) {
+    switch (user?.role) {
+      case 'RESTAURANT_OWNER':
+        return <OwnerTabNavigator />;
+      case 'DRIVER':
+        return <DriverTabNavigator />;
+      case 'ADMIN':
+        return <AdminTabNavigator />;
+      case 'CUSTOMER':
+      default:
+        return <RootStack />;
+    }
   }
+
+  // Khách vãng lai chưa đăng nhập: Vào thẳng trang chủ để duyệt món và quán ăn
+  return <RootStack />;
 };

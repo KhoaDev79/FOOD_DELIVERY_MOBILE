@@ -1,5 +1,5 @@
 import { apiClient } from './client';
-import { OrderDetail, OrderSummary, PaginatedResult, PaymentMethod } from '../types/api';
+import { DriverStats, OrderDetail, OrderSummary, PaginatedResult, PaymentMethod } from '../types/api';
 
 export interface CreateOrderPayload {
   restaurantId: string;
@@ -40,4 +40,11 @@ export const ordersApi = {
     apiClient.get<any, PaginatedResult<OrderDetail>>('/orders/deliveries', { params }),
 
   acceptOrder: (id: string) => apiClient.post<any, OrderDetail>(`/orders/${id}/accept`),
+
+  getDriverStats: (params?: { days?: number }) =>
+    apiClient.get<any, DriverStats>('/orders/driver/stats', { params }),
+
+  /** Khách chấm điểm quán (1–5 sao) cho đơn đã giao; điểm trung bình của quán được cập nhật. */
+  review: (id: string, data: { rating: number; comment?: string }) =>
+    apiClient.post<any, unknown>(`/orders/${id}/review`, data),
 };

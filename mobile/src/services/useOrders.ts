@@ -1,11 +1,14 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { CreateOrderPayload, ordersApi } from '../api/orders';
 import { queryKeys } from '../constants/queryKeys';
+import { useAuthStore } from '../store/useAuthStore';
 
 export function useMyOrders(status?: string) {
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   return useQuery({
     queryKey: queryKeys.orders.mine(status),
     queryFn: () => ordersApi.getMine({ status, limit: 30 }),
+    enabled: isAuthenticated,
   });
 }
 

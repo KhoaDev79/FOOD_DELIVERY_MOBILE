@@ -11,7 +11,13 @@ export function resolveImageUrl(uri?: string | null): string | null {
   if (!uri || typeof uri !== 'string' || !uri.trim()) return null;
   const trimmed = uri.trim();
 
-  if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+  if (
+    trimmed.startsWith('http://') ||
+    trimmed.startsWith('https://') ||
+    trimmed.startsWith('file://') ||
+    trimmed.startsWith('content://') ||
+    trimmed.startsWith('data:')
+  ) {
     return trimmed;
   }
 

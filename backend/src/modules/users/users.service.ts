@@ -1,6 +1,9 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { User } from '@prisma/client';
 import * as argon2 from 'argon2';
+import { existsSync, mkdirSync, writeFileSync } from 'fs';
+import { extname, join } from 'path';
+import { BufferedFile } from '../../common/types/file.interface';
 import { formatAddress, isCoordinateAddress, isInferredMockAddress } from '../../common/utils/address.util';
 import { PrismaService } from '../prisma/prisma.service';
 import { ChangePasswordDto, CreateAddressDto, UpdateAddressDto, UpdateProfileDto } from './dto/users.dto';
@@ -24,6 +27,24 @@ export class UsersService {
 
   async updateMe(userId: string, dto: UpdateProfileDto) {
     const user = await this.prisma.user.update({ where: { id: userId }, data: dto });
+    return toPublicUser(user);
+  }
+
+  async uploadAvatar(userId: string, file: BufferedFile) {
+    const uploadDir = join(process.cwd(), 'public', 'uploads', 'avatars');
+    if (!existsSync(uploadDir)) {
+      mkdirSync(uploadDir, { recursive: true });
+    }
+    const ext = extname(file.originalname) || '.jpg';
+    const filename = `${userId}-${Date.now()}${ext}`;
+    const filePath = join(uploadDir, filename);
+    writeFileSync(filePath, file.buffer);
+
+    const relativeUrl = `/public/uploads/avatars/${filename}`;
+    const user = await this.prisma.user.update({
+      where: { id: userId },
+      data: { avatarUrl: relativeUrl },
+    });
     return toPublicUser(user);
   }
 

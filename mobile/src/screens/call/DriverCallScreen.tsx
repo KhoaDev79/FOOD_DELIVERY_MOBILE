@@ -2,13 +2,11 @@ import { Ionicons } from '@expo/vector-icons';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import React, { useEffect, useState } from 'react';
 import {
-  SafeAreaView,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
+  Pressable,
   View,
 } from 'react-native';
-import { colors } from '../../constants/colors';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { Text } from '../../components/ui';
 import { RootStackParamList } from '../../types/navigation';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'DriverCall'>;
@@ -40,174 +38,85 @@ export const DriverCallScreen: React.FC<Props> = ({ navigation, route }) => {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView edges={['top', 'bottom']} style={{ flex: 1 }} className="flex-1 justify-between bg-canvas-subtle py-10">
       {/* Thông tin đầu trang */}
-      <View style={styles.topInfo}>
-        <Text style={styles.callerTitle}>{driverName}</Text>
-        <Text style={styles.phoneSub}>{driverPhone}</Text>
-        <Text style={styles.timerText}>{formatTimer(callSeconds)}</Text>
+      <View className="mt-5 items-center">
+        <Text variant="display" weight="bold" className="mb-1 text-center">
+          {driverName}
+        </Text>
+        <Text variant="body" tone="secondary" className="mb-3 text-center">
+          {driverPhone}
+        </Text>
+        <Text variant="title" weight="semibold" tone="brand">
+          {formatTimer(callSeconds)}
+        </Text>
       </View>
 
       {/* Avatar tròn lớn ở giữa */}
-      <View style={styles.centerSection}>
-        <View style={styles.avatarRingOuter}>
-          <View style={styles.avatarRingInner}>
-            <View style={styles.avatarCircle}>
-              <Ionicons name="person" size={80} color={colors.white} />
+      <View className="items-center justify-center">
+        <View className="h-48 w-48 items-center justify-center rounded-full bg-brand-50">
+          <View className="h-40 w-40 items-center justify-center rounded-full bg-brand-100">
+            <View className="h-32 w-32 items-center justify-center rounded-full bg-brand-500 shadow-raised">
+              <Ionicons name="person" size={72} color="#FFFFFF" />
             </View>
           </View>
         </View>
       </View>
 
       {/* Cụm điều khiển phía dưới */}
-      <View style={styles.bottomSection}>
-        <View style={styles.toolsRow}>
-          <TouchableOpacity
-            style={[styles.toolBtn, isSpeakerOn && styles.toolBtnActive]}
+      <View className="items-center gap-9 pb-6">
+        <View className="flex-row justify-center gap-14">
+          <Pressable
+            className={`h-18 w-18 items-center justify-center rounded-full border shadow-card active:opacity-70 ${
+              isSpeakerOn ? 'border-brand-500 bg-brand-50' : 'border-line bg-surface'
+            }`}
             onPress={() => setIsSpeakerOn(!isSpeakerOn)}
           >
             <Ionicons
               name={isSpeakerOn ? 'volume-high' : 'volume-medium-outline'}
               size={28}
-              color={isSpeakerOn ? '#EE4D2D' : colors.text}
+              color={isSpeakerOn ? '#1EB9CE' : '#1A1A1A'}
             />
-            <Text style={[styles.toolLabel, isSpeakerOn && styles.toolLabelActive]}>Loa ngoài</Text>
-          </TouchableOpacity>
+            <Text
+              variant="micro"
+              weight="semibold"
+              className={isSpeakerOn ? 'text-brand-600' : 'text-ink-secondary'}
+            >
+              Loa ngoài
+            </Text>
+          </Pressable>
 
-          <TouchableOpacity
-            style={[styles.toolBtn, isMuted && styles.toolBtnActive]}
+          <Pressable
+            className={`h-18 w-18 items-center justify-center rounded-full border shadow-card active:opacity-70 ${
+              isMuted ? 'border-brand-500 bg-brand-50' : 'border-line bg-surface'
+            }`}
             onPress={() => setIsMuted(!isMuted)}
           >
             <Ionicons
               name={isMuted ? 'mic-off' : 'mic-outline'}
               size={28}
-              color={isMuted ? '#EE4D2D' : colors.text}
+              color={isMuted ? '#1EB9CE' : '#1A1A1A'}
             />
-            <Text style={[styles.toolLabel, isMuted && styles.toolLabelActive]}>Tắt tiếng</Text>
-          </TouchableOpacity>
+            <Text
+              variant="micro"
+              weight="semibold"
+              className={isMuted ? 'text-brand-600' : 'text-ink-secondary'}
+            >
+              Tắt tiếng
+            </Text>
+          </Pressable>
         </View>
 
         {/* Nút cúp máy màu đỏ lớn */}
-        <TouchableOpacity style={styles.endCallBtn} onPress={handleEndCall} activeOpacity={0.8}>
-          <Ionicons name="call" size={34} color={colors.white} style={styles.hangupIcon} />
-        </TouchableOpacity>
+        <Pressable
+          className="h-18 w-18 items-center justify-center rounded-full bg-danger shadow-raised active:opacity-80"
+          onPress={handleEndCall}
+        >
+          <View className="rotate-[135deg]">
+            <Ionicons name="call" size={32} color="#FFFFFF" />
+          </View>
+        </Pressable>
       </View>
     </SafeAreaView>
   );
 };
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#FAFAFA',
-    justifyContent: 'space-between',
-    paddingVertical: 40,
-  },
-  topInfo: {
-    alignItems: 'center',
-    marginTop: 20,
-  },
-  callerTitle: {
-    fontSize: 26,
-    fontWeight: '800',
-    color: colors.text,
-    marginBottom: 4,
-  },
-  phoneSub: {
-    fontSize: 15,
-    color: colors.textSecondary,
-    marginBottom: 12,
-  },
-  timerText: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#EE4D2D',
-  },
-  centerSection: {
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  avatarRingOuter: {
-    width: 190,
-    height: 190,
-    borderRadius: 95,
-    backgroundColor: '#FFF0ED',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  avatarRingInner: {
-    width: 160,
-    height: 160,
-    borderRadius: 80,
-    backgroundColor: '#FFE2DC',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  avatarCircle: {
-    width: 130,
-    height: 130,
-    borderRadius: 65,
-    backgroundColor: '#EE4D2D',
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: '#EE4D2D',
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.35,
-    shadowRadius: 10,
-    elevation: 8,
-  },
-  bottomSection: {
-    alignItems: 'center',
-    gap: 36,
-  },
-  toolsRow: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    gap: 60,
-  },
-  toolBtn: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    width: 72,
-    height: 72,
-    borderRadius: 36,
-    backgroundColor: colors.white,
-    borderWidth: 1,
-    borderColor: '#EFEFEF',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 6,
-    elevation: 2,
-  },
-  toolBtnActive: {
-    backgroundColor: '#FFF0ED',
-    borderColor: '#EE4D2D',
-  },
-  toolLabel: {
-    fontSize: 11,
-    color: colors.textSecondary,
-    marginTop: 4,
-    fontWeight: '600',
-  },
-  toolLabelActive: {
-    color: '#EE4D2D',
-  },
-  endCallBtn: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
-    backgroundColor: '#EF4444',
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: '#EF4444',
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.4,
-    shadowRadius: 10,
-    elevation: 6,
-  },
-  hangupIcon: {
-    transform: [{ rotate: '135deg' }],
-  },
-});
-

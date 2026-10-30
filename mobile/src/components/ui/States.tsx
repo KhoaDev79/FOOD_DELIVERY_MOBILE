@@ -1,5 +1,5 @@
 import React from 'react';
-import { View } from 'react-native';
+import { ActivityIndicator, View } from 'react-native';
 import { Button } from './Button';
 import { cn } from './cn';
 import { Gradient } from './Gradient';
@@ -10,6 +10,7 @@ export interface EmptyStateProps {
   icon?: IconName;
   title: string;
   description?: string;
+  message?: string;
   actionLabel?: string;
   onAction?: () => void;
   /** card: thẻ gradient như ảnh mẫu 8; plain: giữa màn như ảnh mẫu 9. */
@@ -21,11 +22,13 @@ export const EmptyState: React.FC<EmptyStateProps> = ({
   icon = 'file-tray-outline',
   title,
   description,
+  message,
   actionLabel,
   onAction,
   variant = 'plain',
   className,
 }) => {
+  const displayDesc = description || message;
   const body = (
     <View className="items-center gap-3 px-6 py-8">
       <View className="h-24 w-24 items-center justify-center rounded-full bg-brand-50">
@@ -34,9 +37,9 @@ export const EmptyState: React.FC<EmptyStateProps> = ({
       <Text variant="headline" className="text-center">
         {title}
       </Text>
-      {!!description && (
+      {!!displayDesc && (
         <Text variant="body-lg" tone="secondary" className="text-center">
-          {description}
+          {displayDesc}
         </Text>
       )}
       {actionLabel && onAction && (
@@ -70,5 +73,19 @@ export const ErrorState: React.FC<{ message?: string; onRetry: () => void; class
       {message}
     </Text>
     <Button label="Thử lại" leftIcon="refresh" variant="primary" size="md" onPress={onRetry} className="mt-1 px-6" />
+  </View>
+);
+
+export const LoadingSpinner: React.FC<{ message?: string; className?: string }> = ({
+  message,
+  className,
+}) => (
+  <View className={cn('flex-1 items-center justify-center p-6', className)}>
+    <ActivityIndicator size="large" color="#1EB9CE" />
+    {message && (
+      <Text variant="body" tone="secondary" className="mt-3 text-center">
+        {message}
+      </Text>
+    )}
   </View>
 );

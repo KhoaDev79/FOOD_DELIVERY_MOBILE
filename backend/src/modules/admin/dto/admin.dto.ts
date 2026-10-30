@@ -1,6 +1,6 @@
 import { Type } from 'class-transformer';
-import { IsEnum, IsInt, IsOptional, IsString, Max, Min } from 'class-validator';
-import { Role } from '@prisma/client';
+import { IsEnum, IsIn, IsInt, IsOptional, IsString, IsUUID, Max, MaxLength, Min } from 'class-validator';
+import { Role, RoleRequestStatus } from '@prisma/client';
 
 export class ListUsersQueryDto {
   @IsOptional()
@@ -101,4 +101,67 @@ export class AdminUpdateRestaurantDto {
 
   @IsOptional()
   isOpen?: boolean;
+}
+
+export enum RestaurantFilter {
+  ALL = 'all',
+  OPEN = 'open',
+  CLOSED = 'closed',
+  UNASSIGNED = 'unassigned',
+}
+
+export class ListAdminRestaurantsQueryDto {
+  @IsOptional()
+  @IsString()
+  q?: string;
+
+  @IsOptional()
+  @IsEnum(RestaurantFilter)
+  filter?: RestaurantFilter;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  page: number = 1;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(100)
+  limit: number = 20;
+}
+
+export class AssignOwnerDto {
+  @IsUUID()
+  ownerId: string;
+}
+
+export class ToggleUserActiveDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(300)
+  reason?: string;
+}
+
+export class ChangeUserRoleDto {
+  @IsEnum(Role)
+  role: Role;
+}
+
+export class ListRoleRequestsQueryDto {
+  @IsOptional()
+  @IsEnum(RoleRequestStatus)
+  status?: RoleRequestStatus;
+}
+
+export class ReviewRoleRequestDto {
+  @IsIn([RoleRequestStatus.APPROVED, RoleRequestStatus.REJECTED])
+  status: RoleRequestStatus;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(300)
+  reviewNote?: string;
 }

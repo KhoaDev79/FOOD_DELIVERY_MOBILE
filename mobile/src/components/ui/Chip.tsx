@@ -57,8 +57,8 @@ export const FilterChip: React.FC<{
     onPress={onPress}
     hitSlop={6}
     className={cn(
-      'h-chip flex-row items-center gap-1.5 rounded-full border px-3 active:opacity-80',
-      selected ? 'border-brand-500 bg-brand-50' : 'border-line bg-surface shadow-card',
+      'h-chip flex-row items-center gap-1.5 rounded-full border px-3 shadow-card active:opacity-80',
+      selected ? 'border-brand-500 bg-brand-50' : 'border-line bg-surface',
       className,
     )}
   >

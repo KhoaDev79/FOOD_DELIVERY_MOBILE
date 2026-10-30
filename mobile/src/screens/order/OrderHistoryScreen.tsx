@@ -18,6 +18,7 @@ import {
   Text,
 } from '../../components/ui';
 import { useMyOrders } from '../../services/useOrders';
+import { useAuthStore } from '../../store/useAuthStore';
 import { palette } from '../../theme';
 import { OrderStatus, OrderSummary } from '../../types/api';
 import { RootStackParamList } from '../../types/navigation';
@@ -119,11 +120,13 @@ const OrderSkeleton: React.FC = () => (
 export const OrderHistoryScreen: React.FC = () => {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const isFocused = useIsFocused();
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   const [refreshing, setRefreshing] = useState(false);
   const [filter, setFilter] = useState<FilterKey>('all');
   const { data, isLoading, isError, refetch } = useMyOrders();
 
   const onRefresh = async () => {
+    if (!isAuthenticated) return;
     setRefreshing(true);
     await refetch();
     setRefreshing(false);
@@ -140,7 +143,13 @@ export const OrderHistoryScreen: React.FC = () => {
       <TabHeader
         title="Đơn hàng của tôi"
         subtitle={
-          isLoading ? 'Đang tải…' : activeCount > 0 ? `${activeCount} đơn đang xử lý` : `${orders.length} đơn đã đặt`
+          !isAuthenticated
+            ? 'Đăng nhập để xem lịch sử đơn'
+            : isLoading
+            ? 'Đang tải…'
+            : activeCount > 0
+            ? `${activeCount} đơn đang xử lý`
+            : `${orders.length} đơn đã đặt`
         }
       />
       <FilterBar options={FILTERS} value={filter} onChange={setFilter} className="mt-1" />
@@ -163,7 +172,15 @@ export const OrderHistoryScreen: React.FC = () => {
             <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[palette.brand['500']]} />
           }
           ListEmptyComponent={
-            orders.length === 0 ? (
+            !isAuthenticated ? (
+              <EmptyState
+                icon="receipt-outline"
+                title="Bạn chưa đăng nhập"
+                description="Đăng nhập để xem lịch sử và theo dõi trạng thái đơn hàng của bạn."
+                actionLabel="Đăng nhập ngay"
+                onAction={() => navigation.navigate('Login')}
+              />
+            ) : orders.length === 0 ? (
               <EmptyState
                 icon="receipt-outline"
                 title="Chưa có đơn hàng nào"

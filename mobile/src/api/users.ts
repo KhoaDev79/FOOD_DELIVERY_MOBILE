@@ -1,5 +1,6 @@
 import { apiClient } from './client';
-import { Address, User } from '../types/api';
+import type { FavoriteRestaurant } from '../store/useFavoritesStore';
+import { Address, CreateRoleRequestPayload, RoleUpgradeRequest, User } from '../types/api';
 
 export interface CreateAddressPayload {
   label: string;
@@ -14,6 +15,24 @@ export const usersApi = {
 
   updateProfile: (data: { fullName?: string; phone?: string; email?: string; avatarUrl?: string }) =>
     apiClient.patch<any, User>('/users/me', data),
+
+  uploadAvatar: (fileUri: string) => {
+    const formData = new FormData();
+    const cleanUri = fileUri.split('?')[0];
+    const filename = cleanUri.split('/').pop() || `avatar-${Date.now()}.jpg`;
+    const match = /\.(\w+)$/.exec(filename);
+    const ext = match ? match[1].toLowerCase() : 'jpg';
+    const type = ext === 'png' ? 'image/png' : ext === 'webp' ? 'image/webp' : 'image/jpeg';
+    formData.append('file', {
+      uri: fileUri,
+      name: filename,
+      type,
+    } as any);
+
+    return apiClient.post<any, User>('/users/me/avatar', formData, {
+      transformRequest: (data) => data,
+    });
+  },
 
   changePassword: (data: { currentPassword: string; newPassword: string }) =>
     apiClient.patch<any, { ok: boolean; message: string }>('/users/me/password', data),
@@ -35,5 +54,18 @@ export const usersApi = {
     apiClient.patch<any, Address>(`/users/me/addresses/${id}/default`),
 
   deleteAddress: (id: string) => apiClient.delete(`/users/me/addresses/${id}`),
+
+  /** Gửi yêu cầu trở thành Chủ quán / Tài xế (admin duyệt). */
+  requestUpgrade: (data: CreateRoleRequestPayload) =>
+    apiClient.post<any, RoleUpgradeRequest>('/users/request-upgrade', data),
+
+  myUpgradeRequests: () => apiClient.get<any, RoleUpgradeRequest[]>('/users/request-upgrade'),
+
+  /** Quán yêu thích của tài khoản đang đăng nhập (mới thêm trước). */
+  getFavorites: () => apiClient.get<any, FavoriteRestaurant[]>('/users/me/favorites'),
+
+  addFavorite: (restaurantId: string) => apiClient.put(`/users/me/favorites/${restaurantId}`),
+
+  removeFavorite: (restaurantId: string) => apiClient.delete(`/users/me/favorites/${restaurantId}`),
 };
 

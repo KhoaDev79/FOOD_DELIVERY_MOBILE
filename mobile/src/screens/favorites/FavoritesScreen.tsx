@@ -15,6 +15,8 @@ import {
   Text,
   useToast,
 } from '../../components/ui';
+import { usersApi } from '../../api/users';
+import { useAuthStore } from '../../store/useAuthStore';
 import { FavoriteRestaurant, useFavoritesStore } from '../../store/useFavoritesStore';
 import { RootStackParamList } from '../../types/navigation';
 
@@ -74,13 +76,19 @@ export const FavoritesScreen: React.FC = () => {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const isFocused = useIsFocused();
   const toast = useToast();
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   const restaurants = useFavoritesStore((s) => s.restaurants);
   const remove = useFavoritesStore((s) => s.remove);
+  const toggle = useFavoritesStore((s) => s.toggle);
 
   const openRestaurant = (id: string) => navigation.navigate('RestaurantDetail', { restaurantId: id });
   const onRemove = (item: FavoriteRestaurant) => {
     remove(item.id);
     toast(`Đã bỏ ${item.name} khỏi yêu thích`);
+    usersApi.removeFavorite(item.id).catch(() => {
+      toggle(item); // hoàn tác
+      toast('Không bỏ được yêu thích, vui lòng thử lại', 'error');
+    });
   };
   const goHome = () => navigation.navigate('MainTabs', { screen: 'HomeTab' });
 
@@ -91,48 +99,55 @@ export const FavoritesScreen: React.FC = () => {
         title="Góc khoái khẩu"
         subtitle={restaurants.length > 0 ? `${restaurants.length} quán yêu thích` : 'Lưu lại những quán ruột của bạn'}
       />
-      <FlatList
-        data={restaurants}
-        keyExtractor={(r) => r.id}
-        contentContainerClassName={cn('flex-grow gap-3 px-4 pt-4', TAB_BAR_CLEARANCE)}
-        ListHeaderComponent={
-          restaurants.length > 0 ? (
-            <View className="flex-row items-center gap-1.5 pb-1">
-              <Icon name="heart" size="sm" tone="danger" />
-              <Text variant="headline">Yêu thích</Text>
-              <Text variant="body" tone="secondary">
-                · {restaurants.length} quán
-              </Text>
+      {!isAuthenticated ? (
+        // Yêu thích gắn với tài khoản: chưa đăng nhập thì mời đăng nhập
+        <View className="gap-4 px-4 pt-4">
+          <EmptyState
+            variant="card"
+            icon="heart-outline"
+            title="Đăng nhập để lưu quán yêu thích"
+            description="Danh sách yêu thích được lưu theo tài khoản, dùng được trên mọi thiết bị của bạn."
+          />
+          <Button label="Đăng nhập" leftIcon="log-in-outline" onPress={() => navigation.navigate('Login')} />
+          <Button label="Khám phá quán ngon" variant="secondary" leftIcon="compass-outline" onPress={goHome} />
+        </View>
+      ) : (
+        <FlatList
+          data={restaurants}
+          keyExtractor={(r) => r.id}
+          contentContainerClassName={cn('flex-grow gap-3 px-4 pt-4', TAB_BAR_CLEARANCE)}
+          ListHeaderComponent={
+            restaurants.length > 0 ? (
+              <View className="flex-row items-center gap-1.5 pb-1">
+                <Icon name="heart" size="sm" tone="danger" />
+                <Text variant="headline">Yêu thích</Text>
+                <Text variant="body" tone="secondary">
+                  · {restaurants.length} quán
+                </Text>
+              </View>
+            ) : undefined
+          }
+          renderItem={({ item }) => <FavoriteRow item={item} onOpen={openRestaurant} onRemove={onRemove} />}
+          ListEmptyComponent={
+            // Trạng thái rỗng theo ảnh mẫu "Góc khoái khẩu".
+            <View className="gap-4">
+              <EmptyState
+                variant="card"
+                icon="heart-outline"
+                title="Chưa có quán nào trong bộ sưu tập"
+                description="Chạm vào biểu tượng trái tim ở trang quán để thêm vài quán ruột vào đây nhé!"
+              />
+              <View className="gap-0.5">
+                <Text variant="headline">Yêu thích</Text>
+                <Text variant="body" tone="secondary">
+                  0 quán
+                </Text>
+              </View>
+              <Button label="Khám phá quán ngon" variant="secondary" leftIcon="compass-outline" onPress={goHome} />
             </View>
-          ) : undefined
-        }
-        renderItem={({ item }) => <FavoriteRow item={item} onOpen={openRestaurant} onRemove={onRemove} />}
-        ListEmptyComponent={
-          // Trạng thái rỗng theo ảnh mẫu "Góc khoái khẩu".
-          <View className="gap-4">
-            <EmptyState
-              variant="card"
-              icon="heart-outline"
-              title="Chưa có quán nào trong bộ sưu tập"
-              description="Chạm vào biểu tượng trái tim ở trang quán để thêm vài quán ruột vào đây nhé!"
-            />
-            <View className="gap-0.5">
-              <Text variant="headline">Yêu thích</Text>
-              <Text variant="body" tone="secondary">
-                0 quán
-              </Text>
-            </View>
-            <Button label="Khám phá quán ngon" variant="secondary" leftIcon="compass-outline" onPress={goHome} />
-          </View>
-        }
-        ListFooterComponent={
-          restaurants.length > 0 ? (
-            <Text variant="caption" weight="regular" tone="muted" className="pt-2 text-center">
-              Danh sách yêu thích được lưu trên thiết bị này.
-            </Text>
-          ) : undefined
-        }
-      />
+          }
+        />
+      )}
     </View>
   );
 };

@@ -53,6 +53,8 @@ export interface ConfirmDialogProps {
   cancelLabel?: string;
   destructive?: boolean;
   loading?: boolean;
+  /** Nội dung thêm dưới lời nhắn (VD: ô nhập lý do). */
+  children?: React.ReactNode;
   onConfirm: () => void;
   onCancel: () => void;
 }
@@ -65,11 +67,15 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
   cancelLabel = 'Huỷ',
   destructive = false,
   loading = false,
+  children,
   onConfirm,
   onCancel,
 }) => (
   <Modal visible={visible} transparent animationType="fade" onRequestClose={onCancel} statusBarTranslucent>
-    <View className="flex-1 items-center justify-center bg-scrim px-6">
+    <KeyboardAvoidingView
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      className="flex-1 items-center justify-center bg-scrim px-6"
+    >
       <View accessibilityViewIsModal className="w-full max-w-sm gap-2 rounded-xl bg-surface p-5 shadow-float">
         <Text variant="headline" accessibilityRole="header">
           {title}
@@ -79,6 +85,7 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
             {message}
           </Text>
         )}
+        {children}
         <View className="mt-3 flex-row gap-3">
           <Button
             label={cancelLabel}
@@ -98,7 +105,7 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
           />
         </View>
       </View>
-    </View>
+    </KeyboardAvoidingView>
   </Modal>
 );
 

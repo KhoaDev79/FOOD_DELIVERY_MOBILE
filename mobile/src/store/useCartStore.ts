@@ -54,6 +54,19 @@ interface CartState {
   ) => 'ADDED' | 'DIFFERENT_RESTAURANT';
   removeItem: (menuItemId: string) => void;
   updateQuantity: (menuItemId: string, quantity: number) => void;
+  updateLineItem: (
+    lineItemId: string,
+    quantity: number,
+    options: {
+      size?: string;
+      toppings?: string[];
+      spiciness?: string;
+      sizeId?: string;
+      toppingIds?: string[];
+      level?: string;
+      note?: string;
+    },
+  ) => void;
   updateNote: (menuItemId: string, note: string) => void;
   clearCart: () => void;
   getTotalItems: () => number;
@@ -127,6 +140,35 @@ export const useCartStore = create<CartState>()(
         const updated = get().items.map((i) => {
           const match = i.id ? i.id === menuItemId : i.menuItem.id === menuItemId;
           return match ? { ...i, quantity: Math.min(quantity, 50) } : i;
+        });
+        set({ items: updated });
+      },
+
+      updateLineItem: (lineItemId, quantity, options) => {
+        if (quantity <= 0) {
+          get().removeItem(lineItemId);
+          return;
+        }
+        const updated = get().items.map((i) => {
+          const match = i.id ? i.id === lineItemId : i.menuItem.id === lineItemId;
+          if (!match) return i;
+          const newUnitPrice = linePrice(i.menuItem, {
+            sizeId: options.sizeId,
+            toppingIds: options.toppingIds,
+          });
+          return {
+            ...i,
+            id: i.id ?? `${i.menuItem.id}-${Date.now()}`,
+            quantity: Math.min(quantity, 50),
+            note: options.note,
+            size: options.size,
+            toppings: options.toppings,
+            spiciness: options.spiciness,
+            sizeId: options.sizeId,
+            toppingIds: options.toppingIds,
+            level: options.level,
+            unitPrice: newUnitPrice,
+          };
         });
         set({ items: updated });
       },

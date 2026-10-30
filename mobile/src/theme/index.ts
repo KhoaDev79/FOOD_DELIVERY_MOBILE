@@ -16,4 +16,5 @@ export const fontAssets = {
   [tokens.fontFamily.medium]: require('../../assets/fonts/BeVietnamPro-Medium.ttf'),
   [tokens.fontFamily.semibold]: require('../../assets/fonts/BeVietnamPro-SemiBold.ttf'),
   [tokens.fontFamily.bold]: require('../../assets/fonts/BeVietnamPro-Bold.ttf'),
+  [tokens.fontFamilyDisplay]: require('../../assets/fonts/Baloo2-ExtraBold.ttf'),
 };

@@ -1,331 +1,442 @@
-import { Ionicons } from '@expo/vector-icons';
-import { useNavigation } from '@react-navigation/native';
+import { useIsFocused, useNavigation } from '@react-navigation/native';
 import { useQuery } from '@tanstack/react-query';
-import React from 'react';
-import {
-  Alert,
-  Linking,
-  SafeAreaView,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
-} from 'react-native';
+import { StatusBar } from 'expo-status-bar';
+import React, { useState } from 'react';
+import { Pressable, RefreshControl, ScrollView, View } from 'react-native';
+import { driversApi } from '../../api/drivers';
 import { ordersApi } from '../../api/orders';
-import { Badge } from '../../components/common/Badge';
-import { Button } from '../../components/common/Button';
-import { Card } from '../../components/common/Card';
-import { colors } from '../../constants/colors';
+import {
+  Avatar,
+  Badge,
+  BadgeTone,
+  Button,
+  cn,
+  ConfirmDialog,
+  Divider,
+  Icon,
+  IconName,
+  IconTone,
+  ListRow,
+  Skeleton,
+  TAB_BAR_CLEARANCE,
+  TabHeader,
+  Text,
+} from '../../components/ui';
 import { useAuthStore } from '../../store/useAuthStore';
+import { palette } from '../../theme';
+import { DriverVerificationStatus } from '../../types/api';
 import { formatVND } from '../../utils/format';
+
+const PERIODS: { days: 1 | 7 | 30; label: string }[] = [
+  { days: 1, label: 'Hôm nay' },
+  { days: 7, label: '7 ngày' },
+  { days: 30, label: '30 ngày' },
+];
+
+const VEHICLE_LABEL: Record<string, string> = {
+  MOTORBIKE: 'Xe máy',
+  ELECTRIC_MOTORBIKE: 'Xe máy điện',
+  BICYCLE: 'Xe đạp',
+};
+
+const STATUS_META: Record<
+  DriverVerificationStatus,
+  { label: string; tone: BadgeTone; icon: IconName; iconTone: IconTone; box: string; text: string }
+> = {
+  APPROVED: {
+    label: 'Đã được duyệt',
+    tone: 'success',
+    icon: 'shield-checkmark',
+    iconTone: 'success',
+    box: 'bg-success-soft',
+    text: 'Hồ sơ phương tiện đã được kiểm duyệt. Bạn có thể bật trực tuyến và nhận chuyến.',
+  },
+  PENDING: {
+    label: 'Đang chờ duyệt',
+    tone: 'warning',
+    icon: 'hourglass',
+    iconTone: 'accent',
+    box: 'bg-warning-soft',
+    text: 'Ban quản trị đang xem xét hồ sơ phương tiện của bạn. Bạn sẽ nhận thông báo khi có kết quả.',
+  },
+  REJECTED: {
+    label: 'Bị từ chối',
+    tone: 'danger',
+    icon: 'close-circle',
+    iconTone: 'danger',
+    box: 'bg-danger-soft',
+    text: 'Hồ sơ chưa đạt yêu cầu. Vui lòng cập nhật lại thông tin xe.',
+  },
+  SUSPENDED: {
+    label: 'Tạm khoá',
+    tone: 'danger',
+    icon: 'lock-closed',
+    iconTone: 'danger',
+    box: 'bg-danger-soft',
+    text: 'Tài khoản tài xế đang bị tạm khoá, chưa thể nhận chuyến.',
+  },
+};
+
+/** "2026-10-24" → "24/10" */
+const shortDate = (iso?: string) => {
+  if (!iso) return '';
+  const [, m, d] = iso.slice(0, 10).split('-');
+  return d && m ? `${d}/${m}` : iso;
+};
+
+/** Dòng thông tin: nhãn trái, giá trị phải (tự xuống dòng, không tràn). */
+const InfoLine: React.FC<{ icon: IconName; label: string; value?: string | null; highlight?: boolean }> = ({
+  icon,
+  label,
+  value,
+  highlight,
+}) => (
+  <View className="min-h-touch flex-row items-center gap-3 py-2">
+    <View className="h-9 w-9 items-center justify-center rounded-full bg-canvas-subtle">
+      <Icon name={icon} size="sm" tone="secondary" />
+    </View>
+    <Text variant="body" tone="secondary" className="flex-1">
+      {label}
+    </Text>
+    <Text
+      variant="body"
+      weight={value ? 'semibold' : 'regular'}
+      tone={!value ? 'muted' : highlight ? 'brand' : 'default'}
+      numberOfLines={2}
+      className="max-w-[55%] text-right"
+    >
+      {value || 'Chưa cập nhật'}
+    </Text>
+  </View>
+);
 
 export const DriverProfileScreen: React.FC = () => {
   const navigation = useNavigation<any>();
+  const isFocused = useIsFocused();
   const user = useAuthStore((s) => s.user);
   const logout = useAuthStore((s) => s.logout);
 
-  // Lấy danh sách chuyến đã giao để tính thống kê
-  const { data: deliveredOrders } = useQuery({
-    queryKey: ['driver', 'stats'],
-    queryFn: () => ordersApi.getDeliveries({ status: 'DELIVERED', limit: 100 }),
+  const [statsDays, setStatsDays] = useState<1 | 7 | 30>(7);
+  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const { data: stats, isLoading: loadingStats, refetch: refetchStats } = useQuery({
+    queryKey: ['driver', 'stats', statsDays],
+    queryFn: () => ordersApi.getDriverStats({ days: statsDays }),
   });
 
-  const totalDelivered = deliveredOrders?.items?.length || 0;
-  // Ước tính thu nhập ship: 15.000đ / đơn hoặc tổng phí ship
-  const totalEarnings = deliveredOrders?.items?.reduce(
-    (sum, o) => sum + (o.deliveryFee || 15000),
-    0,
-  ) || 0;
+  const { data: profile, isLoading: loadingProfile, refetch: refetchProfile } = useQuery({
+    queryKey: ['driver', 'me'],
+    queryFn: () => driversApi.getMe(),
+  });
 
-  const handleLogout = () => {
-    Alert.alert('Đăng xuất', 'Bạn có chắc chắn muốn đăng xuất khỏi tài khoản tài xế?', [
-      { text: 'Huỷ', style: 'cancel' },
-      {
-        text: 'Đăng xuất',
-        style: 'destructive',
-        onPress: () => logout(),
-      },
-    ]);
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await Promise.all([refetchStats(), refetchProfile()]);
+    setRefreshing(false);
   };
 
-  const handleSupport = () => {
-    Alert.alert(
-      'Tổng đài hỗ trợ đối tác',
-      'Hotline: 1900 6868\nThời gian hỗ trợ: 24/7\n\nBạn có muốn gọi ngay không?',
-      [
-        { text: 'Đóng', style: 'cancel' },
-        { text: 'Gọi 1900 6868', onPress: () => Linking.openURL('tel:19006868') },
-      ],
-    );
+  const handleLogout = async () => {
+    setShowLogoutConfirm(false);
+    try {
+      await driversApi.updateStatus({ isOnline: false });
+    } catch {
+      // Bỏ qua lỗi mạng khi đăng xuất để luôn cho phép thoát
+    }
+    logout();
   };
+
+  const status = profile ? STATUS_META[profile.verificationStatus] : null;
+  const isBicycle = profile?.vehicleType === 'BICYCLE';
+  const daily = stats?.daily ?? [];
+  const maxDaily = Math.max(1, ...daily.map((d) => d.earnings));
 
   return (
-    <SafeAreaView style={styles.container}>
-      <ScrollView contentContainerStyle={styles.scrollContent}>
-        {/* Profile Card */}
-        <Card style={styles.profileCard}>
-          <View style={styles.avatarContainer}>
-            <Ionicons name="person" size={36} color={colors.white} />
+    <View className="flex-1 bg-canvas-subtle">
+      {isFocused && <StatusBar style="light" />}
+      <ScrollView
+        contentContainerClassName={TAB_BAR_CLEARANCE}
+        showsVerticalScrollIndicator={false}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[palette.brand['500']]} />}
+      >
+        <TabHeader title="Hồ sơ tài xế">
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Sửa thông tin cá nhân"
+            onPress={() => navigation.navigate('EditProfile')}
+            className="flex-row items-center gap-3 active:opacity-80"
+          >
+            <Avatar uri={user?.avatarUrl} name={user?.fullName} size="lg" className="border-2 border-surface/60" />
+            <View className="flex-1 gap-0.5">
+              <Text variant="headline" tone="inverse" numberOfLines={1}>
+                {user?.fullName || 'Tài xế ZomZom'}
+              </Text>
+              <Text variant="body" tone="inverse" className="opacity-85" numberOfLines={1}>
+                {user?.email}
+              </Text>
+              {!!user?.phone && (
+                <Text variant="caption" weight="regular" tone="inverse" className="opacity-85">
+                  {user.phone}
+                </Text>
+              )}
+            </View>
+            <View className="rounded-full bg-surface/20 px-3 py-1.5">
+              <Text variant="caption" weight="semibold" tone="inverse">
+                Sửa
+              </Text>
+            </View>
+          </Pressable>
+
+          <View className="flex-row flex-wrap gap-2">
+            <View className="flex-row items-center gap-1.5 rounded-full bg-surface/20 px-3 py-1">
+              <Icon name="bicycle" size="xs" tone="inverse" />
+              <Text variant="caption" weight="semibold" tone="inverse">
+                Đối tác tài xế
+              </Text>
+            </View>
+            {status && (
+              <View className="flex-row items-center gap-1.5 rounded-full bg-surface/20 px-3 py-1">
+                <View
+                  className={cn(
+                    'h-2 w-2 rounded-full',
+                    profile?.verificationStatus === 'APPROVED'
+                      ? 'bg-success'
+                      : profile?.verificationStatus === 'PENDING'
+                        ? 'bg-warning'
+                        : 'bg-danger',
+                  )}
+                />
+                <Text variant="caption" weight="semibold" tone="inverse">
+                  Hồ sơ {status.label.toLowerCase()}
+                </Text>
+              </View>
+            )}
           </View>
-          <View style={styles.profileInfo}>
-            <Text style={styles.userName}>{user?.fullName || 'Tài xế Food Delivery'}</Text>
-            <Text style={styles.userEmail}>{user?.email}</Text>
-            {user?.phone ? <Text style={styles.userPhone}>{user.phone}</Text> : null}
-            <View style={styles.badgeRow}>
-              <Badge variant="primary" label="Tài xế đối tác" />
-              <View style={styles.statusChip}>
-                <View style={styles.statusDot} />
-                <Text style={styles.statusText}>Đang hoạt động</Text>
+        </TabHeader>
+
+        <View className="gap-4 px-4 pt-4">
+          {/* Trạng thái hồ sơ */}
+          {loadingProfile ? (
+            <Skeleton className="h-20 rounded-2xl" />
+          ) : status ? (
+            <View className="flex-row items-start gap-3 rounded-2xl bg-surface p-4 shadow-card">
+              <View className={cn('h-11 w-11 items-center justify-center rounded-full', status.box)}>
+                <Icon name={status.icon} size="md" tone={status.iconTone} />
+              </View>
+              <View className="flex-1 gap-1">
+                <View className="flex-row items-center justify-between gap-2">
+                  <Text variant="headline">Trạng thái hồ sơ</Text>
+                  <Badge label={status.label} tone={status.tone} />
+                </View>
+                <Text variant="caption" weight="regular" tone="secondary">
+                  {status.text}
+                </Text>
+                {!!profile?.rejectionReason && profile.verificationStatus !== 'APPROVED' && (
+                  <View className="mt-1 rounded-lg bg-danger-soft px-3 py-2">
+                    <Text variant="caption" tone="danger">
+                      Lý do: {profile.rejectionReason}
+                    </Text>
+                  </View>
+                )}
               </View>
             </View>
+          ) : null}
+
+          {/* Thu nhập */}
+          <View className="gap-3 rounded-2xl bg-surface p-4 shadow-card">
+            <View className="flex-row items-end justify-between">
+              <Text variant="headline">Thu nhập</Text>
+              <Text variant="caption" weight="regular" tone="muted">
+                {stats ? (stats.days === 1 ? `Hôm nay, ${shortDate(stats.to)}` : `${shortDate(stats.from)} – ${shortDate(stats.to)}`) : ''}
+              </Text>
+            </View>
+
+            {/* Chọn kỳ: thanh phân đoạn chia đều, không tràn */}
+            <View accessibilityRole="tablist" className="flex-row rounded-full bg-canvas-subtle p-1">
+              {PERIODS.map((p) => {
+                const selected = statsDays === p.days;
+                return (
+                  <Pressable
+                    key={p.days}
+                    accessibilityRole="tab"
+                    accessibilityState={{ selected }}
+                    onPress={() => setStatsDays(p.days)}
+                    className={cn(
+                      'h-9 flex-1 items-center justify-center rounded-full',
+                      selected && 'bg-surface shadow-card',
+                    )}
+                  >
+                    <Text variant="caption" weight={selected ? 'semibold' : 'medium'} tone={selected ? 'brand' : 'secondary'}>
+                      {p.label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+
+            {/* Tổng phí ship */}
+            <View className="gap-1 rounded-xl bg-brand-50 p-4">
+              <View className="flex-row items-center gap-2">
+                <Icon name="wallet" size="sm" tone="brand" />
+                <Text variant="caption" tone="secondary">
+                  Tổng phí ship
+                </Text>
+              </View>
+              {loadingStats ? (
+                <Skeleton className="h-8 w-36" />
+              ) : (
+                <Text variant="display" tone="brand">
+                  {formatVND(stats?.earnings ?? 0)}
+                </Text>
+              )}
+
+              {/* Biểu đồ cột thu nhập theo ngày */}
+              {statsDays > 1 && daily.length > 1 && (
+                <View className="mt-2 h-12 flex-row items-end gap-[3px]">
+                  {daily.map((d) => (
+                    <View
+                      key={d.date}
+                      className={cn('flex-1 rounded-t-sm', d.earnings > 0 ? 'bg-brand-400' : 'bg-brand-100')}
+                      style={{ height: `${Math.max(6, (d.earnings / maxDaily) * 100)}%` }}
+                    />
+                  ))}
+                </View>
+              )}
+            </View>
+
+            <View className="flex-row gap-3">
+              <View className="flex-1 gap-1 rounded-xl bg-success-soft p-3">
+                <View className="flex-row items-center gap-1.5">
+                  <Icon name="checkmark-done" size="sm" tone="success" />
+                  <Text variant="caption" tone="secondary" numberOfLines={1}>
+                    Chuyến đã giao
+                  </Text>
+                </View>
+                <Text variant="title" weight="bold" tone="success">
+                  {stats?.deliveredTrips ?? 0}
+                </Text>
+              </View>
+              <View className="flex-1 gap-1 rounded-xl bg-accent-50 p-3">
+                <View className="flex-row items-center gap-1.5">
+                  <Icon name="cash" size="sm" tone="accent" />
+                  <Text variant="caption" tone="secondary" numberOfLines={1}>
+                    Tiền mặt COD
+                  </Text>
+                </View>
+                <Text variant="title" weight="bold" tone="accent" numberOfLines={1} adjustsFontSizeToFit>
+                  {formatVND(stats?.cashCollected ?? 0)}
+                </Text>
+              </View>
+            </View>
+
+            {!!stats?.cancelledTrips && (
+              <View className="flex-row items-center gap-2 rounded-xl bg-danger-soft px-3 py-2">
+                <Icon name="close-circle-outline" size="sm" tone="danger" />
+                <Text variant="caption" tone="danger" className="flex-1">
+                  {stats.cancelledTrips} chuyến bị huỷ trong kỳ
+                </Text>
+              </View>
+            )}
           </View>
-        </Card>
 
-        {/* Stats Grid */}
-        <View style={styles.statsGrid}>
-          <Card style={styles.statBox}>
-            <Ionicons name="bicycle" size={24} color={colors.primary} />
-            <Text style={styles.statNumber}>{totalDelivered}</Text>
-            <Text style={styles.statLabel}>Đơn đã giao</Text>
-          </Card>
+          {/* Phương tiện */}
+          <View className="rounded-2xl bg-surface px-4 pb-2 pt-4 shadow-card">
+            <View className="flex-row items-center justify-between pb-1">
+              <Text variant="headline">Phương tiện</Text>
+              <Button
+                label="Sửa"
+                leftIcon="create-outline"
+                variant="secondary"
+                size="sm"
+                onPress={() => navigation.navigate('DriverVehicle')}
+              />
+            </View>
 
-          <Card style={styles.statBox}>
-            <Ionicons name="wallet-outline" size={24} color={colors.success} />
-            <Text style={[styles.statNumber, { color: colors.success }]}>
-              {formatVND(totalEarnings)}
-            </Text>
-            <Text style={styles.statLabel}>Thu nhập ship</Text>
-          </Card>
+            {/* Biển số dạng tấm biển */}
+            {!isBicycle && !!profile?.licensePlate && (
+              <View className="my-2 flex-row items-center gap-3">
+                <View className="rounded-md border-2 border-ink bg-surface px-3 py-1">
+                  <Text variant="headline" weight="bold" className="tracking-wider">
+                    {profile.licensePlate}
+                  </Text>
+                </View>
+                <Text variant="caption" weight="regular" tone="secondary" className="flex-1">
+                  {VEHICLE_LABEL[profile.vehicleType] ?? ''}
+                  {profile.vehicleColor ? ` • ${profile.vehicleColor}` : ''}
+                </Text>
+              </View>
+            )}
 
-          <Card style={styles.statBox}>
-            <Ionicons name="star" size={24} color="#F59E0B" />
-            <Text style={styles.statNumber}>5.0 ★</Text>
-            <Text style={styles.statLabel}>Đánh giá</Text>
-          </Card>
+            <InfoLine icon="bicycle-outline" label="Loại xe" value={profile ? VEHICLE_LABEL[profile.vehicleType] : null} />
+            {!isBicycle && (
+              <>
+                <Divider inset />
+                <InfoLine
+                  icon="car-sport-outline"
+                  label="Hãng & dòng xe"
+                  value={[profile?.vehicleBrand, profile?.vehicleModel].filter(Boolean).join(' ') || null}
+                />
+              </>
+            )}
+            <Divider inset />
+            <InfoLine
+              icon="card-outline"
+              label="Ngân hàng"
+              value={
+                profile?.bankName
+                  ? `${profile.bankName}${profile.maskedBankAccountNumber ? ` • ${profile.maskedBankAccountNumber}` : ''}`
+                  : null
+              }
+            />
+            <Divider inset />
+            <InfoLine
+              icon="call-outline"
+              label="Liên hệ khẩn cấp"
+              value={
+                profile?.emergencyContactName
+                  ? `${profile.emergencyContactName}${profile.emergencyContactPhone ? ` • ${profile.emergencyContactPhone}` : ''}`
+                  : null
+              }
+            />
+          </View>
+
+          {/* Tiện ích */}
+          <View className="rounded-2xl bg-surface px-3 shadow-card">
+            <ListRow
+              icon="person-outline"
+              iconTone="brand"
+              title="Thông tin cá nhân & mật khẩu"
+              onPress={() => navigation.navigate('EditProfile')}
+            />
+            <Divider inset />
+            <ListRow
+              icon="time-outline"
+              iconTone="brand"
+              title="Lịch sử chuyến giao"
+              onPress={() => navigation.navigate('DriverTabs', { screen: 'DriverDeliveriesTab' })}
+            />
+          </View>
+
+          <Button
+            label="Đăng xuất"
+            leftIcon="log-out-outline"
+            variant="dangerSoft"
+            size="lg"
+            onPress={() => setShowLogoutConfirm(true)}
+          />
         </View>
-
-        {/* Thông tin phương tiện */}
-        <Card style={styles.sectionCard}>
-          <Text style={styles.sectionTitle}>Thông tin phương tiện</Text>
-          <View style={styles.infoRow}>
-            <Text style={styles.infoLabel}>Loại xe:</Text>
-            <Text style={styles.infoValue}>Xe máy (Honda Wave Alpha)</Text>
-          </View>
-          <View style={styles.divider} />
-          <View style={styles.infoRow}>
-            <Text style={styles.infoLabel}>Biển số xe:</Text>
-            <Text style={styles.infoValue}>29-H1 888.88</Text>
-          </View>
-          <View style={styles.divider} />
-          <View style={styles.infoRow}>
-            <Text style={styles.infoLabel}>Trạng thái hồ sơ:</Text>
-            <Badge variant="success" label="Đã xác thực CCCD & GPLX" />
-          </View>
-        </Card>
-
-        {/* Menu cài đặt & trợ giúp */}
-        <Card style={styles.sectionCard}>
-          <TouchableOpacity
-            style={styles.menuItem}
-            onPress={() => navigation.navigate('EditProfile')}
-          >
-            <View style={styles.menuLeft}>
-              <Ionicons name="person-circle-outline" size={20} color={colors.primary} />
-              <Text style={styles.menuLabel}>Thông tin cá nhân & Đổi mật khẩu</Text>
-            </View>
-            <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
-          </TouchableOpacity>
-
-          <View style={styles.divider} />
-
-          <TouchableOpacity style={styles.menuItem} onPress={handleSupport}>
-            <View style={styles.menuLeft}>
-              <Ionicons name="headset-outline" size={20} color={colors.primary} />
-              <Text style={styles.menuLabel}>Tổng đài hỗ trợ 24/7</Text>
-            </View>
-            <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
-          </TouchableOpacity>
-
-          <View style={styles.divider} />
-
-          <TouchableOpacity
-            style={styles.menuItem}
-            onPress={() =>
-              Alert.alert(
-                'Quy trình giao hàng',
-                '1. Tab "Tìm đơn": Bấm nhận chuyến khả dụng.\n2. Di chuyển đến nhà hàng và đợi món nấu xong.\n3. Nhận món, bấm "Đã lấy món".\n4. Giao đến địa chỉ khách hàng.\n5. Thu tiền (nếu COD) và bấm "Giao hàng thành công".',
-              )
-            }
-          >
-            <View style={styles.menuLeft}>
-              <Ionicons name="help-circle-outline" size={20} color={colors.info} />
-              <Text style={styles.menuLabel}>Quy trình & Hướng dẫn nhận đơn</Text>
-            </View>
-            <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
-          </TouchableOpacity>
-        </Card>
-
-        {/* Nút đăng xuất */}
-        <Button
-          label="Đăng xuất tài khoản"
-          variant="outline"
-          icon="log-out-outline"
-          onPress={handleLogout}
-          style={styles.logoutButton}
-        />
-
-        <Text style={styles.versionText}>Food Delivery Driver App • Phiên bản 1.0.0</Text>
       </ScrollView>
-    </SafeAreaView>
+
+      <ConfirmDialog
+        visible={showLogoutConfirm}
+        title="Đăng xuất?"
+        message="Bạn sẽ được chuyển sang ngoại tuyến và cần đăng nhập lại để nhận chuyến."
+        confirmLabel="Đăng xuất"
+        cancelLabel="Ở lại"
+        destructive
+        onConfirm={handleLogout}
+        onCancel={() => setShowLogoutConfirm(false)}
+      />
+    </View>
   );
 };
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: colors.background,
-  },
-  scrollContent: {
-    padding: 16,
-    paddingBottom: 40,
-  },
-  profileCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 16,
-    marginBottom: 16,
-  },
-  avatarContainer: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    backgroundColor: colors.primary,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 16,
-  },
-  profileInfo: {
-    flex: 1,
-  },
-  userName: {
-    fontSize: 17,
-    fontWeight: '700',
-    color: colors.text,
-  },
-  userEmail: {
-    fontSize: 13,
-    color: colors.textSecondary,
-    marginTop: 2,
-  },
-  userPhone: {
-    fontSize: 13,
-    color: colors.textMuted,
-    marginTop: 2,
-  },
-  badgeRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 6,
-  },
-  statusChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#E8F5E9',
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 10,
-    marginLeft: 8,
-  },
-  statusDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: colors.success,
-    marginRight: 4,
-  },
-  statusText: {
-    fontSize: 10,
-    fontWeight: '600',
-    color: colors.success,
-  },
-  statsGrid: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 16,
-  },
-  statBox: {
-    flex: 1,
-    alignItems: 'center',
-    paddingVertical: 14,
-    marginHorizontal: 4,
-  },
-  statNumber: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: colors.text,
-    marginTop: 6,
-    marginBottom: 2,
-  },
-  statLabel: {
-    fontSize: 11,
-    color: colors.textMuted,
-  },
-  sectionCard: {
-    padding: 14,
-    marginBottom: 16,
-  },
-  sectionTitle: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: colors.text,
-    marginBottom: 10,
-  },
-  infoRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: 6,
-  },
-  infoLabel: {
-    fontSize: 13,
-    color: colors.textSecondary,
-  },
-  infoValue: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: colors.text,
-  },
-  divider: {
-    height: 1,
-    backgroundColor: colors.borderLight,
-    marginVertical: 4,
-  },
-  menuItem: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: 10,
-  },
-  menuLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  menuLabel: {
-    fontSize: 14,
-    fontWeight: '500',
-    color: colors.text,
-    marginLeft: 10,
-  },
-  logoutButton: {
-    marginTop: 8,
-    borderColor: colors.danger,
-  },
-  versionText: {
-    textAlign: 'center',
-    fontSize: 12,
-    color: colors.textMuted,
-    marginTop: 20,
-  },
-});
-

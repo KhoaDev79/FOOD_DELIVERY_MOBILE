@@ -19,9 +19,13 @@ module.exports = {
       colors: tokens.colors,
       // Tên lớp: font-body, font-body-medium, font-body-semibold, font-body-bold.
       // Không dùng "font-medium"... để tránh trùng lớp độ đậm của Tailwind.
-      fontFamily: Object.fromEntries(
-        Object.entries(tokens.fontFamily).map(([k, v]) => [k === 'regular' ? 'body' : `body-${k}`, [v]]),
-      ),
+      // font-display: chữ thương hiệu ZomZom (Baloo 2).
+      fontFamily: {
+        ...Object.fromEntries(
+          Object.entries(tokens.fontFamily).map(([k, v]) => [k === 'regular' ? 'body' : `body-${k}`, [v]]),
+        ),
+        display: [tokens.fontFamilyDisplay],
+      },
       fontSize,
       borderRadius: px(tokens.radius),
       boxShadow: tokens.shadow,

@@ -2,37 +2,54 @@ import { Ionicons } from '@expo/vector-icons';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import React, { useState } from 'react';
 import {
-  Alert,
   KeyboardAvoidingView,
   Platform,
-  SafeAreaView,
+  Pressable,
   ScrollView,
-  StyleSheet,
-  Text,
   TextInput,
-  TouchableOpacity,
   View,
 } from 'react-native';
-import { colors } from '../../constants/colors';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { ordersApi } from '../../api/orders';
+import { Button, Text, TopBar, useToast } from '../../components/ui';
 import { RootStackParamList } from '../../types/navigation';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Rating'>;
 
 const FEEDBACK_TAGS = [
-  'Giao nhanh như chớp',
-  'Tài xế thân thiện',
-  'Món ăn còn nóng hổi',
+  'Món ăn ngon',
+  'Món còn nóng hổi',
+  'Đúng món đã đặt',
   'Đóng gói cẩn thận',
-  'Giao không tiếp xúc',
-  'Nhiệt tình, chu đáo',
+  'Giao nhanh',
+  'Tài xế thân thiện',
 ];
 
 export const RatingScreen: React.FC<Props> = ({ navigation, route }) => {
-  const driverName = route.params?.driverName || 'Nguyễn Văn Tài (Tài xế)';
+  const { orderId, restaurantName } = route.params;
+  const toast = useToast();
+  const queryClient = useQueryClient();
   const [stars, setStars] = useState(5);
-  const [selectedTags, setSelectedTags] = useState<string[]>(['Giao nhanh như chớp', 'Tài xế thân thiện']);
+  const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [comment, setComment] = useState('');
-  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Gửi đánh giá thật lên server (trước đây chỉ giả lập, điểm của quán không bao giờ đổi)
+  const reviewMutation = useMutation({
+    mutationFn: () =>
+      ordersApi.review(orderId, {
+        rating: stars,
+        comment: [selectedTags.join(', '), comment.trim()].filter(Boolean).join('. ') || undefined,
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['restaurants'] });
+      toast('Cảm ơn bạn! Đánh giá đã được ghi nhận.', 'success');
+      navigation.navigate('MainTabs', { screen: 'HomeTab' });
+    },
+    onError: (err: any) => {
+      toast(err.response?.data?.message || 'Không gửi được đánh giá, vui lòng thử lại.', 'error');
+    },
+  });
 
   const toggleTag = (tag: string) => {
     if (selectedTags.includes(tag)) {
@@ -42,206 +59,125 @@ export const RatingScreen: React.FC<Props> = ({ navigation, route }) => {
     }
   };
 
-  const handleSubmit = () => {
-    setIsSubmitting(true);
-    setTimeout(() => {
-      setIsSubmitting(false);
-      Alert.alert('Cảm ơn bạn!', 'Đánh giá của bạn đã được gửi thành công.', [
-        {
-          text: 'Về trang chủ',
-          onPress: () => navigation.navigate('MainTabs', { screen: 'HomeTab' }),
-        },
-      ]);
-    }, 600);
-  };
+  const handleSubmit = () => reviewMutation.mutate();
 
   return (
-    <SafeAreaView style={styles.container}>
-      {/* Top Header */}
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
-          <Ionicons name="arrow-back" size={24} color={colors.text} />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Đánh giá dịch vụ</Text>
-        <View style={{ width: 40 }} />
-      </View>
+    <SafeAreaView edges={['top', 'bottom']} style={{ flex: 1 }} className="flex-1 bg-surface">
+      <TopBar title="Đánh giá đơn hàng" onLeadingPress={() => navigation.goBack()} />
 
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         style={{ flex: 1 }}
+        className="flex-1"
       >
-        <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
+        <ScrollView
+          style={{ flex: 1 }}
+          className="flex-1"
+          contentContainerClassName="px-4 py-5 gap-5"
+          keyboardShouldPersistTaps="handled"
+        >
           {/* Avatar & Title */}
-          <View style={styles.avatarSection}>
-            <View style={styles.avatarCircle}>
-              <Ionicons name="person" size={50} color={colors.white} />
+          <View className="items-center py-2">
+            <View className="h-20 w-20 items-center justify-center rounded-full bg-brand-500 shadow-raised mb-3">
+              <Ionicons name="storefront" size={40} color="#FFFFFF" />
             </View>
-            <Text style={styles.ratingTargetName}>Đánh giá cho {driverName}</Text>
-            <Text style={styles.ratingSubtitle}>Trải nghiệm giao hàng của bạn thế nào?</Text>
+            <Text variant="title" weight="bold" className="text-center">
+              {restaurantName ? `Bạn thấy ${restaurantName} thế nào?` : 'Bạn thấy đơn hàng thế nào?'}
+            </Text>
+            <Text variant="body" tone="secondary" className="mt-1 text-center">
+              Số sao được tính vào điểm đánh giá của quán
+            </Text>
           </View>
 
           {/* 5 Stars Rating Bar */}
-          <View style={styles.starsRow}>
+          <View className="flex-row justify-center gap-3 py-2">
             {[1, 2, 3, 4, 5].map((index) => {
               const isFilled = index <= stars;
               return (
-                <TouchableOpacity
+                <Pressable
                   key={index}
+                  accessibilityRole="button"
+                  accessibilityLabel={`${index} sao`}
+                  accessibilityState={{ selected: isFilled }}
                   onPress={() => setStars(index)}
-                  activeOpacity={0.7}
-                  style={styles.starBtn}
+                  className="p-1 active:opacity-70"
                 >
                   <Ionicons
                     name={isFilled ? 'star' : 'star-outline'}
-                    size={38}
-                    color={isFilled ? '#F59E0B' : '#D1D5DB'}
+                    size={40}
+                    color={isFilled ? '#FFB400' : '#D1D5DB'}
                   />
-                </TouchableOpacity>
+                </Pressable>
               );
             })}
           </View>
 
           {/* Quick Feedback Tags */}
-          <Text style={styles.sectionTitle}>Chọn điểm bạn hài lòng:</Text>
-          <View style={styles.tagsContainer}>
-            {FEEDBACK_TAGS.map((tag) => {
-              const isSelected = selectedTags.includes(tag);
-              return (
-                <TouchableOpacity
-                  key={tag}
-                  style={[styles.tagChip, isSelected && styles.tagChipSelected]}
-                  onPress={() => toggleTag(tag)}
-                  activeOpacity={0.7}
-                >
-                  <Ionicons
-                    name={isSelected ? 'checkmark-circle' : 'add-circle-outline'}
-                    size={16}
-                    color={isSelected ? '#EE4D2D' : colors.textSecondary}
-                    style={{ marginRight: 4 }}
-                  />
-                  <Text style={[styles.tagChipText, isSelected && styles.tagChipTextSelected]}>
-                    {tag}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
+          <View className="gap-2.5">
+            <Text variant="caption" weight="bold" tone="secondary" className="uppercase">
+              Chọn điểm bạn hài lòng:
+            </Text>
+            <View className="flex-row flex-wrap gap-2">
+              {FEEDBACK_TAGS.map((tag) => {
+                const isSelected = selectedTags.includes(tag);
+                return (
+                  <Pressable
+                    key={tag}
+                    className={`flex-row items-center rounded-full border px-3.5 py-2 active:opacity-70 ${
+                      isSelected
+                        ? 'border-brand-500 bg-brand-50'
+                        : 'border-line bg-canvas-subtle'
+                    }`}
+                    onPress={() => toggleTag(tag)}
+                  >
+                    <Ionicons
+                      name={isSelected ? 'checkmark-circle' : 'add-circle-outline'}
+                      size={16}
+                      color={isSelected ? '#1EB9CE' : '#6B6F76'}
+                      style={{ marginRight: 6 }}
+                    />
+                    <Text
+                      variant="caption"
+                      weight="medium"
+                      className={isSelected ? 'text-brand-600' : 'text-ink-secondary'}
+                    >
+                      {tag}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
           </View>
 
           {/* Comment Area */}
-          <Text style={styles.sectionTitle}>Để lại lời nhắn (không bắt buộc):</Text>
-          <TextInput
-            placeholder="Chia sẻ thêm về tài xế hoặc góp ý dịch vụ..."
-            placeholderTextColor={colors.textMuted}
-            value={comment}
-            onChangeText={setComment}
-            multiline
-            numberOfLines={4}
-            style={styles.commentInput}
-          />
+          <View className="gap-2">
+            <Text variant="caption" weight="bold" tone="secondary" className="uppercase">
+              Để lại lời nhắn (không bắt buộc):
+            </Text>
+            <TextInput
+              placeholder="Chia sẻ thêm về món ăn, quán hoặc tài xế..."
+              placeholderTextColor="#9A9EA5"
+              value={comment}
+              onChangeText={setComment}
+              multiline
+              numberOfLines={4}
+              textAlignVertical="top"
+              className="min-h-[110px] rounded-xl border border-line bg-canvas-subtle p-3.5 font-body text-body text-ink"
+            />
+          </View>
         </ScrollView>
 
         {/* Nút gửi đánh giá */}
-        <View style={styles.bottomBar}>
-          <TouchableOpacity
-            style={styles.submitBtn}
+        <View className="border-t border-line bg-surface p-4 shadow-card">
+          <Button
+            label="Gửi đánh giá"
             onPress={handleSubmit}
-            disabled={isSubmitting}
-            activeOpacity={0.8}
-          >
-            <Text style={styles.submitBtnText}>
-              {isSubmitting ? 'Đang gửi...' : 'Gửi đánh giá'}
-            </Text>
-          </TouchableOpacity>
+            loading={reviewMutation.isPending}
+            variant="primary"
+            size="lg"
+          />
         </View>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
 };
-
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#FAFAFA' },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    backgroundColor: colors.white,
-    borderBottomWidth: 1,
-    borderBottomColor: '#EEEEEE',
-  },
-  backBtn: { padding: 4 },
-  headerTitle: { fontSize: 18, fontWeight: '700', color: colors.text },
-  scrollContent: { padding: 20, alignItems: 'center' },
-  avatarSection: { alignItems: 'center', marginVertical: 16 },
-  avatarCircle: {
-    width: 90,
-    height: 90,
-    borderRadius: 45,
-    backgroundColor: '#EE4D2D',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 14,
-    shadowColor: '#EE4D2D',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.25,
-    shadowRadius: 8,
-    elevation: 6,
-  },
-  ratingTargetName: { fontSize: 18, fontWeight: '800', color: colors.text, marginBottom: 4 },
-  ratingSubtitle: { fontSize: 13, color: colors.textSecondary },
-  starsRow: { flexDirection: 'row', gap: 10, marginVertical: 16 },
-  starBtn: { padding: 4 },
-  sectionTitle: {
-    alignSelf: 'flex-start',
-    fontSize: 14,
-    fontWeight: '700',
-    color: colors.text,
-    marginTop: 14,
-    marginBottom: 10,
-  },
-  tagsContainer: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, width: '100%' },
-  tagChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-    backgroundColor: colors.white,
-  },
-  tagChipSelected: {
-    borderColor: '#EE4D2D',
-    backgroundColor: '#FFF0ED',
-  },
-  tagChipText: { fontSize: 13, color: colors.textSecondary, fontWeight: '500' },
-  tagChipTextSelected: { color: '#EE4D2D', fontWeight: '700' },
-  commentInput: {
-    width: '100%',
-    backgroundColor: colors.white,
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-    borderRadius: 12,
-    padding: 14,
-    fontSize: 14,
-    color: colors.text,
-    minHeight: 100,
-    textAlignVertical: 'top',
-  },
-  bottomBar: {
-    padding: 16,
-    backgroundColor: colors.white,
-    borderTopWidth: 1,
-    borderTopColor: '#EEEEEE',
-  },
-  submitBtn: {
-    backgroundColor: '#EE4D2D',
-    borderRadius: 10,
-    paddingVertical: 14,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  submitBtnText: { color: colors.white, fontSize: 16, fontWeight: '700' },
-});
-

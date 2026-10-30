@@ -7,6 +7,9 @@ async function main() {
   console.log('🌱 Bắt đầu gieo dữ liệu mẫu toàn diện (Phase 1 Full Seed)...');
 
   // Xoá dữ liệu cũ theo thứ tự ràng buộc khoá ngoại (Idempotent Reseed)
+  await prisma.auditLog.deleteMany();
+  await prisma.favorite.deleteMany();
+  await prisma.roleUpgradeRequest.deleteMany();
   await prisma.review.deleteMany();
   await prisma.banner.deleteMany();
   await prisma.orderStatusHistory.deleteMany();
@@ -20,7 +23,9 @@ async function main() {
   await prisma.address.deleteMany();
   await prisma.user.deleteMany();
 
-  const defaultPasswordHash = await hashSecret('Password123!');
+  // Mọi tài khoản demo dùng chung mật khẩu này (hash Argon2 sinh lúc seed, đăng nhập được ngay).
+  const DEMO_PASSWORD = 'Password123!';
+  const defaultPasswordHash = await hashSecret(DEMO_PASSWORD);
 
   // =========================================================================
   // 1. TÀI KHOẢN DEMO (8 User đại diện 4 vai trò)
@@ -28,6 +33,7 @@ async function main() {
   const admin = await prisma.user.create({
     data: {
       email: 'admin@fooddelivery.com',
+      username: 'admin',
       fullName: 'Quản trị viên Hệ thống',
       phone: '0900000001',
       role: Role.ADMIN,
@@ -38,6 +44,7 @@ async function main() {
   const owner1 = await prisma.user.create({
     data: {
       email: 'owner@fooddelivery.com',
+      username: 'owner',
       fullName: 'Nguyễn Văn Chủ Quán',
       phone: '0900000002',
       role: Role.RESTAURANT_OWNER,
@@ -48,6 +55,7 @@ async function main() {
   const owner2 = await prisma.user.create({
     data: {
       email: 'owner2@fooddelivery.com',
+      username: 'owner2',
       fullName: 'Trần Thị Chủ Quán 2',
       phone: '0900000012',
       role: Role.RESTAURANT_OWNER,
@@ -58,6 +66,7 @@ async function main() {
   const driver1 = await prisma.user.create({
     data: {
       email: 'driver@fooddelivery.com',
+      username: 'driver',
       fullName: 'Trần Văn Tài Xế',
       phone: '0900000003',
       role: Role.DRIVER,
@@ -68,6 +77,7 @@ async function main() {
   const driver2 = await prisma.user.create({
     data: {
       email: 'driver2@fooddelivery.com',
+      username: 'driver2',
       fullName: 'Lê Văn Tài Xế 2',
       phone: '0900000013',
       role: Role.DRIVER,
@@ -75,9 +85,59 @@ async function main() {
     },
   });
 
+  // Hồ sơ tài xế cho tài xế demo
+  await prisma.driverProfile.create({
+    data: {
+      userId: driver1.id,
+      vehicleType: 'MOTORBIKE',
+      vehicleBrand: 'Honda',
+      vehicleModel: 'Wave Alpha',
+      vehicleColor: 'Đỏ đen',
+      licensePlate: '59-X1 123.45',
+      driverLicenseClass: 'A1',
+      verificationStatus: 'APPROVED',
+      verifiedAt: new Date(),
+      verifiedById: admin.id,
+      isOnline: true,
+      lastLatitude: 10.7769,
+      lastLongitude: 106.7009,
+      lastLocationAt: new Date(),
+      emergencyContactName: 'Trần Thị Người Thân',
+      emergencyContactPhone: '0901234567',
+      bankName: 'Vietcombank',
+      bankAccountNumber: '9988776655',
+      bankAccountName: 'TRAN VAN TAI XE',
+    },
+  });
+
+  await prisma.driverProfile.create({
+    data: {
+      userId: driver2.id,
+      vehicleType: 'ELECTRIC_MOTORBIKE',
+      vehicleBrand: 'VinFast',
+      vehicleModel: 'Feliz S',
+      vehicleColor: 'Xanh ngọc',
+      licensePlate: '59-E1 678.90',
+      driverLicenseClass: 'A1',
+      verificationStatus: 'APPROVED',
+      verifiedAt: new Date(),
+      verifiedById: admin.id,
+      isOnline: true,
+      lastLatitude: 10.7745,
+      lastLongitude: 106.7025,
+      lastLocationAt: new Date(),
+      emergencyContactName: 'Lê Thị Người Thân',
+      emergencyContactPhone: '0909876543',
+      bankName: 'Techcombank',
+      bankAccountNumber: '1122334455',
+      bankAccountName: 'LE VAN TAI XE 2',
+    },
+  });
+
   const customer1 = await prisma.user.create({
     data: {
       email: 'customer@fooddelivery.com',
+      username: 'customer',
       fullName: 'Lê Khách Hàng',
       phone: '0900000004',
       role: Role.CUSTOMER,
@@ -110,6 +170,7 @@ async function main() {
   const customer2 = await prisma.user.create({
     data: {
       email: 'customer2@fooddelivery.com',
+      username: 'customer2',
       fullName: 'Phạm Thị Khách Hàng 2',
       phone: '0900000014',
       role: Role.CUSTOMER,
@@ -132,10 +193,21 @@ async function main() {
   const customer3 = await prisma.user.create({
     data: {
       email: 'customer3@fooddelivery.com',
+      username: 'customer3',
       fullName: 'Hoàng Minh Khách Hàng 3',
       phone: '0900000024',
       role: Role.CUSTOMER,
       passwordHash: defaultPasswordHash,
+    },
+  });
+
+  // Yêu cầu nâng cấp vai trò mẫu (để thử luồng duyệt của Admin)
+  await prisma.roleUpgradeRequest.create({
+    data: {
+      userId: customer3.id,
+      requestedRole: Role.RESTAURANT_OWNER,
+      metadata: { restaurantName: 'Bếp Nhà Mẫn', restaurantAddress: '45 Lê Lợi, Quận 1, TP.HCM' },
+      note: 'Mình muốn đưa quán cơm nhà lên ZomZom.',
     },
   });
 
@@ -750,7 +822,7 @@ async function main() {
     {
       name: 'Quán Ẩm Thực Cố Đô - Bún Bò Xứ Huế Truyền Thống',
       description: 'Quán gia truyền phục vụ bún bò lâu năm',
-      imageUrl: null, // Không có ảnh đại diện
+        imageUrl: '/public/images/food/pizza.jpg', // Không có ảnh đại diện
       address: '22 Võ Văn Tần, Phường Xuân Hoà, TP. Hồ Chí Minh',
       latitude: 10.782,
       longitude: 106.689,
@@ -764,7 +836,7 @@ async function main() {
         {
           name: 'Món Tiêu Biểu',
           items: [
-            { name: 'Bún Bò Giò Heo Nước Trong', price: 45000, imageUrl: null, isAvailable: true },
+            { name: 'Bún Bò Giò Heo Nước Trong', price: 45000, imageUrl: '/public/images/food/pizza.jpg', isAvailable: true },
           ],
         },
       ],
@@ -817,7 +889,7 @@ async function main() {
             name: it.name,
             price: it.price,
             discountPrice: (it as any).discountPrice || null,
-            description: it.description || null,
+            description: (it as any).description || null,
             imageUrl: it.imageUrl || null,
             options: (it as any).options || null,
             isAvailable: it.isAvailable !== false,
@@ -940,6 +1012,9 @@ async function main() {
   console.log(`✅ Tổng số Nhà hàng ẩm thực: ${createdRestaurants.length} (Bao gồm đầy đủ các ca biên)`);
   console.log(`✅ Tổng số Món ăn trong thực đơn: ${totalItemsCount}`);
   console.log(`✅ Tổng số Tài khoản demo: 8 (1 Admin, 2 Owner, 2 Driver, 3 Customer)`);
+  console.log(`🔑 Mật khẩu chung cho mọi tài khoản demo: ${DEMO_PASSWORD}`);
+  console.log(`   Tên đăng nhập: admin | owner | owner2 | driver | driver2 | customer | customer2 | customer3 (hoặc email @fooddelivery.com)`);
+  console.log(`✅ Yêu cầu nâng cấp vai trò chờ duyệt: 1 (customer3 xin mở quán)`);
   console.log(`✅ Tổng số Banners trang chủ: 4`);
   console.log(`✅ Tổng số Vouchers: 6 (Đủ loại: Freeship, Tiền mặt, Phần trăm, Hết hạn, Hết lượt)`);
   console.log(`✅ Tổng số Đơn hàng mẫu: 15 (Trải đều từ PENDING đến DELIVERED & CANCELLED)`);

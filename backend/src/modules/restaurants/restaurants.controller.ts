@@ -1,4 +1,15 @@
-import { Body, Controller, Delete, Get, Param, ParseUUIDPipe, Patch, Post, Query } from '@nestjs/common';
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  ParseUUIDPipe,
+  Patch,
+  Post,
+  Query,
+} from '@nestjs/common';
 import { Role } from '@prisma/client';
 import { AuthUser, CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Public } from '../../common/decorators/public.decorator';
@@ -8,6 +19,7 @@ import {
   NearbyRestaurantsQueryDto,
   UpdateRestaurantDto,
 } from './dto/restaurants.dto';
+import { STATS_RANGES, StatsRange } from './restaurant-stats';
 import { RestaurantsService } from './restaurants.service';
 
 @Controller('restaurants')
@@ -35,6 +47,21 @@ export class RestaurantsController {
   @Get('mine')
   mine(@CurrentUser('id') userId: string) {
     return this.restaurants.findMine(userId);
+  }
+
+  /** GET /restaurants/:id/stats?days=1|7|30 – doanh thu, số đơn, món bán chạy (chủ quán / ADMIN). */
+  @Roles(Role.RESTAURANT_OWNER, Role.ADMIN)
+  @Get(':id/stats')
+  stats(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: AuthUser,
+    @Query('days') daysRaw?: string,
+  ) {
+    const days = Number(daysRaw ?? 7) as StatsRange;
+    if (!STATS_RANGES.includes(days)) {
+      throw new BadRequestException('days chỉ nhận 1, 7 hoặc 30');
+    }
+    return this.restaurants.getStats(id, user, days);
   }
 
   @Public()

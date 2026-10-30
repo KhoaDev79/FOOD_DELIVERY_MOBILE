@@ -1,27 +1,29 @@
 import { zodResolver } from '@hookform/resolvers/zod';
+import { Ionicons } from '@expo/vector-icons';
+import { useIsFocused } from '@react-navigation/native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
+import { StatusBar } from 'expo-status-bar';
 import React, { useState } from 'react';
-import { Controller, useForm } from 'react-hook-form';
+import { useForm } from 'react-hook-form';
 import {
   Alert,
   KeyboardAvoidingView,
   Platform,
+  Pressable,
   ScrollView,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
+  Text as RNText,
   View,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { z } from 'zod';
 import { authApi } from '../../api/auth';
-import { Button } from '../../components/common/Button';
-import { Input } from '../../components/common/Input';
-import { colors } from '../../constants/colors';
+import { Button, FormInput, Gradient, IconName, Text, useToast } from '../../components/ui';
 import { useAuthStore } from '../../store/useAuthStore';
+import { palette } from '../../theme';
 import { AuthStackParamList } from '../../types/navigation';
 
 const loginSchema = z.object({
-  email: z.string().email('Email không đúng định dạng'),
+  username: z.string().trim().min(1, 'Vui lòng nhập tên đăng nhập'),
   password: z.string().min(8, 'Mật khẩu phải từ 8 ký tự trở lên'),
 });
 
@@ -29,25 +31,35 @@ type LoginFormData = z.infer<typeof loginSchema>;
 
 type Props = NativeStackScreenProps<AuthStackParamList, 'Login'>;
 
-const DEMO_ACCOUNTS = [
-  { label: '🛒 Khách hàng', email: 'customer@fooddelivery.com', color: '#10B981' },
-  { label: '🏪 Chủ quán', email: 'owner@fooddelivery.com', color: '#F59E0B' },
-  { label: '🛵 Tài xế', email: 'driver@fooddelivery.com', color: '#3B82F6' },
-  { label: '👑 Admin', email: 'admin@fooddelivery.com', color: '#8B5CF6' },
+// Chỉ phần hiển thị (nhãn, mô tả, biểu tượng, màu); tên đăng nhập giữ nguyên.
+const DEMO_ACCOUNTS: {
+  label: string;
+  hint: string;
+  username: string;
+  icon: IconName;
+  iconBg: string;
+  iconColor: string;
+}[] = [
+  { label: 'Khách hàng', hint: 'Đặt món', username: 'customer', icon: 'bag-handle-outline', iconBg: 'bg-brand-50', iconColor: palette.brand['600'] },
+  { label: 'Chủ quán', hint: 'Quản lý quán', username: 'owner', icon: 'storefront-outline', iconBg: 'bg-accent-50', iconColor: palette.accent['600'] },
+  { label: 'Tài xế', hint: 'Nhận đơn giao', username: 'driver', icon: 'bicycle-outline', iconBg: 'bg-info-soft', iconColor: palette.info.strong },
+  { label: 'Quản trị', hint: 'Toàn hệ thống', username: 'admin', icon: 'shield-checkmark-outline', iconBg: 'bg-violet-soft', iconColor: palette.violet.strong },
 ];
 
 export const LoginScreen: React.FC<Props> = ({ navigation }) => {
   const [loading, setLoading] = useState(false);
+  const toast = useToast();
   const setAuth = useAuthStore((s) => s.setAuth);
+  // Chỉ để đổi màu chữ thanh trạng thái khi màn này đang hiển thị (giống các màn khác).
+  const isFocused = useIsFocused();
 
   const {
     control,
     handleSubmit,
     setValue,
-    formState: { errors },
   } = useForm<LoginFormData>({
     resolver: zodResolver(loginSchema),
-    defaultValues: { email: '', password: '' },
+    defaultValues: { username: '', password: '' },
   });
 
   const onSubmit = async (data: LoginFormData) => {
@@ -55,127 +67,176 @@ export const LoginScreen: React.FC<Props> = ({ navigation }) => {
       setLoading(true);
       const res = await authApi.login(data);
       await setAuth(res.user, res.accessToken, res.refreshToken);
+      toast(`Đăng nhập thành công! Chào mừng ${res.user.fullName || 'bạn'} quay trở lại.`, 'success');
+      // Chủ quán / tài xế / admin: AppNavigator tự chuyển sang giao diện theo vai trò và màn này đã
+      // bị gỡ, không còn "MainTabs" để điều hướng tới (trước đây gây lỗi NAVIGATE ... not handled).
+      if (res.user.role !== 'CUSTOMER') return;
+      if (navigation.canGoBack()) {
+        navigation.goBack();
+      } else {
+        (navigation as any).navigate('MainTabs', { screen: 'HomeTab' });
+      }
     } catch (err: any) {
       const errorMsg =
         err.response?.data?.message ||
         (err.message === 'Network Error'
           ? 'Không thể kết nối đến máy chủ backend (Network Error). Hãy kiểm tra Backend đang bật.'
-          : err.message || 'Email hoặc mật khẩu không chính xác');
+          : err.message || 'Tên đăng nhập hoặc mật khẩu không chính xác');
       Alert.alert('Đăng nhập thất bại', errorMsg);
     } finally {
       setLoading(false);
     }
   };
 
-  const handleQuickLogin = (email: string) => {
-    setValue('email', email);
+  const handleQuickLogin = (username: string) => {
+    setValue('username', username);
     setValue('password', 'Password123!');
-    onSubmit({ email, password: 'Password123!' });
+    onSubmit({ username, password: 'Password123!' });
   };
 
   return (
     <KeyboardAvoidingView
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      style={styles.container}
+      className="flex-1 bg-surface"
     >
-      <ScrollView contentContainerStyle={styles.scroll}>
-        <View style={styles.header}>
-          <Text style={styles.appTitle}>🍔 Food Delivery</Text>
-          <Text style={styles.subtitle}>Đăng nhập để bắt đầu trải nghiệm</Text>
-        </View>
+      {isFocused && <StatusBar style="light" />}
 
-        {/* Demo Fast Switch Chips */}
-        <View style={styles.demoSection}>
-          <Text style={styles.demoTitle}>⚡ Chọn nhanh tài khoản Demo (1 chạm):</Text>
-          <View style={styles.demoGrid}>
-            {DEMO_ACCOUNTS.map((acc) => (
-              <TouchableOpacity
-                key={acc.email}
-                style={[styles.demoChip, { borderColor: acc.color }]}
-                onPress={() => handleQuickLogin(acc.email)}
-                disabled={loading}
-              >
-                <Text style={[styles.demoChipText, { color: acc.color }]}>{acc.label}</Text>
-              </TouchableOpacity>
-            ))}
+      <ScrollView
+        className="flex-1 bg-surface"
+        contentContainerClassName="flex-grow"
+        keyboardShouldPersistTaps="handled"
+        bounces={false}
+      >
+        {/* Đầu trang: nền xanh cùng tông màn khởi động, logo và lời chào */}
+        <Gradient preset="splash" className="overflow-hidden bg-brand-800 pb-14">
+          <View aria-hidden pointerEvents="none" className="absolute inset-0 items-center justify-center">
+            <View className="absolute h-[420px] w-[420px] rounded-full border border-white/5" />
+            <View className="absolute h-[300px] w-[300px] rounded-full border border-white/10" />
+            <View className="absolute h-[190px] w-[190px] rounded-full border border-white/15" />
           </View>
-        </View>
 
-        <Controller
-          control={control}
-          name="email"
-          render={({ field: { onChange, value } }) => (
-            <Input
-              label="Email"
-              placeholder="nhap.email@example.com"
-              keyboardType="email-address"
+          <SafeAreaView edges={['top']}>
+            <View className="h-touch flex-row items-center px-4">
+              {navigation.canGoBack() && (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Quay lại"
+                  onPress={() => navigation.goBack()}
+                  className="h-touch w-touch items-center justify-center rounded-full bg-white/15 active:opacity-75"
+                >
+                  <Ionicons name="arrow-back" size={22} color={palette.surface} />
+                </Pressable>
+              )}
+            </View>
+
+            <View className="items-center px-6 pt-2">
+              {/* Logo chữ Z, giống màn khởi động */}
+              <View
+                aria-hidden
+                className="h-[72px] w-[72px] items-center justify-center rounded-[22px] border-4 border-white/20 bg-intro-teal shadow-float"
+              >
+                <RNText className="font-display text-[48px] leading-[77px] text-intro-on-teal">Z</RNText>
+                <View className="absolute right-[13px] top-[14px] h-2.5 w-2.5 rounded-full bg-intro-orange" />
+              </View>
+
+              <RNText accessibilityRole="header" className="mt-4 font-display text-[30px] leading-[48px] text-white">
+                Chào mừng trở lại
+              </RNText>
+              <Text variant="body" className="text-center text-brand-50">
+                Đăng nhập để đặt món và theo dõi đơn hàng
+              </Text>
+            </View>
+          </SafeAreaView>
+        </Gradient>
+
+        {/* Khung trắng bo góc lớn chứa form */}
+        <View className="-mt-8 flex-1 rounded-t-[32px] bg-surface px-6 pb-8 pt-7">
+          <View className="gap-4">
+            <FormInput
+              control={control}
+              name="username"
+              label="Tên đăng nhập"
+              placeholder="VD: customer"
               autoCapitalize="none"
-              value={value}
-              onChangeText={onChange}
-              error={errors.email?.message}
+              autoCorrect={false}
+              autoComplete="username"
+              textContentType="username"
+              leftIcon="person-outline"
             />
-          )}
-        />
 
-        <Controller
-          control={control}
-          name="password"
-          render={({ field: { onChange, value } }) => (
-            <Input
+            <FormInput
+              control={control}
+              name="password"
               label="Mật khẩu"
               placeholder="••••••••"
-              secureTextEntry
-              value={value}
-              onChangeText={onChange}
-              error={errors.password?.message}
+              password
+              leftIcon="lock-closed-outline"
             />
-          )}
-        />
 
-        <Button
-          title="Đăng nhập"
-          onPress={handleSubmit(onSubmit)}
-          loading={loading}
-          style={styles.button}
-        />
+            <Button
+              label="Đăng nhập"
+              rightIcon="arrow-forward"
+              onPress={() => handleSubmit(onSubmit)()}
+              loading={loading}
+              variant="primary"
+              size="lg"
+              className="mt-2 rounded-full shadow-glow"
+            />
+          </View>
 
-        <View style={styles.footer}>
-          <Text style={styles.footerText}>Chưa có tài khoản? </Text>
-          <TouchableOpacity onPress={() => navigation.navigate('Register')}>
-            <Text style={styles.linkText}>Đăng ký ngay</Text>
-          </TouchableOpacity>
+          {/* Đường phân cách */}
+          <View className="my-7 flex-row items-center gap-3">
+            <View className="h-px flex-1 bg-line" />
+            <Text variant="caption" tone="muted">
+              hoặc dùng tài khoản demo
+            </Text>
+            <View className="h-px flex-1 bg-line" />
+          </View>
+
+          {/* Tài khoản demo: lưới 2 cột, chạm một lần để đăng nhập */}
+          <View className="flex-row flex-wrap justify-between gap-y-3">
+            {DEMO_ACCOUNTS.map((acc) => (
+              <Pressable
+                key={acc.username}
+                accessibilityRole="button"
+                accessibilityLabel={`Đăng nhập nhanh bằng tài khoản ${acc.label}`}
+                accessibilityState={{ disabled: loading }}
+                className="min-h-touch w-[48%] flex-row items-center gap-2.5 rounded-2xl border border-line bg-surface p-3 shadow-card active:opacity-70"
+                onPress={() => handleQuickLogin(acc.username)}
+                disabled={loading}
+              >
+                <View className={`h-10 w-10 items-center justify-center rounded-xl ${acc.iconBg}`}>
+                  <Ionicons name={acc.icon} size={20} color={acc.iconColor} />
+                </View>
+                <View className="flex-1">
+                  <Text variant="body" weight="semibold" numberOfLines={1}>
+                    {acc.label}
+                  </Text>
+                  <Text variant="micro" tone="muted" weight="medium" numberOfLines={1}>
+                    {acc.hint}
+                  </Text>
+                </View>
+              </Pressable>
+            ))}
+          </View>
+
+          <View className="mt-8 flex-row items-center justify-center">
+            <Text variant="body" tone="secondary">
+              Chưa có tài khoản?{' '}
+            </Text>
+            <Pressable
+              accessibilityRole="link"
+              onPress={() => navigation.navigate('Register')}
+              hitSlop={12}
+              className="min-h-touch justify-center"
+            >
+              <Text variant="body" weight="bold" tone="brand">
+                Đăng ký ngay
+              </Text>
+            </Pressable>
+          </View>
         </View>
       </ScrollView>
     </KeyboardAvoidingView>
   );
 };
-
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.white },
-  scroll: { flexGrow: 1, justifyContent: 'center', padding: 24 },
-  header: { marginBottom: 20, alignItems: 'center' },
-  appTitle: { fontSize: 28, fontWeight: '800', color: colors.primary, marginBottom: 6 },
-  subtitle: { fontSize: 14, color: colors.textSecondary, textAlign: 'center' },
-  demoSection: {
-    backgroundColor: '#F8FAFC',
-    borderRadius: 12,
-    padding: 12,
-    marginBottom: 20,
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
-  },
-  demoTitle: { fontSize: 12, fontWeight: '700', color: colors.textSecondary, marginBottom: 8 },
-  demoGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  demoChip: {
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 8,
-    borderWidth: 1.5,
-    backgroundColor: colors.white,
-  },
-  demoChipText: { fontSize: 12, fontWeight: '700' },
-  button: { marginTop: 12 },
-  footer: { flexDirection: 'row', justifyContent: 'center', marginTop: 24 },
-  footerText: { fontSize: 14, color: colors.textSecondary },
-  linkText: { fontSize: 14, fontWeight: '700', color: colors.primary },
-});

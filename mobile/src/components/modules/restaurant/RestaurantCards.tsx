@@ -1,6 +1,7 @@
 import React, { memo } from 'react';
 import { Pressable, View } from 'react-native';
 import { AppImage, Badge, cn, Icon, IconButton, InfoChip, Text } from '../../ui';
+import { useToggleFavorite } from '../../../hooks/useFavorites';
 import { useFavoritesStore } from '../../../store/useFavoritesStore';
 import { Restaurant } from '../../../types/api';
 import { calculateDeliveryFee, estimateDeliveryTime } from '../../../utils/fee';
@@ -21,6 +22,7 @@ const useMeta = (r: Restaurant) => {
     time && `giao khoảng ${time}`,
     hours,
     !r.isOpen && 'đã đóng cửa',
+    r.canDeliver === false && 'ngoài vùng giao hàng',
   ]
     .filter(Boolean)
     .join(', ');
@@ -113,7 +115,7 @@ RestaurantCardVertical.displayName = 'RestaurantCardVertical';
 export const RestaurantRow = memo<CardProps>(({ restaurant: r, onPress, className }) => {
   const m = useMeta(r);
   const liked = useFavoritesStore((s) => s.restaurants.some((x) => x.id === r.id));
-  const toggleFavorite = useFavoritesStore((s) => s.toggle);
+  const toggleFavorite = useToggleFavorite();
   return (
     // Nút tim là phần tử ngang hàng, không lồng trong nút của thẻ.
     <View className={className}>
@@ -173,7 +175,18 @@ export const RestaurantRow = memo<CardProps>(({ restaurant: r, onPress, classNam
                 </Text>
               </View>
             )}
-            {m.fee !== null && <InfoChip label={`Ship ${formatVND(m.fee)}`} tone="freeship" icon="cube-outline" />}
+            {/* Quán ngoài vùng giao không có phí ship: không đặt được */}
+            {m.fee !== null && r.canDeliver !== false && (
+              <InfoChip label={`Ship ${formatVND(m.fee)}`} tone="freeship" icon="cube-outline" />
+            )}
+            {r.canDeliver === false && (
+              <InfoChip label="Ngoài vùng giao hàng" tone="danger" icon="alert-circle-outline" />
+            )}
+            {!!r.matchedDishes?.length && (
+              <Text variant="caption" tone="secondary" numberOfLines={2}>
+                Có món: <Text variant="caption" weight="semibold">{r.matchedDishes.join(', ')}</Text>
+              </Text>
+            )}
           </View>
         </View>
       </Pressable>

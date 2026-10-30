@@ -11,6 +11,7 @@ import { HealthController } from './health.controller';
 import { AdminModule } from './modules/admin/admin.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { BannersModule } from './modules/banners/banners.module';
+import { DriversModule } from './modules/drivers/drivers.module';
 import { MapsModule } from './modules/maps/maps.module';
 import { MenusModule } from './modules/menus/menus.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
@@ -32,6 +33,7 @@ import { UsersModule } from './modules/users/users.module';
     RestaurantsModule,
     BannersModule,
     MenusModule,
+    DriversModule,
     OrdersModule,
     RealtimeModule,
     NotificationsModule,

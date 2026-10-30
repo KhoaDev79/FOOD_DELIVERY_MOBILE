@@ -1,113 +1,172 @@
-import { Ionicons } from '@expo/vector-icons';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import React, { useState, useEffect } from 'react';
-import {
-  Alert,
-  FlatList,
-  RefreshControl,
-  SafeAreaView,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
-} from 'react-native';
+import { useIsFocused } from '@react-navigation/native';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { StatusBar } from 'expo-status-bar';
+import React, { useEffect, useMemo, useState } from 'react';
+import { FlatList, Pressable, RefreshControl, ScrollView, View } from 'react-native';
 import { ordersApi } from '../../api/orders';
 import { restaurantsApi } from '../../api/restaurants';
-import { Badge } from '../../components/common/Badge';
-import { Button } from '../../components/common/Button';
-import { Card } from '../../components/common/Card';
-import { EmptyState } from '../../components/common/EmptyState';
-import { LoadingSpinner } from '../../components/common/LoadingSpinner';
-import { colors } from '../../constants/colors';
+import {
+  Button,
+  ConfirmDialog,
+  EmptyState,
+  FilterChip,
+  Icon,
+  LoadingSpinner,
+  OrderStatusBadge,
+  TAB_BAR_CLEARANCE,
+  TabHeader,
+  Text,
+  useToast,
+} from '../../components/ui';
 import { useSocket } from '../../hooks/useSocket';
+import { palette } from '../../theme';
 import { OrderDetail, OrderStatus } from '../../types/api';
 import { formatDateTime, formatVND } from '../../utils/format';
-import { ORDER_STATUS_CONFIG } from '../../utils/orderStatus';
 
+/** Bộ lọc theo đủ các trạng thái của đơn (trước đây thiếu "Đã nhận" và "Đã huỷ"). */
 const STATUS_TABS: { label: string; value?: OrderStatus }[] = [
   { label: 'Tất cả' },
   { label: 'Chờ nhận', value: 'PENDING' },
-  { label: 'Đang chuẩn bị món', value: 'PREPARING' },
+  { label: 'Đã nhận', value: 'CONFIRMED' },
+  { label: 'Đang chuẩn bị', value: 'PREPARING' },
   { label: 'Chờ tài xế', value: 'READY_FOR_PICKUP' },
   { label: 'Đang giao', value: 'PICKED_UP' },
   { label: 'Hoàn thành', value: 'DELIVERED' },
+  { label: 'Đã huỷ', value: 'CANCELLED' },
 ];
+
+/** Hành động chủ quán được phép làm, khớp với quy tắc chuyển trạng thái ở backend (order-state-machine). */
+interface OrderAction {
+  to: OrderStatus;
+  label: string;
+  confirmTitle: string;
+  confirmMessage: string;
+  destructive?: boolean;
+}
+
+const NEXT_ACTION: Partial<Record<OrderStatus, OrderAction>> = {
+  PENDING: {
+    to: 'CONFIRMED',
+    label: 'Nhận đơn',
+    confirmTitle: 'Nhận đơn này?',
+    confirmMessage: 'Khách hàng sẽ được báo là quán đã nhận đơn.',
+  },
+  CONFIRMED: {
+    to: 'PREPARING',
+    label: 'Bắt đầu chuẩn bị',
+    confirmTitle: 'Bắt đầu chuẩn bị món?',
+    confirmMessage: 'Đơn sẽ chuyển sang trạng thái "Đang chuẩn bị món".',
+  },
+  PREPARING: {
+    to: 'READY_FOR_PICKUP',
+    label: 'Món đã sẵn sàng',
+    confirmTitle: 'Món đã sẵn sàng?',
+    confirmMessage: 'Tài xế sẽ được báo đến quán lấy món.',
+  },
+};
+
+/** Backend chỉ cho chủ quán huỷ khi đơn đang "Chờ nhận" hoặc "Đã nhận". */
+const CANCEL_ACTION: Partial<Record<OrderStatus, OrderAction>> = {
+  PENDING: {
+    to: 'CANCELLED',
+    label: 'Từ chối',
+    confirmTitle: 'Từ chối đơn này?',
+    confirmMessage: 'Đơn sẽ bị huỷ và khách hàng sẽ được thông báo. Không thể hoàn tác.',
+    destructive: true,
+  },
+  CONFIRMED: {
+    to: 'CANCELLED',
+    label: 'Huỷ đơn',
+    confirmTitle: 'Huỷ đơn này?',
+    confirmMessage: 'Đơn sẽ bị huỷ và khách hàng sẽ được thông báo. Không thể hoàn tác.',
+    destructive: true,
+  },
+};
+
+/** Dòng chữ cho trạng thái chủ quán không cần thao tác. */
+const WAITING_NOTE: Partial<Record<OrderStatus, { icon: 'time-outline' | 'bicycle-outline'; text: string }>> = {
+  READY_FOR_PICKUP: { icon: 'time-outline', text: 'Đang chờ tài xế đến lấy món' },
+  PICKED_UP: { icon: 'bicycle-outline', text: 'Tài xế đang giao cho khách' },
+};
+
+const EMPTY_PAGE = { items: [] as OrderDetail[], total: 0, page: 1, limit: 50, hasMore: false };
 
 export const OwnerOrdersScreen: React.FC = () => {
   const queryClient = useQueryClient();
+  const isFocused = useIsFocused();
+  const toast = useToast();
   const { socket } = useSocket();
   const [selectedStatus, setSelectedStatus] = useState<OrderStatus | undefined>(undefined);
   const [refreshing, setRefreshing] = useState(false);
+  const [pending, setPending] = useState<{ order: OrderDetail; action: OrderAction } | null>(null);
 
-  // 1. Lấy quán của chủ quán
+  // 1. Quán của chủ quán
   const { data: restaurants, isLoading: loadingRest } = useQuery({
     queryKey: ['owner', 'restaurants'],
     queryFn: () => restaurantsApi.getMine(),
   });
-
   const restaurant = restaurants?.[0];
 
-  // 2. Lấy đơn hàng của quán
-  const {
-    data: ordersData,
-    isLoading: loadingOrders,
-    refetch,
-  } = useQuery({
-    queryKey: ['owner', 'orders', restaurant?.id, selectedStatus],
+  // 2. Tất cả đơn (dùng để đếm số đơn mỗi trạng thái; trùng khoá với bộ lọc "Tất cả" nên không gọi thêm API)
+  const allOrders = useQuery({
+    queryKey: ['owner', 'orders', restaurant?.id, undefined],
     queryFn: () =>
-      restaurant
-        ? restaurantsApi.getRestaurantOrders(restaurant.id, {
-            status: selectedStatus,
-            limit: 50,
-          })
-        : Promise.resolve({ items: [], total: 0, page: 1, limit: 50, hasMore: false }),
+      restaurant ? restaurantsApi.getRestaurantOrders(restaurant.id, { limit: 50 }) : Promise.resolve(EMPTY_PAGE),
     enabled: Boolean(restaurant?.id),
     refetchInterval: 10000,
   });
 
-  // Lắng nghe Socket để cập nhật đơn mới tức thời
+  // 3. Đơn theo bộ lọc đang chọn
+  const filtered = useQuery({
+    queryKey: ['owner', 'orders', restaurant?.id, selectedStatus],
+    queryFn: () =>
+      restaurant
+        ? restaurantsApi.getRestaurantOrders(restaurant.id, { status: selectedStatus, limit: 50 })
+        : Promise.resolve(EMPTY_PAGE),
+    enabled: Boolean(restaurant?.id),
+    refetchInterval: 10000,
+  });
+
+  // Socket: có đơn mới / đổi trạng thái thì tải lại mọi danh sách đơn của quán
   useEffect(() => {
     const handleOrderUpdate = () => {
-      refetch();
+      queryClient.invalidateQueries({ queryKey: ['owner', 'orders'] });
     };
-
     socket?.on('order:created', handleOrderUpdate);
     socket?.on('order:status', handleOrderUpdate);
     socket?.on('order:driver_assigned', handleOrderUpdate);
-
+    // Đơn VNPay chỉ hiện với quán khi khách thanh toán xong
+    socket?.on('order:payment', handleOrderUpdate);
     return () => {
       socket?.off('order:created', handleOrderUpdate);
       socket?.off('order:status', handleOrderUpdate);
       socket?.off('order:driver_assigned', handleOrderUpdate);
+      socket?.off('order:payment', handleOrderUpdate);
     };
-  }, [socket, refetch]);
+  }, [socket, queryClient]);
 
-  // Mutation cập nhật trạng thái đơn
   const updateStatusMutation = useMutation({
-    mutationFn: ({ id, status }: { id: string; status: OrderStatus }) =>
-      ordersApi.updateStatus(id, status),
-    onSuccess: () => {
+    mutationFn: ({ id, status }: { id: string; status: OrderStatus }) => ordersApi.updateStatus(id, status),
+    onSuccess: (_data, vars) => {
       queryClient.invalidateQueries({ queryKey: ['owner', 'orders'] });
+      toast(vars.status === 'CANCELLED' ? 'Đã huỷ đơn hàng.' : 'Đã cập nhật trạng thái đơn.', 'success');
     },
     onError: (err: any) => {
-      Alert.alert('Lỗi cập nhật', err.response?.data?.message || 'Không thể chuyển trạng thái đơn');
+      toast(err.response?.data?.message || 'Không thể chuyển trạng thái đơn', 'error');
     },
+    onSettled: () => setPending(null),
   });
+
+  const counts = useMemo(() => {
+    const map: Partial<Record<OrderStatus, number>> = {};
+    for (const o of allOrders.data?.items ?? []) map[o.status] = (map[o.status] ?? 0) + 1;
+    return map;
+  }, [allOrders.data]);
 
   const onRefresh = async () => {
     setRefreshing(true);
-    await refetch();
+    await queryClient.invalidateQueries({ queryKey: ['owner', 'orders'] });
     setRefreshing(false);
-  };
-
-  const handleUpdateStatus = (order: OrderDetail, nextStatus: OrderStatus, actionName: string) => {
-    Alert.alert('Xác nhận', `Bạn muốn chuyển đơn sang: "${actionName}"?`, [
-      { text: 'Hủy', style: 'cancel' },
-      {
-        text: 'Đồng ý',
-        onPress: () => updateStatusMutation.mutate({ id: order.id, status: nextStatus }),
-      },
-    ]);
   };
 
   if (loadingRest) {
@@ -116,221 +175,287 @@ export const OwnerOrdersScreen: React.FC = () => {
 
   if (!restaurant) {
     return (
-      <SafeAreaView style={styles.container}>
+      <View className="flex-1 bg-canvas-subtle">
+        {isFocused && <StatusBar style="light" />}
+        <TabHeader title="Đơn hàng" />
         <EmptyState
-          icon={<Ionicons name="storefront-outline" size={64} color={colors.textMuted} />}
+          icon="storefront-outline"
           title="Bạn chưa có nhà hàng nào"
           description="Vui lòng liên hệ Quản trị viên để đăng ký mở quán trên hệ thống."
         />
-      </SafeAreaView>
+      </View>
     );
   }
 
-  const orders = ordersData?.items || [];
+  const orders = filtered.data?.items ?? [];
 
   return (
-    <SafeAreaView style={styles.container}>
-      {/* Header Quán */}
-      <View style={styles.header}>
-        <View>
-          <Text style={styles.headerSubtitle}>Quản lý đơn hàng</Text>
-          <Text style={styles.headerTitle}>{restaurant.name}</Text>
+    <View className="flex-1 bg-canvas-subtle">
+      {isFocused && <StatusBar style="light" />}
+
+      <TabHeader
+        title="Đơn hàng"
+        subtitle={restaurant.name}
+        trailing={
+          <View className="flex-row items-center gap-1.5 rounded-full bg-surface/20 px-3 py-1.5">
+            <View
+              className={`h-2 w-2 rounded-full ${
+                restaurant.acceptingOrders ? 'bg-success' : restaurant.isOpen ? 'bg-warning' : 'bg-danger'
+              }`}
+            />
+            <Text variant="caption" weight="semibold" tone="inverse">
+              {restaurant.acceptingOrders ? 'Đang nhận đơn' : restaurant.isOpen ? 'Ngoài giờ mở cửa' : 'Đã đóng cửa'}
+            </Text>
+          </View>
+        }
+      >
+        {/* Tóm tắt nhanh: bấm để lọc */}
+        <View className="flex-row gap-2">
+          <Stat label="Đơn mới" value={counts.PENDING ?? 0} highlight onPress={() => setSelectedStatus('PENDING')} />
+          <Stat label="Đã nhận" value={counts.CONFIRMED ?? 0} onPress={() => setSelectedStatus('CONFIRMED')} />
+          <Stat
+            label="Đang chuẩn bị"
+            value={counts.PREPARING ?? 0}
+            onPress={() => setSelectedStatus('PREPARING')}
+          />
         </View>
-        <Badge
-          label={restaurant.isOpen ? 'Đang mở cửa' : 'Đã đóng cửa'}
-          color={restaurant.isOpen ? colors.success : colors.danger}
-          bgColor={restaurant.isOpen ? '#D1FAE5' : '#FEE2E2'}
-        />
-      </View>
+      </TabHeader>
 
       {/* Bộ lọc trạng thái */}
-      <View style={styles.tabsContainer}>
-        <FlatList
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          data={STATUS_TABS}
-          keyExtractor={(_, index) => String(index)}
-          contentContainerStyle={styles.tabsList}
-          renderItem={({ item }) => {
-            const isActive = selectedStatus === item.value;
+      <View>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerClassName="gap-2 px-4 py-3">
+          {STATUS_TABS.map((tab) => {
+            const n = tab.value ? counts[tab.value] : allOrders.data?.items.length;
             return (
-              <TouchableOpacity
-                style={[styles.tabChip, isActive && styles.tabChipActive]}
-                onPress={() => setSelectedStatus(item.value)}
-              >
-                <Text style={[styles.tabText, isActive && styles.tabTextActive]}>
-                  {item.label}
-                </Text>
-              </TouchableOpacity>
+              <FilterChip
+                key={tab.label}
+                label={n ? `${tab.label} (${n})` : tab.label}
+                selected={selectedStatus === tab.value}
+                onPress={() => setSelectedStatus(tab.value)}
+              />
             );
-          }}
-        />
+          })}
+        </ScrollView>
       </View>
 
-      {/* Danh sách đơn */}
-      {loadingOrders ? (
+      {filtered.isLoading ? (
         <LoadingSpinner message="Đang tải danh sách đơn..." />
       ) : (
         <FlatList
           data={orders}
           keyExtractor={(item) => item.id}
-          contentContainerStyle={styles.list}
+          contentContainerClassName={`gap-3 px-4 pt-1 ${TAB_BAR_CLEARANCE}`}
           refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[colors.primary]} />
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[palette.brand['500']]} />
           }
-          renderItem={({ item }) => {
-            const statusConfig = ORDER_STATUS_CONFIG[item.status];
-            return (
-              <Card style={styles.orderCard}>
-                <View style={styles.cardHeader}>
-                  <View>
-                    <Text style={styles.orderId}>Mã đơn: #{item.id.slice(0, 8)}</Text>
-                    <Text style={styles.orderTime}>{formatDateTime(item.createdAt)}</Text>
-                  </View>
-                  <Badge
-                    label={statusConfig.label}
-                    color={statusConfig.color}
-                    bgColor={statusConfig.bgColor}
-                  />
-                </View>
-
-                {/* Khách hàng */}
-                <View style={styles.customerRow}>
-                  <Ionicons name="person-circle-outline" size={20} color={colors.textSecondary} />
-                  <Text style={styles.customerText}>
-                    {item.customer?.fullName} • {item.customer?.phone || 'Chưa có SĐT'}
-                  </Text>
-                </View>
-
-                {/* Danh sách món */}
-                <View style={styles.itemsBox}>
-                  {item.items?.map((m) => (
-                    <View key={m.id} style={styles.itemRow}>
-                      <Text style={styles.itemName}>
-                        <Text style={{ fontWeight: '700' }}>{m.quantity}x </Text>
-                        {m.name}
-                        {m.note ? ` (${m.note})` : ''}
-                      </Text>
-                      <Text style={styles.itemPrice}>{formatVND(m.lineTotal)}</Text>
-                    </View>
-                  ))}
-                </View>
-
-                {/* Tài xế nếu đã có */}
-                {item.driver && (
-                  <View style={styles.driverRow}>
-                    <Ionicons name="bicycle" size={16} color={colors.primary} />
-                    <Text style={styles.driverText}>
-                      Tài xế: {item.driver.fullName} ({item.driver.phone || 'Đang đến quán'})
-                    </Text>
-                  </View>
-                )}
-
-                {/* Tổng tiền & Nút Thao tác */}
-                <View style={styles.cardFooter}>
-                  <View>
-                    <Text style={styles.totalLabel}>Tổng đơn</Text>
-                    <Text style={styles.totalValue}>{formatVND(item.total)}</Text>
-                  </View>
-
-                  <View style={styles.actionsRow}>
-                    {item.status === 'PENDING' && (
-                      <Button
-                        title="Nhận đơn"
-                        size="small"
-                        onPress={() => handleUpdateStatus(item, 'CONFIRMED', 'Đã nhận đơn')}
-                      />
-                    )}
-                    {item.status === 'CONFIRMED' && (
-                      <Button
-                        title="Chuẩn bị món"
-                        size="small"
-                        onPress={() => handleUpdateStatus(item, 'PREPARING', 'Đang chuẩn bị món')}
-                      />
-                    )}
-                    {item.status === 'PREPARING' && (
-                      <Button
-                        title="Món đã xong"
-                        size="small"
-                        variant="secondary"
-                        onPress={() => handleUpdateStatus(item, 'READY_FOR_PICKUP', 'Chờ tài xế')}
-                      />
-                    )}
-                    {item.status === 'PENDING' && (
-                      <Button
-                        title="Từ chối"
-                        size="small"
-                        variant="danger"
-                        onPress={() => handleUpdateStatus(item, 'CANCELLED', 'Hủy đơn')}
-                      />
-                    )}
-                  </View>
-                </View>
-              </Card>
-            );
-          }}
+          renderItem={({ item }) => (
+            <OrderCard
+              order={item}
+              busy={updateStatusMutation.isPending && pending?.order.id === item.id}
+              onAction={(action) => setPending({ order: item, action })}
+            />
+          )}
           ListEmptyComponent={
             <EmptyState
-              icon={<Ionicons name="receipt-outline" size={48} color={colors.textMuted} />}
-              title="Chưa có đơn hàng nào"
-              description="Các đơn đặt món của khách hàng sẽ xuất hiện tại đây theo thời gian thực."
+              icon="receipt-outline"
+              title="Chưa có đơn hàng"
+              description={
+                selectedStatus
+                  ? 'Không có đơn nào ở trạng thái này.'
+                  : 'Đơn mới sẽ hiện ở đây ngay khi khách đặt món.'
+              }
             />
           }
         />
       )}
-    </SafeAreaView>
+
+      {/* Hộp xác nhận chạy được cả trên web (Alert.alert có nút không hiện trên web) */}
+      <ConfirmDialog
+        visible={!!pending}
+        title={pending?.action.confirmTitle ?? ''}
+        message={pending ? `Đơn #${pending.order.id.slice(0, 8).toUpperCase()}. ${pending.action.confirmMessage}` : ''}
+        confirmLabel={pending?.action.label}
+        cancelLabel="Quay lại"
+        destructive={pending?.action.destructive}
+        loading={updateStatusMutation.isPending}
+        onCancel={() => !updateStatusMutation.isPending && setPending(null)}
+        onConfirm={() =>
+          pending && updateStatusMutation.mutate({ id: pending.order.id, status: pending.action.to })
+        }
+      />
+    </View>
   );
 };
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.background },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: 16,
-    backgroundColor: colors.white,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.borderLight,
-  },
-  headerSubtitle: { fontSize: 12, color: colors.textMuted },
-  headerTitle: { fontSize: 18, fontWeight: '800', color: colors.text },
-  tabsContainer: { backgroundColor: colors.white, borderBottomWidth: 1, borderBottomColor: colors.borderLight },
-  tabsList: { paddingHorizontal: 12, paddingVertical: 10, gap: 8 },
-  tabChip: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 20,
-    backgroundColor: colors.background,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  tabChipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
-  tabText: { fontSize: 13, color: colors.textSecondary, fontWeight: '600' },
-  tabTextActive: { color: colors.white },
-  list: { padding: 16 },
-  orderCard: { marginBottom: 14 },
-  cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
-  orderId: { fontSize: 14, fontWeight: '700', color: colors.text },
-  orderTime: { fontSize: 12, color: colors.textMuted, marginTop: 2 },
-  customerRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 10 },
-  customerText: { fontSize: 13, color: colors.textSecondary },
-  itemsBox: { backgroundColor: '#F8FAFC', padding: 10, borderRadius: 8, marginBottom: 10, gap: 6 },
-  itemRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  itemName: { fontSize: 13, color: colors.text, flex: 1, marginRight: 8 },
-  itemPrice: { fontSize: 13, fontWeight: '600', color: colors.text },
-  driverRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 10 },
-  driverText: { fontSize: 12, color: colors.primary, fontWeight: '600' },
-  cardFooter: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingTop: 10,
-    borderTopWidth: 1,
-    borderTopColor: colors.borderLight,
-  },
-  totalLabel: { fontSize: 11, color: colors.textMuted },
-  totalValue: { fontSize: 16, fontWeight: '800', color: colors.primary },
-  actionsRow: { flexDirection: 'row', gap: 8 },
-});
+/** Ô số liệu trên đầu trang. */
+const Stat: React.FC<{ label: string; value: number; highlight?: boolean; onPress: () => void }> = ({
+  label,
+  value,
+  highlight,
+  onPress,
+}) => (
+  <Pressable
+    accessibilityRole="button"
+    accessibilityLabel={`${label}: ${value}, bấm để lọc`}
+    onPress={onPress}
+    className="min-h-touch flex-1 rounded-lg bg-surface/15 px-3 py-2.5 active:bg-surface/25"
+  >
+    <View className="flex-row items-center gap-1.5">
+      <Text variant="title" weight="bold" tone="inverse">
+        {value}
+      </Text>
+      {highlight && value > 0 && <View className="h-2 w-2 rounded-full bg-accent-500" />}
+    </View>
+    <Text variant="caption" tone="inverse" className="opacity-85">
+      {label}
+    </Text>
+  </Pressable>
+);
 
+const OrderCard: React.FC<{
+  order: OrderDetail;
+  busy: boolean;
+  onAction: (action: OrderAction) => void;
+}> = ({ order, busy, onAction }) => {
+  const next = NEXT_ACTION[order.status];
+  const cancel = CANCEL_ACTION[order.status];
+  const waiting = WAITING_NOTE[order.status];
+  const isNew = order.status === 'PENDING';
+  const itemCount = order.items?.reduce((sum, m) => sum + m.quantity, 0) ?? 0;
+
+  return (
+    <View
+      className={`gap-3 rounded-xl border bg-surface p-4 shadow-card ${isNew ? 'border-accent-500' : 'border-line'}`}
+    >
+      {/* Mã đơn, thời gian, trạng thái */}
+      <View className="flex-row items-start justify-between gap-2">
+        <View className="flex-1">
+          <View className="flex-row items-center gap-2">
+            <Text variant="body-lg" weight="bold">
+              #{order.id.slice(0, 8).toUpperCase()}
+            </Text>
+            {isNew && (
+              <View className="rounded-full bg-accent-500 px-2 py-0.5">
+                <Text variant="micro" tone="inverse">
+                  Mới
+                </Text>
+              </View>
+            )}
+          </View>
+          <Text variant="caption" tone="muted">
+            {formatDateTime(order.createdAt)}
+          </Text>
+        </View>
+        <OrderStatusBadge status={order.status} />
+      </View>
+
+      {/* Khách hàng và địa chỉ giao */}
+      <View className="gap-1.5">
+        <View className="flex-row items-center gap-2">
+          <Icon name="person-outline" size="sm" tone="secondary" />
+          <Text variant="body" weight="medium" className="flex-1" numberOfLines={1}>
+            {order.customer?.fullName || 'Khách hàng'}
+            {order.customer?.phone ? ` · ${order.customer.phone}` : ''}
+          </Text>
+        </View>
+        <View className="flex-row items-start gap-2">
+          <Icon name="location-outline" size="sm" tone="secondary" />
+          <Text variant="caption" tone="secondary" className="flex-1" numberOfLines={2}>
+            {order.deliveryAddress}
+          </Text>
+        </View>
+      </View>
+
+      {/* Món đã đặt */}
+      <View className="gap-1.5 rounded-lg bg-canvas-subtle p-3">
+        {order.items?.map((m) => (
+          <View key={m.id} className="flex-row items-start justify-between gap-2">
+            <View className="flex-1 flex-row gap-2">
+              <Text variant="body" weight="bold" tone="brand">
+                {m.quantity}×
+              </Text>
+              <View className="flex-1">
+                <Text variant="body">{m.name}</Text>
+                {!!m.note && (
+                  <Text variant="caption" tone="muted">
+                    Ghi chú: {m.note}
+                  </Text>
+                )}
+              </View>
+            </View>
+            <Text variant="body" weight="medium">
+              {formatVND(m.lineTotal)}
+            </Text>
+          </View>
+        ))}
+      </View>
+
+      {!!order.note && (
+        <View className="flex-row items-start gap-2 rounded-lg bg-warning-soft px-3 py-2">
+          <Icon name="chatbox-ellipses-outline" size="sm" tone="accent" />
+          <Text variant="caption" className="flex-1 text-warning-strong">
+            {order.note}
+          </Text>
+        </View>
+      )}
+
+      {/* Tài xế đã nhận đơn */}
+      {order.driver && (
+        <View className="flex-row items-center gap-2 rounded-lg bg-brand-50 px-3 py-2">
+          <Icon name="bicycle-outline" size="sm" tone="brand" />
+          <Text variant="caption" weight="medium" tone="brand" className="flex-1" numberOfLines={1}>
+            Tài xế: {order.driver.fullName}
+            {order.driver.phone ? ` · ${order.driver.phone}` : ''}
+          </Text>
+        </View>
+      )}
+
+      {/* Tổng tiền */}
+      <View className="flex-row items-end justify-between border-t border-line-subtle pt-3">
+        <View>
+          <Text variant="caption" tone="muted">
+            {itemCount} món · {order.paymentMethod === 'VNPAY' ? 'VNPay' : 'Tiền mặt'}
+            {order.paymentStatus === 'PAID' ? ' (đã thanh toán)' : ''}
+          </Text>
+          <Text variant="headline" weight="bold" tone="brand">
+            {formatVND(order.total)}
+          </Text>
+        </View>
+        {waiting && (
+          <View className="flex-row items-center gap-1.5">
+            <Icon name={waiting.icon} size="sm" tone="secondary" />
+            <Text variant="caption" tone="secondary">
+              {waiting.text}
+            </Text>
+          </View>
+        )}
+      </View>
+
+      {/* Thao tác */}
+      {(next || cancel) && (
+        <View className="flex-row gap-2">
+          {cancel && (
+            <Button
+              label={cancel.label}
+              variant="outline"
+              size="md"
+              disabled={busy}
+              onPress={() => onAction(cancel)}
+              className="min-h-touch flex-1"
+            />
+          )}
+          {next && (
+            <Button
+              label={next.label}
+              variant="primary"
+              size="md"
+              loading={busy}
+              onPress={() => onAction(next)}
+              className="min-h-touch flex-[2]"
+            />
+          )}
+        </View>
+      )}
+    </View>
+  );
+};

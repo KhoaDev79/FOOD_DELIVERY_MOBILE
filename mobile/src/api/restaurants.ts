@@ -1,5 +1,13 @@
 import { apiClient } from './client';
-import { Banner, NearbyDish, OrderDetail, PaginatedResult, Restaurant, RestaurantDetail } from '../types/api';
+import {
+  Banner,
+  NearbyDish,
+  OrderDetail,
+  PaginatedResult,
+  Restaurant,
+  RestaurantDetail,
+  RestaurantStats,
+} from '../types/api';
 
 export interface NearbyQueryParams {
   lat: number;
@@ -52,14 +60,34 @@ export const restaurantsApi = {
 
   createMenuItem: (
     restaurantId: string,
-    data: { name: string; price: number; description?: string; categoryId?: string; imageUrl?: string },
+    data: {
+      name: string;
+      price: number;
+      description?: string;
+      categoryId?: string;
+      imageUrl?: string;
+      /** 0, 5, 7, 10, 15, 20 – backend tự tính giá giảm */
+      discountPercent?: number;
+    },
   ) => apiClient.post<any, any>(`/restaurants/${restaurantId}/menu-items`, data),
 
   updateMenuItem: (
     id: string,
-    data: { name?: string; price?: number; description?: string; isAvailable?: boolean; categoryId?: string; imageUrl?: string },
+    data: {
+      name?: string;
+      price?: number;
+      description?: string;
+      isAvailable?: boolean;
+      categoryId?: string;
+      imageUrl?: string;
+      discountPercent?: number;
+    },
   ) => apiClient.patch<any, any>(`/menu-items/${id}`, data),
 
   archiveMenuItem: (id: string) =>
     apiClient.delete(`/menu-items/${id}`),
+
+  /** Thống kê bán hàng của quán: days = 1 (hôm nay), 7 hoặc 30 ngày. */
+  getStats: (restaurantId: string, days: 1 | 7 | 30) =>
+    apiClient.get<any, RestaurantStats>(`/restaurants/${restaurantId}/stats`, { params: { days } }),
 };

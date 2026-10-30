@@ -13,6 +13,35 @@ export function useMe() {
   });
 }
 
+export function useUpdateProfile() {
+  const queryClient = useQueryClient();
+  const updateUser = useAuthStore((s) => s.updateUser);
+
+  return useMutation({
+    mutationFn: (data: { fullName?: string; phone?: string; email?: string; avatarUrl?: string }) =>
+      usersApi.updateProfile(data),
+    onSuccess: (updated) => {
+      updateUser(updated);
+      queryClient.setQueryData(queryKeys.user.me, updated);
+      queryClient.invalidateQueries({ queryKey: queryKeys.user.me });
+    },
+  });
+}
+
+export function useUploadAvatar() {
+  const queryClient = useQueryClient();
+  const updateUser = useAuthStore((s) => s.updateUser);
+
+  return useMutation({
+    mutationFn: (fileUri: string) => usersApi.uploadAvatar(fileUri),
+    onSuccess: (updated) => {
+      updateUser(updated);
+      queryClient.setQueryData(queryKeys.user.me, updated);
+      queryClient.invalidateQueries({ queryKey: queryKeys.user.me });
+    },
+  });
+}
+
 export function useAddresses() {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   return useQuery({

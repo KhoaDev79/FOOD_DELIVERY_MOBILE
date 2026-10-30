@@ -5,7 +5,7 @@ import { cn } from './cn';
 import { Icon, IconName, IconTone } from './Icon';
 import { Text, TextTone } from './Text';
 
-export type ButtonVariant = 'primary' | 'secondary' | 'outline' | 'ghost' | 'danger';
+export type ButtonVariant = 'primary' | 'secondary' | 'outline' | 'ghost' | 'danger' | 'dangerSoft';
 export type ButtonSize = 'sm' | 'md' | 'lg';
 
 const CONTAINER: Record<ButtonVariant, string> = {
@@ -14,6 +14,8 @@ const CONTAINER: Record<ButtonVariant, string> = {
   outline: 'bg-surface border border-line active:bg-canvas-subtle',
   ghost: 'bg-transparent active:bg-brand-50',
   danger: 'bg-danger active:opacity-80',
+  /** Cảnh báo nhẹ: nền đỏ nhạt, chữ đỏ (VD: đăng xuất). */
+  dangerSoft: 'bg-danger-soft border border-danger/20 active:opacity-80',
 };
 
 const LABEL_TONE: Record<ButtonVariant, TextTone> = {
@@ -22,6 +24,7 @@ const LABEL_TONE: Record<ButtonVariant, TextTone> = {
   outline: 'default',
   ghost: 'brand',
   danger: 'inverse',
+  dangerSoft: 'danger',
 };
 
 const ICON_TONE: Record<ButtonVariant, IconTone> = {
@@ -30,6 +33,7 @@ const ICON_TONE: Record<ButtonVariant, IconTone> = {
   outline: 'default',
   ghost: 'brand',
   danger: 'inverse',
+  dangerSoft: 'danger',
 };
 
 const SPINNER: Record<ButtonVariant, string> = {
@@ -38,6 +42,7 @@ const SPINNER: Record<ButtonVariant, string> = {
   outline: palette.ink.DEFAULT,
   ghost: palette.brand['600'],
   danger: palette.ink.inverse,
+  dangerSoft: palette.danger.DEFAULT,
 };
 
 const SIZE: Record<ButtonSize, string> = {

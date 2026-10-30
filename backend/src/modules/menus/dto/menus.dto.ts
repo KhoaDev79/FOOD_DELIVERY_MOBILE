@@ -1,6 +1,8 @@
 import { Type } from 'class-transformer';
+import { DISCOUNT_PERCENTS } from '../menu-discount';
 import {
   IsBoolean,
+  IsIn,
   IsInt,
   IsOptional,
   IsString,
@@ -54,6 +56,12 @@ export class CreateMenuItemDto {
   @IsOptional()
   @IsBoolean()
   isAvailable?: boolean;
+
+  /** Mức giảm giá (%): 0, 5, 7, 10, 15 hoặc 20. Backend tự tính discountPrice từ giá. */
+  @IsOptional()
+  @Type(() => Number)
+  @IsIn(DISCOUNT_PERCENTS)
+  discountPercent?: number;
 }
 
 export class UpdateMenuItemDto {
@@ -86,4 +94,10 @@ export class UpdateMenuItemDto {
   @IsOptional()
   @IsBoolean()
   isAvailable?: boolean;
+
+  /** Mức giảm giá (%): 0, 5, 7, 10, 15 hoặc 20. Backend tự tính discountPrice từ giá. */
+  @IsOptional()
+  @Type(() => Number)
+  @IsIn(DISCOUNT_PERCENTS)
+  discountPercent?: number;
 }

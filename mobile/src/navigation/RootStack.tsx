@@ -1,6 +1,8 @@
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import React from 'react';
 import { colors } from '../constants/colors';
+import { LoginScreen } from '../screens/auth/LoginScreen';
+import { RegisterScreen } from '../screens/auth/RegisterScreen';
 import { DriverCallScreen } from '../screens/call/DriverCallScreen';
 import { CartScreen } from '../screens/cart/CartScreen';
 import { ChatScreen } from '../screens/chat/ChatScreen';
@@ -10,8 +12,10 @@ import { AddAddressScreen } from '../screens/profile/AddAddressScreen';
 import { AddressManagementScreen } from '../screens/profile/AddressManagementScreen';
 import { AddressPickerScreen } from '../screens/profile/AddressPickerScreen';
 import { EditProfileScreen } from '../screens/profile/EditProfileScreen';
+import { RoleUpgradeRequestScreen } from '../screens/profile/RoleUpgradeRequestScreen';
 import { RatingScreen } from '../screens/rating/RatingScreen';
 import { RestaurantDetailScreen } from '../screens/restaurant/RestaurantDetailScreen';
+import { SearchScreen } from '../screens/search/SearchScreen';
 import { VoucherSelectScreen } from '../screens/voucher/VoucherSelectScreen';
 import { RootStackParamList } from '../types/navigation';
 import { BottomTabNavigator } from './BottomTabNavigator';
@@ -31,6 +35,21 @@ export const RootStack: React.FC = () => {
       <Stack.Screen
         name="MainTabs"
         component={BottomTabNavigator}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="Search"
+        component={SearchScreen}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="Login"
+        component={LoginScreen}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="Register"
+        component={RegisterScreen}
         options={{ headerShown: false }}
       />
       <Stack.Screen
@@ -71,6 +90,11 @@ export const RootStack: React.FC = () => {
       <Stack.Screen
         name="EditProfile"
         component={EditProfileScreen}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="RoleUpgradeRequest"
+        component={RoleUpgradeRequestScreen}
         options={{ headerShown: false }}
       />
       <Stack.Screen

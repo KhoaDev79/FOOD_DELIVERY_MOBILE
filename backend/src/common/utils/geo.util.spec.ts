@@ -40,8 +40,16 @@ describe('geo.util', () => {
 
   it('calcDeliveryFee applies free km and rounds up to 1,000đ', () => {
     const opts = { baseFee: 15000, feePerKm: 5000, freeKm: 2 };
-    expect(calcDeliveryFee(1.5, opts)).toBe(15000);
-    expect(calcDeliveryFee(3, opts)).toBe(20000);
-    expect(calcDeliveryFee(3.1, opts)).toBe(21000); // 20,500 -> 21,000
+    // Cố định giờ thấp điểm (15:00 giờ VN) để kết quả không phụ thuộc lúc chạy test
+    const offPeak = new Date('2026-10-30T15:00:00+07:00');
+    expect(calcDeliveryFee(1.5, opts, offPeak)).toBe(15000);
+    expect(calcDeliveryFee(3, opts, offPeak)).toBe(20000);
+    expect(calcDeliveryFee(3.1, opts, offPeak)).toBe(21000); // 20,500 -> 21,000
+  });
+
+  it('calcDeliveryFee cộng 20% giờ cao điểm', () => {
+    const opts = { baseFee: 15000, feePerKm: 5000, freeKm: 2 };
+    const dinner = new Date('2026-10-30T18:00:00+07:00');
+    expect(calcDeliveryFee(1.5, opts, dinner)).toBe(18000);
   });
 });

@@ -8,7 +8,8 @@ export interface AuthResponse {
 }
 
 export const authApi = {
-  login: (data: { email: string; password: string }) =>
+  /** username: tên đăng nhập (backend cũng chấp nhận email). */
+  login: (data: { username: string; password: string }) =>
     apiClient.post<any, AuthResponse>('/auth/login', data),
 
   register: (data: { email: string; password: string; fullName: string; phone?: string }) =>

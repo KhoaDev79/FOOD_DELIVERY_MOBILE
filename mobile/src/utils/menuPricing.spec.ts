@@ -1,4 +1,11 @@
-import { discountPercent, effectiveBasePrice, hasChoices, linePrice, originalLinePrice } from './menuPricing';
+import {
+  discountPercent,
+  discountPriceFor,
+  effectiveBasePrice,
+  hasChoices,
+  linePrice,
+  originalLinePrice,
+} from './menuPricing';
 
 const options = {
   sizes: [
@@ -38,5 +45,16 @@ describe('menuPricing (khớp quy tắc backend)', () => {
     expect(hasChoices(trasua)).toBe(true);
     expect(hasChoices({ options: null })).toBe(false);
     expect(hasChoices({ options: { sizes: [] } as never })).toBe(false);
+  });
+});
+
+describe('discountPriceFor', () => {
+  it('khớp công thức backend và suy ngược ra đúng phần trăm', () => {
+    expect(discountPriceFor(55000, 7)).toBe(51200);
+    expect(discountPriceFor(250000, 20)).toBe(200000);
+    expect(discountPriceFor(55000, 0)).toBeNull();
+    for (const p of [5, 7, 10, 15, 20]) {
+      expect(discountPercent({ price: 55000, discountPrice: discountPriceFor(55000, p) })).toBe(p);
+    }
   });
 });

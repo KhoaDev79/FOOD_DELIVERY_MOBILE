@@ -1,23 +1,25 @@
 import { zodResolver } from '@hookform/resolvers/zod';
+import { Ionicons } from '@expo/vector-icons';
+import { useIsFocused } from '@react-navigation/native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
+import { StatusBar } from 'expo-status-bar';
 import React, { useState } from 'react';
-import { Controller, useForm } from 'react-hook-form';
+import { useForm } from 'react-hook-form';
 import {
   Alert,
   KeyboardAvoidingView,
   Platform,
+  Pressable,
   ScrollView,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
+  Text as RNText,
   View,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { z } from 'zod';
 import { authApi } from '../../api/auth';
-import { Button } from '../../components/common/Button';
-import { Input } from '../../components/common/Input';
-import { colors } from '../../constants/colors';
+import { Button, FormInput, Gradient, Text, useToast } from '../../components/ui';
 import { useAuthStore } from '../../store/useAuthStore';
+import { palette } from '../../theme';
 import { AuthStackParamList } from '../../types/navigation';
 
 const registerSchema = z.object({
@@ -37,12 +39,14 @@ type Props = NativeStackScreenProps<AuthStackParamList, 'Register'>;
 
 export const RegisterScreen: React.FC<Props> = ({ navigation }) => {
   const [loading, setLoading] = useState(false);
+  const toast = useToast();
   const setAuth = useAuthStore((s) => s.setAuth);
+  // Chỉ để đổi màu chữ thanh trạng thái khi màn này đang hiển thị (giống các màn khác).
+  const isFocused = useIsFocused();
 
   const {
     control,
     handleSubmit,
-    formState: { errors },
   } = useForm<RegisterFormData>({
     resolver: zodResolver(registerSchema),
     defaultValues: { fullName: '', email: '', phone: '', password: '' },
@@ -56,6 +60,12 @@ export const RegisterScreen: React.FC<Props> = ({ navigation }) => {
         phone: data.phone || undefined,
       });
       await setAuth(res.user, res.accessToken, res.refreshToken);
+      toast(`Đăng ký thành công! Chào mừng ${res.user.fullName} đến với ZomZom.`, 'success');
+      if (navigation.canGoBack()) {
+        navigation.goBack();
+      } else {
+        (navigation as any).navigate('MainTabs', { screen: 'HomeTab' });
+      }
     } catch (err: any) {
       Alert.alert('Đăng ký thất bại', err.response?.data?.message || 'Có lỗi xảy ra, vui lòng thử lại');
     } finally {
@@ -66,101 +76,123 @@ export const RegisterScreen: React.FC<Props> = ({ navigation }) => {
   return (
     <KeyboardAvoidingView
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      style={styles.container}
+      className="flex-1 bg-surface"
     >
-      <ScrollView contentContainerStyle={styles.scroll}>
-        <View style={styles.header}>
-          <Text style={styles.title}>Tạo tài khoản</Text>
-          <Text style={styles.subtitle}>Đăng ký tài khoản mới để đặt đồ ăn nhanh chóng</Text>
-        </View>
+      {isFocused && <StatusBar style="light" />}
 
-        <Controller
-          control={control}
-          name="fullName"
-          render={({ field: { onChange, value } }) => (
-            <Input
+      <ScrollView
+        className="flex-1 bg-surface"
+        contentContainerClassName="flex-grow"
+        keyboardShouldPersistTaps="handled"
+        bounces={false}
+      >
+        {/* Đầu trang: nền xanh cùng tông màn khởi động, logo và lời chào */}
+        <Gradient preset="splash" className="overflow-hidden bg-brand-800 pb-14">
+          <View aria-hidden pointerEvents="none" className="absolute inset-0 items-center justify-center">
+            <View className="absolute h-[400px] w-[400px] rounded-full border border-white/5" />
+            <View className="absolute h-[280px] w-[280px] rounded-full border border-white/10" />
+            <View className="absolute h-[170px] w-[170px] rounded-full border border-white/15" />
+          </View>
+
+          <SafeAreaView edges={['top']}>
+            <View className="h-touch flex-row items-center px-4">
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Quay lại"
+                onPress={() => navigation.goBack()}
+                className="h-touch w-touch items-center justify-center rounded-full bg-white/15 active:opacity-75"
+              >
+                <Ionicons name="arrow-back" size={22} color={palette.surface} />
+              </Pressable>
+            </View>
+
+            <View className="items-center px-6">
+              {/* Logo chữ Z, giống màn khởi động */}
+              <View
+                aria-hidden
+                className="h-16 w-16 items-center justify-center rounded-[20px] border-4 border-white/20 bg-intro-teal shadow-float"
+              >
+                <RNText className="font-display text-[42px] leading-[67px] text-intro-on-teal">Z</RNText>
+                <View className="absolute right-[11px] top-[12px] h-2.5 w-2.5 rounded-full bg-intro-orange" />
+              </View>
+
+              <RNText accessibilityRole="header" className="mt-3 font-display text-[30px] leading-[48px] text-white">
+                Tạo tài khoản mới
+              </RNText>
+              <Text variant="body" className="text-center text-brand-50">
+                Tham gia ZomZom để đặt món ngon quanh bạn
+              </Text>
+            </View>
+          </SafeAreaView>
+        </Gradient>
+
+        {/* Khung trắng bo góc lớn chứa form */}
+        <View className="-mt-8 flex-1 rounded-t-[32px] bg-surface px-6 pb-8 pt-7">
+          <View className="gap-4">
+            <FormInput
+              control={control}
+              name="fullName"
               label="Họ và tên"
               placeholder="Nguyễn Văn A"
-              value={value}
-              onChangeText={onChange}
-              error={errors.fullName?.message}
+              leftIcon="person-outline"
             />
-          )}
-        />
 
-        <Controller
-          control={control}
-          name="email"
-          render={({ field: { onChange, value } }) => (
-            <Input
+            <FormInput
+              control={control}
+              name="email"
               label="Email"
               placeholder="nhap.email@example.com"
               keyboardType="email-address"
               autoCapitalize="none"
-              value={value}
-              onChangeText={onChange}
-              error={errors.email?.message}
+              leftIcon="mail-outline"
             />
-          )}
-        />
 
-        <Controller
-          control={control}
-          name="phone"
-          render={({ field: { onChange, value } }) => (
-            <Input
-              label="Số điện thoại"
+            <FormInput
+              control={control}
+              name="phone"
+              label="Số điện thoại (không bắt buộc)"
               placeholder="0901234567"
               keyboardType="phone-pad"
-              value={value}
-              onChangeText={onChange}
-              error={errors.phone?.message}
+              leftIcon="call-outline"
             />
-          )}
-        />
 
-        <Controller
-          control={control}
-          name="password"
-          render={({ field: { onChange, value } }) => (
-            <Input
+            <FormInput
+              control={control}
+              name="password"
               label="Mật khẩu"
               placeholder="Tối thiểu 8 ký tự"
-              secureTextEntry
-              value={value}
-              onChangeText={onChange}
-              error={errors.password?.message}
+              password
+              leftIcon="lock-closed-outline"
             />
-          )}
-        />
 
-        <Button
-          title="Đăng ký"
-          onPress={handleSubmit(onSubmit)}
-          loading={loading}
-          style={styles.button}
-        />
+            <Button
+              label="Tạo tài khoản"
+              rightIcon="arrow-forward"
+              onPress={() => handleSubmit(onSubmit)()}
+              loading={loading}
+              variant="primary"
+              size="lg"
+              className="mt-2 rounded-full shadow-glow"
+            />
+          </View>
 
-        <View style={styles.footer}>
-          <Text style={styles.footerText}>Đã có tài khoản? </Text>
-          <TouchableOpacity onPress={() => navigation.navigate('Login')}>
-            <Text style={styles.linkText}>Đăng nhập</Text>
-          </TouchableOpacity>
+          <View className="mt-8 flex-row items-center justify-center">
+            <Text variant="body" tone="secondary">
+              Đã có tài khoản?{' '}
+            </Text>
+            <Pressable
+              accessibilityRole="link"
+              onPress={() => navigation.navigate('Login')}
+              hitSlop={12}
+              className="min-h-touch justify-center"
+            >
+              <Text variant="body" weight="bold" tone="brand">
+                Đăng nhập
+              </Text>
+            </Pressable>
+          </View>
         </View>
       </ScrollView>
     </KeyboardAvoidingView>
   );
 };
-
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.white },
-  scroll: { flexGrow: 1, justifyContent: 'center', padding: 24 },
-  header: { marginBottom: 24, alignItems: 'center' },
-  title: { fontSize: 24, fontWeight: '700', color: colors.text, marginBottom: 8 },
-  subtitle: { fontSize: 14, color: colors.textSecondary, textAlign: 'center' },
-  button: { marginTop: 12 },
-  footer: { flexDirection: 'row', justifyContent: 'center', marginTop: 24 },
-  footerText: { fontSize: 14, color: colors.textSecondary },
-  linkText: { fontSize: 14, fontWeight: '700', color: colors.primary },
-});
-

@@ -1,21 +1,38 @@
 import { apiClient } from './client';
-import { PaginatedResult, Role, User } from '../types/api';
+import { OrderStatus, PaginatedResult, Role, RoleUpgradeRequest, User } from '../types/api';
 
 export interface AdminStats {
   users: {
+    /** = customersCount + ownersCount + driversCount + adminsCount */
     total: number;
-    roles: Record<string, number>;
+    customersCount: number;
+    ownersCount: number;
+    driversCount: number;
+    adminsCount: number;
+    inactive: number;
+    roles: Record<Role, number>;
   };
   restaurants: {
     total: number;
     open: number;
     closed: number;
+    unassigned: number;
   };
   orders: {
     total: number;
-    statuses: Record<string, number>;
+    statuses: Partial<Record<OrderStatus, number>>;
     totalRevenue: number;
   };
+  roleRequests: { pending: number };
+}
+
+export interface AdminRestaurantOwner {
+  id: string;
+  fullName: string;
+  email: string;
+  phone?: string | null;
+  role: Role;
+  isActive: boolean;
 }
 
 export interface AdminRestaurantItem {
@@ -26,30 +43,86 @@ export interface AdminRestaurantItem {
   address: string;
   isOpen: boolean;
   rating: number;
+  openTime: string;
+  closeTime: string;
   createdAt: string;
-  owner: {
-    id: string;
-    fullName: string;
-    email: string;
-    phone?: string | null;
-  };
+  owner: AdminRestaurantOwner;
+  /** Chủ hiện tại không phải tài khoản chủ quán đang hoạt động → cần gán chủ mới. */
+  needsOwner: boolean;
   _count: {
     menuItems: number;
     orders: number;
   };
 }
 
+export interface AuditLogEntry {
+  id: string;
+  action: string;
+  targetType: string;
+  targetId: string;
+  metadata?: Record<string, any> | null;
+  createdAt: string;
+  actor?: { id: string; fullName: string } | null;
+}
+
+export interface AdminRestaurantDetail extends AdminRestaurantItem {
+  latitude: number;
+  longitude: number;
+  deliveryRadiusKm: number;
+  priceRange: string;
+  _count: { menuItems: number; orders: number; reviews: number; categories: number };
+  stats: {
+    revenue: number;
+    deliveredOrders: number;
+    statuses: Partial<Record<OrderStatus, number>>;
+  };
+  history: AuditLogEntry[];
+}
+
+export interface AdminUserActivity {
+  user: Pick<User, 'id' | 'fullName' | 'email' | 'role' | 'createdAt'>;
+  summary: { orderCount: number; deliveryCount: number; restaurantCount: number };
+  restaurants: { id: string; name: string; isOpen: boolean }[];
+  auditLogs: AuditLogEntry[];
+  recentOrders: {
+    id: string;
+    status: OrderStatus;
+    total: number;
+    createdAt: string;
+    asCustomer: boolean;
+    restaurant: { id: string; name: string };
+  }[];
+  roleRequests: RoleUpgradeRequest[];
+}
+
+export type RestaurantFilter = 'all' | 'open' | 'closed' | 'unassigned';
+
+export interface AdminRoleRequest extends RoleUpgradeRequest {
+  user: Pick<User, 'id' | 'fullName' | 'email' | 'phone' | 'role' | 'avatarUrl' | 'isActive'>;
+  reviewedBy?: { id: string; fullName: string } | null;
+}
+
 export const adminApi = {
   getStats: () => apiClient.get<any, AdminStats>('/admin/stats'),
 
+  /* ------------------------------ Người dùng ------------------------------ */
   listUsers: (params?: { role?: Role; q?: string; page?: number; limit?: number }) =>
-    apiClient.get<any, PaginatedResult<User>>('/admin/users', { params }),
+    apiClient.get<any, PaginatedResult<User> & { total: number }>('/admin/users', { params }),
 
-  toggleUserActive: (id: string) =>
-    apiClient.patch<any, User>(`/admin/users/${id}/toggle-active`),
+  toggleUserActive: (id: string, reason?: string) =>
+    apiClient.patch<any, User>(`/admin/users/${id}/toggle-active`, reason ? { reason } : {}),
 
-  listRestaurants: (params?: { page?: number; limit?: number; q?: string }) =>
-    apiClient.get<any, PaginatedResult<AdminRestaurantItem>>('/admin/restaurants', { params }),
+  changeUserRole: (id: string, role: Role) => apiClient.patch<any, User>(`/admin/users/${id}/role`, { role }),
+
+  getUserActivity: (id: string) => apiClient.get<any, AdminUserActivity>(`/admin/users/${id}/activity`),
+
+  /* ------------------------------- Quán ăn ------------------------------- */
+  listRestaurants: (params?: { page?: number; limit?: number; q?: string; filter?: RestaurantFilter }) =>
+    apiClient.get<any, PaginatedResult<AdminRestaurantItem> & { total: number }>('/admin/restaurants', {
+      params: params?.filter === 'all' ? { ...params, filter: undefined } : params,
+    }),
+
+  getRestaurant: (id: string) => apiClient.get<any, AdminRestaurantDetail>(`/admin/restaurants/${id}`),
 
   createRestaurant: (data: {
     name: string;
@@ -61,18 +134,23 @@ export const adminApi = {
     ownerName: string;
     ownerPhone: string;
     ownerEmail: string;
-  }) => apiClient.post<any, any>('/admin/restaurants', data),
+  }) => apiClient.post<any, AdminRestaurantItem & { temporaryPassword?: string | null }>('/admin/restaurants', data),
 
-  updateRestaurant: (id: string, data: Partial<AdminRestaurantItem>) =>
-    apiClient.patch<any, any>(`/admin/restaurants/${id}`, data),
+  assignOwner: (restaurantId: string, ownerId: string) =>
+    apiClient.patch<any, AdminRestaurantItem & { promoted: boolean }>(
+      `/admin/restaurants/${restaurantId}/assign-owner`,
+      { ownerId },
+    ),
 
-  deleteRestaurant: (id: string) =>
-    apiClient.delete(`/admin/restaurants/${id}`),
+  toggleRestaurantOpen: (id: string) => apiClient.patch<any, AdminRestaurantItem>(`/admin/restaurants/${id}/toggle-open`),
 
-  deleteMenuItem: (id: string) =>
-    apiClient.delete(`/admin/menu-items/${id}`),
+  /* ----------------------- Yêu cầu nâng cấp vai trò ----------------------- */
+  listRoleRequests: (status?: RoleUpgradeRequest['status']) =>
+    apiClient.get<any, AdminRoleRequest[]>('/admin/role-requests', { params: status ? { status } : undefined }),
 
-  toggleRestaurantOpen: (id: string) =>
-    apiClient.patch<any, any>(`/admin/restaurants/${id}/toggle-open`),
+  reviewRoleRequest: (id: string, status: 'APPROVED' | 'REJECTED', reviewNote?: string) =>
+    apiClient.patch<any, AdminRoleRequest>(`/admin/role-requests/${id}/review`, {
+      status,
+      ...(reviewNote ? { reviewNote } : {}),
+    }),
 };
-

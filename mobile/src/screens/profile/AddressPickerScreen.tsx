@@ -4,19 +4,16 @@ import * as Location from 'expo-location';
 import React, { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   FlatList,
   Platform,
-  SafeAreaView,
+  Pressable,
   StyleSheet,
-  Text,
   TextInput,
-  TouchableOpacity,
   View,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { AutocompleteItem, mapsApi } from '../../api/maps';
-import { Button } from '../../components/common/Button';
-import { colors } from '../../constants/colors';
+import { Button, Text, useToast } from '../../components/ui';
 import { DEFAULT_COORDS } from '../../constants/config';
 import { isCoordinateAddressString, useAddressDraftStore } from '../../store/useAddressDraftStore';
 import { RootStackParamList } from '../../types/navigation';
@@ -32,6 +29,10 @@ if (Platform.OS !== 'web') {
 export const AddressPickerScreen: React.FC<Props> = ({ navigation, route }) => {
   const mapRef = useRef<any>(null);
   const debounceTimerRef = useRef<any>(null);
+  // Bỏ qua một lần tra ngược địa chỉ khi bản đồ tự di chuyển tới kết quả vừa chọn (giữ tên địa điểm đã chọn)
+  const skipReverseRef = useRef(false);
+  // Toast thay cho Alert.alert: Alert không hiện gì trên web.
+  const toast = useToast();
   const initialCoords = route.params?.initialCoords || DEFAULT_COORDS;
 
   const [currentRegion, setCurrentRegion] = useState({
@@ -121,6 +122,10 @@ export const AddressPickerScreen: React.FC<Props> = ({ navigation, route }) => {
   // Khi kéo bản đồ dừng lại -> Áp dụng Debounce 400ms
   const handleRegionChangeComplete = (region: any) => {
     setCurrentRegion(region);
+    if (skipReverseRef.current) {
+      skipReverseRef.current = false;
+      return;
+    }
     if (isManualMode) return; // Nếu đang gõ tay, không gọi reverse geocode đè
 
     if (debounceTimerRef.current) {
@@ -137,7 +142,7 @@ export const AddressPickerScreen: React.FC<Props> = ({ navigation, route }) => {
       setIsLocating(true);
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted') {
-        Alert.alert('Quyền vị trí', 'Vui lòng cấp quyền vị trí để tự động định vị.');
+        toast('Vui lòng cấp quyền vị trí để tự động định vị.', 'error');
         return;
       }
 
@@ -159,7 +164,7 @@ export const AddressPickerScreen: React.FC<Props> = ({ navigation, route }) => {
       setIsManualMode(false);
       reverseGeocode(newCoords.latitude, newCoords.longitude);
     } catch {
-      Alert.alert('Lỗi định vị', 'Không thể lấy được vị trí GPS hiện tại.');
+      toast('Không thể lấy được vị trí GPS hiện tại.', 'error');
     } finally {
       setIsLocating(false);
     }
@@ -180,37 +185,38 @@ export const AddressPickerScreen: React.FC<Props> = ({ navigation, route }) => {
       );
       setSearchResults(list || []);
       if (!list || list.length === 0) {
-        Alert.alert(
-          'Không tìm thấy',
-          'Không tìm thấy địa điểm phù hợp. Bạn có thể chuyển sang tự gõ địa chỉ bên dưới.',
-        );
+        toast('Không tìm thấy địa điểm phù hợp. Bạn có thể chuyển sang tự gõ địa chỉ bên dưới.', 'error');
       }
     } catch (err: any) {
-      Alert.alert(
-        'Dịch vụ tìm kiếm',
-        err.response?.data?.message || 'Không thể kết nối dịch vụ tìm kiếm địa chỉ. Bạn có thể tự gõ tên đường.',
-      );
+      toast(err.response?.data?.message || 'Không thể kết nối dịch vụ tìm kiếm địa chỉ. Bạn có thể tự gõ tên đường.', 'error');
     } finally {
       setIsSearching(false);
     }
   };
 
-  // Chọn một kết quả từ danh sách tìm kiếm
-  const handleSelectSearchResult = (item: AutocompleteItem) => {
+  // Chọn một kết quả từ danh sách tìm kiếm: lấy toạ độ thật của địa điểm rồi đưa bản đồ tới đó
+  // (trước đây giữ toạ độ cũ của bản đồ nên địa chỉ và vị trí ghim không khớp nhau).
+  const handleSelectSearchResult = async (item: AutocompleteItem) => {
     setSearchResults([]);
     setSearchQuery('');
     setSelectedAddress(item.mainText);
     setAddressDetails(item.description);
     setIsManualMode(false);
 
-    useAddressDraftStore.getState().setSelectedAddress(
-      item.description,
-      {
-        latitude: currentRegion.latitude,
-        longitude: currentRegion.longitude,
-      },
-      false,
-    );
+    let coords = { latitude: currentRegion.latitude, longitude: currentRegion.longitude };
+    try {
+      const place = await mapsApi.getPlaceDetail(item.placeId);
+      if (place) coords = { latitude: place.latitude, longitude: place.longitude };
+    } catch {
+      toast('Không lấy được vị trí chính xác của địa điểm. Hãy kéo bản đồ để ghim lại.', 'error');
+    }
+
+    const region = { ...coords, latitudeDelta: 0.005, longitudeDelta: 0.005 };
+    skipReverseRef.current = Platform.OS !== 'web' && Boolean(mapRef.current?.animateToRegion);
+    setCurrentRegion(region);
+    mapRef.current?.animateToRegion?.(region, 800);
+
+    useAddressDraftStore.getState().setSelectedAddress(item.description, coords, false);
   };
 
   // Xác nhận vị trí: Lưu vào Zustand store và quay lại màn hình trước
@@ -218,10 +224,7 @@ export const AddressPickerScreen: React.FC<Props> = ({ navigation, route }) => {
     const finalAddress = addressDetails || selectedAddress;
 
     if (!finalAddress || isCoordinateAddressString(finalAddress)) {
-      Alert.alert(
-        'Địa chỉ chưa hợp lệ',
-        'Vui lòng nhập hoặc chọn vị trí có số nhà / tên đường cụ thể trước khi lưu.',
-      );
+      toast('Vui lòng nhập hoặc chọn vị trí có số nhà / tên đường cụ thể trước khi lưu.', 'error');
       return;
     }
 
@@ -235,19 +238,7 @@ export const AddressPickerScreen: React.FC<Props> = ({ navigation, route }) => {
       isManualMode,
     );
 
-    // Hỗ trợ callback route params (nếu có để tương thích)
-    if (route.params?.onSelectAddress) {
-      try {
-        route.params.onSelectAddress({
-          addressLine: finalAddress,
-          lat: currentRegion.latitude,
-          lng: currentRegion.longitude,
-        });
-      } catch {
-        // Safe ignore
-      }
-    }
-
+    // Màn gọi đọc kết quả từ useAddressDraftStore (không truyền hàm qua tham số điều hướng)
     navigation.goBack();
   };
 
@@ -256,16 +247,18 @@ export const AddressPickerScreen: React.FC<Props> = ({ navigation, route }) => {
   );
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView edges={['top', 'bottom']} style={{ flex: 1 }} className="flex-1 bg-surface">
       {/* Top Header & Search Bar */}
-      <View style={styles.headerBar}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
-          <Ionicons name="arrow-back" size={24} color={colors.text} />
-        </TouchableOpacity>
-        <View style={styles.searchBox}>
-          <Ionicons name="search" size={18} color={colors.textMuted} />
+      <View className="z-10 flex-row items-center border-b border-line bg-surface px-3 py-2.5 gap-2">
+        <Pressable onPress={() => navigation.goBack()} className="p-2 active:opacity-70">
+          <Ionicons name="arrow-back" size={24} color="#1A1A1A" />
+        </Pressable>
+
+        <View className="h-10 flex-1 flex-row items-center gap-2 rounded-lg bg-canvas-subtle px-3">
+          <Ionicons name="search" size={18} color="#9A9EA5" />
           <TextInput
             placeholder="Tìm tên đường, địa điểm..."
+            placeholderTextColor="#9A9EA5"
             value={searchQuery}
             onChangeText={(txt) => {
               setSearchQuery(txt);
@@ -273,84 +266,98 @@ export const AddressPickerScreen: React.FC<Props> = ({ navigation, route }) => {
             }}
             onSubmitEditing={handleSearchAddress}
             returnKeyType="search"
-            style={styles.searchInput}
+            className="h-full flex-1 font-body text-body text-ink"
           />
           {searchQuery.length > 0 && (
-            <TouchableOpacity
+            <Pressable
               onPress={() => {
                 setSearchQuery('');
                 setSearchResults([]);
               }}
+              className="p-1 active:opacity-70"
             >
-              <Ionicons name="close-circle" size={16} color={colors.textMuted} />
-            </TouchableOpacity>
+              <Ionicons name="close-circle" size={16} color="#9A9EA5" />
+            </Pressable>
           )}
         </View>
-        <TouchableOpacity style={styles.searchActionBtn} onPress={handleSearchAddress}>
+
+        <Pressable
+          className="rounded-lg bg-brand-500 px-3.5 py-2 active:opacity-80"
+          onPress={handleSearchAddress}
+        >
           {isSearching ? (
-            <ActivityIndicator size="small" color="#EE4D2D" />
+            <ActivityIndicator size="small" color="#FFFFFF" />
           ) : (
-            <Text style={styles.searchActionText}>Tìm</Text>
+            <Text variant="caption" weight="bold" tone="inverse">
+              Tìm
+            </Text>
           )}
-        </TouchableOpacity>
+        </Pressable>
       </View>
 
       {/* Thông báo lỗi khi dịch vụ bản đồ lỗi hoặc chưa có key */}
       {geocodingError && (
-        <View style={styles.errorNoticeBar}>
-          <Ionicons name="alert-circle-outline" size={18} color="#B91C1C" />
-          <Text style={styles.errorNoticeText} numberOfLines={2}>
+        <View className="z-10 flex-row items-center gap-2 bg-danger-soft px-3.5 py-2">
+          <Ionicons name="alert-circle-outline" size={18} color="#E5484D" />
+          <Text variant="caption" tone="danger" numberOfLines={2} className="flex-1">
             {geocodingError}
           </Text>
-          <TouchableOpacity onPress={() => setIsManualMode(true)} style={styles.manualActionPill}>
-            <Text style={styles.manualActionText}>Gõ tay</Text>
-          </TouchableOpacity>
+          <Pressable
+            onPress={() => setIsManualMode(true)}
+            className="rounded bg-surface px-2.5 py-1 shadow-card active:opacity-75"
+          >
+            <Text variant="micro" weight="bold" tone="brand">
+              Gõ tay
+            </Text>
+          </Pressable>
         </View>
       )}
 
       {/* Dropdown danh sách gợi ý tìm kiếm */}
       {searchResults.length > 0 && (
-        <View style={styles.searchResultsOverlay}>
+        <View className="absolute left-3 right-3 top-16 z-20 max-h-72 rounded-xl border border-line bg-surface shadow-raised">
           <FlatList
             data={searchResults}
             keyExtractor={(item) => item.placeId}
             keyboardShouldPersistTaps="handled"
             renderItem={({ item }) => (
-              <TouchableOpacity
-                style={styles.searchResultItem}
+              <Pressable
+                className="flex-row items-start border-b border-line p-3 active:bg-canvas-subtle"
                 onPress={() => handleSelectSearchResult(item)}
               >
-                <Ionicons name="location-outline" size={20} color="#EE4D2D" style={{ marginTop: 2 }} />
-                <View style={{ flex: 1, marginLeft: 10 }}>
-                  <Text style={styles.resultMainText} numberOfLines={1}>
+                <Ionicons name="location-outline" size={20} color="#1EB9CE" style={{ marginTop: 2 }} />
+                <View className="ml-2.5 flex-1">
+                  <Text variant="body" weight="semibold" numberOfLines={1}>
                     {item.mainText}
                   </Text>
-                  <Text style={styles.resultSubText} numberOfLines={2}>
+                  <Text variant="caption" tone="secondary" numberOfLines={2} className="mt-0.5">
                     {item.secondaryText || item.description}
                   </Text>
                 </View>
-              </TouchableOpacity>
+              </Pressable>
             )}
           />
         </View>
       )}
 
       {/* Map View */}
-      <View style={styles.mapContainer}>
+      <View style={{ flex: 1 }} className="relative flex-1">
         {Platform.OS !== 'web' && NativeMapView ? (
           <NativeMapView
             ref={mapRef}
-            style={styles.fullMap}
+            style={StyleSheet.absoluteFill}
             initialRegion={currentRegion}
             onRegionChangeComplete={handleRegionChangeComplete}
             showsUserLocation
             showsMyLocationButton={false}
           />
         ) : (
-          <View style={styles.webMapNoticeBox}>
-            <Ionicons name="map-outline" size={44} color={colors.primary} />
-            <Text style={styles.webMapNoticeTitle}>Chế độ xem bản đồ trên Web</Text>
-            <Text style={styles.webMapNoticeSub}>
+          <View className="flex-1 items-center justify-center bg-canvas-subtle p-6">
+            <Ionicons name="map-outline" size={48} color="#1EB9CE" />
+            <Text variant="headline" weight="bold" className="mt-3 text-center">
+              Chế độ xem bản đồ trên Web
+            </Text>
+            <Text variant="body" tone="secondary" className="mt-2 text-center">
               Bản đồ kéo ghim tương tác tối ưu trên điện thoại di động (Expo Go trên iPhone / Android). Trên trình duyệt web, bạn có thể tìm kiếm địa điểm ở ô trên hoặc tự gõ địa chỉ bên dưới.
             </Text>
           </View>
@@ -358,360 +365,91 @@ export const AddressPickerScreen: React.FC<Props> = ({ navigation, route }) => {
 
         {/* Ghim trung tâm (chỉ trên thiết bị di động) */}
         {Platform.OS !== 'web' && (
-          <View style={styles.centerMarkerWrapper} pointerEvents="none">
-            <View style={styles.markerBubble}>
-              <Text style={styles.markerBubbleText} numberOfLines={1}>
+          <View className="pointer-events-none absolute inset-0 items-center justify-center" pointerEvents="none">
+            <View className="mb-1 rounded-full border border-line bg-surface px-3 py-1 shadow-card">
+              <Text variant="micro" weight="bold" tone="brand" numberOfLines={1}>
                 {isGeocoding ? 'Đang định vị...' : 'Giao đến đây'}
               </Text>
             </View>
-            <Ionicons name="location" size={44} color="#EE4D2D" style={styles.pinIcon} />
-            <View style={styles.markerShadow} />
+            <Ionicons name="location" size={44} color="#1EB9CE" />
+            <View className="h-1.5 w-3.5 rounded-full bg-black/20" />
           </View>
         )}
 
         {/* Nút GPS định vị tôi */}
-        <TouchableOpacity
-          style={styles.gpsButton}
+        <Pressable
+          className="absolute bottom-5 right-4 h-12 w-12 items-center justify-center rounded-full border border-line bg-surface shadow-raised active:opacity-80"
           onPress={handleGetCurrentLocation}
-          activeOpacity={0.8}
         >
           {isLocating ? (
-            <ActivityIndicator size="small" color="#EE4D2D" />
+            <ActivityIndicator size="small" color="#1EB9CE" />
           ) : (
-            <Ionicons name="locate" size={24} color="#EE4D2D" />
+            <Ionicons name="locate" size={24} color="#1EB9CE" />
           )}
-        </TouchableOpacity>
+        </Pressable>
       </View>
 
       {/* Bottom Sheet hiển thị địa chỉ chi tiết & Tự gõ tay */}
-      <View style={styles.bottomCard}>
-        <View style={styles.addressInfoRow}>
-          <View style={styles.pinCircle}>
-            <Ionicons name="location-sharp" size={20} color="#EE4D2D" />
+      <View className="border-t border-line bg-surface p-4 shadow-raised gap-3.5">
+        <View className="flex-row items-start gap-3">
+          <View className="h-10 w-10 items-center justify-center rounded-full bg-brand-50">
+            <Ionicons name="location-sharp" size={20} color="#1EB9CE" />
           </View>
+
           {isManualMode ? (
-            <View style={styles.textContainer}>
-              <Text style={styles.manualLabel}>Tự gõ địa chỉ chữ:</Text>
+            <View className="flex-1 gap-1.5">
+              <Text variant="caption" weight="bold" tone="secondary">
+                Tự gõ địa chỉ chữ:
+              </Text>
               <TextInput
-                style={styles.manualInputBox}
+                className="min-h-[70px] rounded-lg border border-line bg-canvas-subtle p-2.5 font-body text-body text-ink"
                 value={addressDetails}
                 onChangeText={(txt) => {
                   setAddressDetails(txt);
                   setSelectedAddress(txt.split(',')[0] || 'Địa chỉ tự gõ');
                 }}
                 placeholder="Số nhà, tên đường, phường, quận..."
-                placeholderTextColor={colors.textMuted}
+                placeholderTextColor="#9A9EA5"
                 multiline
+                textAlignVertical="top"
               />
-              <TouchableOpacity onPress={() => setIsManualMode(false)} style={{ marginTop: 4 }}>
-                <Text style={styles.cancelManualText}>↩ Quay lại tự động định vị</Text>
-              </TouchableOpacity>
+              <Pressable onPress={() => setIsManualMode(false)} className="mt-1 self-start">
+                <Text variant="caption" weight="semibold" tone="brand">
+                  ↩ Quay lại tự động định vị
+                </Text>
+              </Pressable>
             </View>
           ) : (
-            <View style={styles.textContainer}>
-              <Text style={styles.addressTitle} numberOfLines={1}>
+            <View className="flex-1">
+              <Text variant="body" weight="bold" numberOfLines={1}>
                 {selectedAddress}
               </Text>
               <Text
-                style={[
-                  styles.addressSubtitle,
-                  isCoordinateAddressString(addressDetails) && { color: '#DC2626' },
-                ]}
+                variant="caption"
+                tone={isCoordinateAddressString(addressDetails) ? 'danger' : 'secondary'}
                 numberOfLines={2}
+                className="mt-0.5"
               >
                 {addressDetails || 'Đang xác định tên đường...'}
               </Text>
-              <TouchableOpacity onPress={() => setIsManualMode(true)} style={{ marginTop: 6 }}>
-                <Text style={styles.manualLinkText}>✏️ Tự gõ tên đường nếu chưa đúng</Text>
-              </TouchableOpacity>
+              <Pressable onPress={() => setIsManualMode(true)} className="mt-1.5 self-start">
+                <Text variant="caption" weight="semibold" tone="brand">
+                  ✏️ Tự gõ tên đường nếu chưa đúng
+                </Text>
+              </Pressable>
             </View>
           )}
         </View>
 
         <Button
-          title={isAddressValid ? 'Xác nhận vị trí này' : 'Nhập hoặc chọn vị trí có tên đường'}
+          label={isAddressValid ? 'Xác nhận vị trí này' : 'Nhập hoặc chọn vị trí có tên đường'}
           onPress={handleConfirm}
           loading={isGeocoding}
           disabled={!isAddressValid}
-          fullWidth
-          style={[styles.confirmBtn, !isAddressValid && styles.confirmBtnDisabled]}
+          variant="primary"
+          size="lg"
         />
       </View>
     </SafeAreaView>
   );
 };
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: colors.white,
-  },
-  headerBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    backgroundColor: colors.white,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.borderLight,
-    zIndex: 10,
-  },
-  backBtn: {
-    padding: 8,
-    marginRight: 6,
-  },
-  searchBox: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#F1F5F9',
-    borderRadius: 8,
-    paddingHorizontal: 10,
-    height: 40,
-    gap: 8,
-  },
-  searchInput: {
-    flex: 1,
-    fontSize: 14,
-    color: colors.text,
-  },
-  searchActionBtn: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-  },
-  searchActionText: {
-    color: '#EE4D2D',
-    fontWeight: '700',
-    fontSize: 14,
-  },
-  errorNoticeBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#FEF2F2',
-    borderBottomWidth: 1,
-    borderBottomColor: '#FEE2E2',
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    gap: 8,
-    zIndex: 10,
-  },
-  errorNoticeText: {
-    flex: 1,
-    fontSize: 12,
-    color: '#B91C1C',
-  },
-  manualActionPill: {
-    backgroundColor: '#EF4444',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 4,
-  },
-  manualActionText: {
-    color: colors.white,
-    fontSize: 11,
-    fontWeight: '700',
-  },
-  searchResultsOverlay: {
-    position: 'absolute',
-    top: 60,
-    left: 12,
-    right: 12,
-    backgroundColor: colors.white,
-    borderRadius: 8,
-    maxHeight: 240,
-    zIndex: 99,
-    elevation: 8,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.15,
-    shadowRadius: 8,
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
-  },
-  searchResultItem: {
-    flexDirection: 'row',
-    padding: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F1F5F9',
-    alignItems: 'flex-start',
-  },
-  resultMainText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: colors.text,
-  },
-  resultSubText: {
-    fontSize: 12,
-    color: colors.textMuted,
-    marginTop: 2,
-  },
-  mapContainer: {
-    flex: 1,
-    position: 'relative',
-  },
-  fullMap: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-  },
-  webMapContainer: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-  },
-  centerMarkerWrapper: {
-    position: 'absolute',
-    top: '50%',
-    left: '50%',
-    marginLeft: -80,
-    marginTop: -60,
-    width: 160,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  markerBubble: {
-    backgroundColor: '#1E293B',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 16,
-    marginBottom: -4,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 3,
-    elevation: 4,
-  },
-  markerBubbleText: {
-    color: colors.white,
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  pinIcon: {
-    marginBottom: -10,
-  },
-  markerShadow: {
-    width: 10,
-    height: 4,
-    backgroundColor: 'rgba(0,0,0,0.25)',
-    borderRadius: 5,
-    marginTop: 2,
-  },
-  gpsButton: {
-    position: 'absolute',
-    right: 16,
-    bottom: 20,
-    backgroundColor: colors.white,
-    borderRadius: 25,
-    width: 50,
-    height: 50,
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.15,
-    shadowRadius: 4,
-    elevation: 5,
-    borderWidth: 1,
-    borderColor: '#F0F0F0',
-  },
-  bottomCard: {
-    backgroundColor: colors.white,
-    padding: 16,
-    paddingBottom: Platform.OS === 'ios' ? 24 : 16,
-    borderTopLeftRadius: 16,
-    borderTopRightRadius: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: -3 },
-    shadowOpacity: 0.08,
-    shadowRadius: 6,
-    elevation: 8,
-  },
-  addressInfoRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    marginBottom: 16,
-  },
-  pinCircle: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: '#FFF2EE',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 12,
-    marginTop: 2,
-  },
-  textContainer: {
-    flex: 1,
-  },
-  addressTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: colors.text,
-    marginBottom: 4,
-  },
-  addressSubtitle: {
-    fontSize: 13,
-    color: colors.textMuted,
-    lineHeight: 18,
-  },
-  manualLabel: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: '#EE4D2D',
-    marginBottom: 4,
-  },
-  manualInputBox: {
-    fontSize: 14,
-    color: colors.text,
-    borderWidth: 1,
-    borderColor: '#CBD5E1',
-    borderRadius: 6,
-    padding: 8,
-    minHeight: 48,
-    backgroundColor: '#F8FAFC',
-  },
-  cancelManualText: {
-    fontSize: 12,
-    color: '#64748B',
-    fontWeight: '600',
-  },
-  manualLinkText: {
-    fontSize: 12,
-    color: '#EE4D2D',
-    fontWeight: '600',
-  },
-  confirmBtn: {
-    backgroundColor: '#EE4D2D',
-    borderRadius: 8,
-  },
-  confirmBtnDisabled: {
-    backgroundColor: '#CBD5E1',
-  },
-  webMapNoticeBox: {
-    flex: 1,
-    backgroundColor: '#F1F5F9',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 24,
-  },
-  webMapNoticeTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: colors.text,
-    marginTop: 12,
-    marginBottom: 6,
-    textAlign: 'center',
-  },
-  webMapNoticeSub: {
-    fontSize: 13,
-    color: colors.textMuted,
-    textAlign: 'center',
-    lineHeight: 20,
-    maxWidth: 420,
-  },
-});

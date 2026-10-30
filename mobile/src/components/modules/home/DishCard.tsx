@@ -61,39 +61,55 @@ export const DishCard = memo<Props>(({ dish, onPress, onAdd, className }) => {
   const rating =
     r.rating > 0 ? r.rating.toLocaleString('vi-VN', { minimumFractionDigits: 1, maximumFractionDigits: 1 }) : null;
   return (
-    // Nút "+" là phần tử ngang hàng (không lồng trong nút của thẻ) để không tạo nút lồng nút.
     <View className={cn('w-40', className)}>
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel={[
-          dish.name,
-          formatVND(linePrice(dish)),
-          `quán ${r.name}`,
-          rating && `quán ${rating} sao`,
-          distance && `cách ${distance}`,
-        ]
-          .filter(Boolean)
-          .join(', ')}
-        onPress={() => onPress(dish)}
-        className="gap-1 active:opacity-80"
-      >
-        <AppImage uri={dish.imageUrl} className="h-40 w-40 rounded-lg" fallbackIcon="fast-food-outline">
-          {/* Nhãn giảm giá như ảnh mẫu "Bữa Ăn 29K" – chỉ khi backend thật sự áp giá giảm */}
-          {discountPercent(dish) > 0 && (
-            <Badge
-              label={`Giảm ${discountPercent(dish)}%`}
-              tone="discount"
-              size="sm"
-              className="absolute left-0 top-0 rounded-none rounded-br-md"
-            />
-          )}
-          {!open && (
-            <View className="absolute inset-0 items-center justify-center bg-scrim">
-              <Badge label="Quán đã đóng" tone="neutral" />
-            </View>
-          )}
-        </AppImage>
-        <View className="mt-1 flex-row items-center gap-1">
+      {/* Khung ảnh vuông và nút "+" nằm gọn bên trong góc dưới phải của ảnh */}
+      <View className="relative h-40 w-40 overflow-hidden rounded-lg">
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={[
+            dish.name,
+            formatVND(linePrice(dish)),
+            `quán ${r.name}`,
+            rating && `quán ${rating} sao`,
+            distance && `cách ${distance}`,
+          ]
+            .filter(Boolean)
+            .join(', ')}
+          onPress={() => onPress(dish)}
+          className="h-full w-full active:opacity-80"
+        >
+          <AppImage uri={dish.imageUrl} className="h-full w-full" fallbackIcon="fast-food-outline">
+            {/* Nhãn giảm giá như ảnh mẫu "Bữa Ăn 29K" – chỉ khi backend thật sự áp giá giảm */}
+            {discountPercent(dish) > 0 && (
+              <Badge
+                label={`Giảm ${discountPercent(dish)}%`}
+                tone="discount"
+                size="sm"
+                className="absolute left-0 top-0 rounded-none rounded-br-md"
+              />
+            )}
+            {!open && (
+              <View className="absolute inset-0 items-center justify-center bg-scrim">
+                <Badge label="Quán đã đóng" tone="neutral" />
+              </View>
+            )}
+          </AppImage>
+        </Pressable>
+        {open && (
+          <IconButton
+            icon="add"
+            accessibilityLabel={`Thêm ${dish.name} vào giỏ`}
+            variant="glass"
+            size="sm"
+            className="absolute bottom-2 right-2"
+            style={{ position: 'absolute', bottom: 8, right: 8 }}
+            onPress={() => onAdd(dish)}
+          />
+        )}
+      </View>
+
+      <Pressable onPress={() => onPress(dish)} className="mt-1 gap-1 active:opacity-80">
+        <View className="flex-row items-center gap-1">
           <Icon name="storefront-outline" size="xs" tone="muted" />
           <Text variant="caption" weight="regular" tone="secondary" numberOfLines={1} className="flex-1">
             {r.name}
@@ -134,16 +150,6 @@ export const DishCard = memo<Props>(({ dish, onPress, onAdd, className }) => {
           )}
         </View>
       </Pressable>
-      {open && (
-        <IconButton
-          icon="add"
-          accessibilityLabel={`Thêm ${dish.name} vào giỏ`}
-          variant="glass"
-          size="sm"
-          className="absolute right-2 top-[120px]"
-          onPress={() => onAdd(dish)}
-        />
-      )}
     </View>
   );
 });

@@ -30,3 +30,10 @@ export function formatDistance(km?: number | null): string | null {
   if (km < 1) return `${Math.max(10, Math.round((km * 1000) / 10) * 10)} m`;
   return `${km.toLocaleString('vi-VN', { maximumFractionDigits: 1 })} km`;
 }
+
+/** Ngày đầy đủ dd/mm/yyyy (VD: ngày đăng ký tài khoản). */
+export function formatDate(dateString: string): string {
+  const d = new Date(dateString);
+  if (Number.isNaN(d.getTime())) return dateString;
+  return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
+}

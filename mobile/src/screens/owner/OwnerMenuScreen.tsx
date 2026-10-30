@@ -1,60 +1,67 @@
-import { Ionicons } from '@expo/vector-icons';
-import { useMutation, useQuery } from '@tanstack/react-query';
+import { useIsFocused } from '@react-navigation/native';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { StatusBar } from 'expo-status-bar';
 import * as ImagePicker from 'expo-image-picker';
-import React, { useState } from 'react';
-import {
-  Alert,
-  Image,
-  Keyboard,
-  KeyboardAvoidingView,
-  Modal,
-  Platform,
-  SafeAreaView,
-  ScrollView,
-  StyleSheet,
-  Switch,
-  Text,
-  TouchableOpacity,
-  TouchableWithoutFeedback,
-  View,
-} from 'react-native';
+import React, { useMemo, useState } from 'react';
+import { Pressable, RefreshControl, ScrollView, Switch, View } from 'react-native';
 import { restaurantsApi } from '../../api/restaurants';
-import { Button } from '../../components/common/Button';
-import { Card } from '../../components/common/Card';
-import { EmptyState } from '../../components/common/EmptyState';
-import { Input } from '../../components/common/Input';
-import { LoadingSpinner } from '../../components/common/LoadingSpinner';
-import { colors } from '../../constants/colors';
+import {
+  AppImage,
+  BottomSheet,
+  Button,
+  ConfirmDialog,
+  EmptyState,
+  Icon,
+  IconButton,
+  Input,
+  LoadingSpinner,
+  TAB_BAR_CLEARANCE,
+  TabHeader,
+  Text,
+  useToast,
+} from '../../components/ui';
+import { palette } from '../../theme';
 import { MenuItem } from '../../types/api';
 import { formatVND } from '../../utils/format';
+import { DISCOUNT_OPTIONS, discountPercent, discountPriceFor, effectiveBasePrice } from '../../utils/menuPricing';
+
+const MIN_PRICE = 1000;
+const MAX_PRICE = 10_000_000; // giới hạn của backend (CreateMenuItemDto)
+
+type SheetMode = { kind: 'create' } | { kind: 'edit'; item: MenuItem } | null;
 
 export const OwnerMenuScreen: React.FC = () => {
-  const [itemModalVisible, setItemModalVisible] = useState(false);
-  const [editModalVisible, setEditModalVisible] = useState(false);
-  const [catModalVisible, setCatModalVisible] = useState(false);
+  const queryClient = useQueryClient();
+  const isFocused = useIsFocused();
+  const toast = useToast();
 
-  // Editing state
-  const [editingItem, setEditingItem] = useState<MenuItem | null>(null);
-
-  // Form states cho thêm / sửa món
+  // Bảng thêm/sửa món (gộp hai trạng thái hiển thị cũ thành một)
+  const [sheet, setSheet] = useState<SheetMode>(null);
   const [name, setName] = useState('');
   const [price, setPrice] = useState('');
   const [description, setDescription] = useState('');
   const [selectedCatId, setSelectedCatId] = useState<string | undefined>(undefined);
   const [imageUrl, setImageUrl] = useState('');
+  const [discount, setDiscount] = useState(0); // % giảm giá: 0, 5, 7, 10, 15, 20
+  const [formError, setFormError] = useState<{ name?: string; price?: string; submit?: string }>({});
 
-  // Form states cho thêm danh mục
+  // Bảng thêm nhóm
+  const [catSheet, setCatSheet] = useState(false);
   const [catName, setCatName] = useState('');
+  const [catError, setCatError] = useState<string | undefined>();
 
-  // 1. Lấy quán
+  // Xác nhận xoá món (ConfirmDialog chạy được cả trên web)
+  const [deleting, setDeleting] = useState<MenuItem | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+
+  // 1. Quán
   const { data: restaurants, isLoading: loadingRest } = useQuery({
     queryKey: ['owner', 'restaurants'],
     queryFn: () => restaurantsApi.getMine(),
   });
-
   const restaurant = restaurants?.[0];
 
-  // 2. Lấy chi tiết thực đơn quán
+  // 2. Thực đơn của quán (backend trả cả món đã tắt "còn món", chỉ bỏ món đã xoá)
   const {
     data: detail,
     isLoading: loadingDetail,
@@ -65,85 +72,120 @@ export const OwnerMenuScreen: React.FC = () => {
     enabled: Boolean(restaurant?.id),
   });
 
-  // Mutation: Thêm món
+  const closeSheet = () => {
+    setSheet(null);
+    setFormError({});
+  };
+
   const createItemMutation = useMutation({
-    mutationFn: (data: any) => restaurantsApi.createMenuItem(restaurant!.id, data),
+    mutationFn: (data: Parameters<typeof restaurantsApi.createMenuItem>[1]) =>
+      restaurantsApi.createMenuItem(restaurant!.id, data),
     onSuccess: () => {
       refetch();
-      setItemModalVisible(false);
-      resetItemForm();
-      Alert.alert('Thành công', 'Đã thêm món ăn mới!');
+      closeSheet();
+      toast('Đã thêm món mới vào thực đơn.', 'success');
     },
     onError: (err: any) => {
-      Alert.alert('Lỗi', err.response?.data?.message || 'Không thể tạo món mới');
+      setFormError({ submit: err.response?.data?.message || 'Không thể tạo món mới' });
     },
   });
 
-  // Mutation: Cập nhật món
   const updateItemMutation = useMutation({
-    mutationFn: ({ id, data }: { id: string; data: any }) =>
+    mutationFn: ({ id, data }: { id: string; data: Parameters<typeof restaurantsApi.updateMenuItem>[1] }) =>
       restaurantsApi.updateMenuItem(id, data),
     onSuccess: () => {
       refetch();
-      setEditModalVisible(false);
-      setEditingItem(null);
-      resetItemForm();
-      Alert.alert('Thành công', 'Đã cập nhật món ăn thành công!');
+      closeSheet();
+      toast('Đã lưu thay đổi của món.', 'success');
     },
     onError: (err: any) => {
-      Alert.alert('Lỗi', err.response?.data?.message || 'Không thể cập nhật món ăn');
+      setFormError({ submit: err.response?.data?.message || 'Không thể cập nhật món ăn' });
     },
   });
 
-  // Mutation: Bật/Tắt còn hàng
+  // Bật/tắt "còn món": đổi ngay trên màn hình, lỗi thì trả lại như cũ
   const toggleAvailableMutation = useMutation({
     mutationFn: ({ id, isAvailable }: { id: string; isAvailable: boolean }) =>
       restaurantsApi.updateMenuItem(id, { isAvailable }),
-    onSuccess: () => refetch(),
+    onMutate: async ({ id, isAvailable }) => {
+      const key = ['owner', 'menu', restaurant?.id];
+      await queryClient.cancelQueries({ queryKey: key });
+      const previous = queryClient.getQueryData(key);
+      queryClient.setQueryData(key, (old: typeof detail) => {
+        if (!old) return old;
+        const patch = (items?: MenuItem[]) => items?.map((m) => (m.id === id ? { ...m, isAvailable } : m));
+        return {
+          ...old,
+          categories: old.categories?.map((c) => ({ ...c, menuItems: patch(c.menuItems) ?? [] })),
+          uncategorizedItems: patch(old.uncategorizedItems),
+        };
+      });
+      return { previous };
+    },
+    onError: (err: any, _vars, ctx) => {
+      if (ctx?.previous) queryClient.setQueryData(['owner', 'menu', restaurant?.id], ctx.previous);
+      toast(err.response?.data?.message || 'Không thể đổi trạng thái món', 'error');
+    },
+    onSettled: () => refetch(),
   });
 
-  // Mutation: Xóa món
   const archiveItemMutation = useMutation({
     mutationFn: (id: string) => restaurantsApi.archiveMenuItem(id),
     onSuccess: () => {
       refetch();
-      if (editModalVisible) {
-        setEditModalVisible(false);
-        setEditingItem(null);
-      }
-    },
-  });
-
-  // Mutation: Thêm danh mục
-  const createCategoryMutation = useMutation({
-    mutationFn: (data: any) => restaurantsApi.createCategory(restaurant!.id, data),
-    onSuccess: () => {
-      refetch();
-      setCatModalVisible(false);
-      setCatName('');
+      closeSheet();
+      toast('Đã xoá món khỏi thực đơn.', 'success');
     },
     onError: (err: any) => {
-      Alert.alert('Lỗi', err.response?.data?.message || 'Không thể tạo danh mục');
+      toast(err.response?.data?.message || 'Không thể xoá món', 'error');
+    },
+    onSettled: () => setDeleting(null),
+  });
+
+  const createCategoryMutation = useMutation({
+    mutationFn: (data: { name: string }) => restaurantsApi.createCategory(restaurant!.id, data),
+    onSuccess: () => {
+      refetch();
+      setCatSheet(false);
+      setCatName('');
+      toast('Đã tạo nhóm món mới.', 'success');
+    },
+    onError: (err: any) => {
+      setCatError(err.response?.data?.message || 'Không thể tạo nhóm');
     },
   });
 
-  const resetItemForm = () => {
+  const openCreate = () => {
     setName('');
     setPrice('');
     setDescription('');
     setSelectedCatId(undefined);
     setImageUrl('');
+    setDiscount(0);
+    setFormError({});
+    setSheet({ kind: 'create' });
   };
 
-  // Chọn ảnh từ thiết bị
+  const openEdit = (item: MenuItem) => {
+    setName(item.name);
+    setPrice(String(item.price));
+    setDescription(item.description || '');
+    setSelectedCatId(item.categoryId || undefined);
+    setImageUrl(item.imageUrl || '');
+    // Mức giảm đang áp dụng; nếu không khớp mức nào (dữ liệu cũ) thì chọn mức gần nhất
+    const current = discountPercent(item);
+    setDiscount(DISCOUNT_OPTIONS.reduce((best, p) => (Math.abs(p - current) < Math.abs(best - current) ? p : best), 0));
+    setFormError({});
+    setSheet({ kind: 'edit', item });
+  };
+
   const handlePickImage = async () => {
     try {
       const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (!permission.granted) {
-        Alert.alert('Quyền truy cập', 'Vui lòng cấp quyền truy cập ảnh để chọn hình món ăn.');
+        setFormError((e) => ({ ...e, submit: 'Vui lòng cấp quyền truy cập ảnh để chọn hình món ăn.' }));
         return;
       }
-
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
         allowsEditing: true,
@@ -151,47 +193,36 @@ export const OwnerMenuScreen: React.FC = () => {
         quality: 0.7,
         base64: true,
       });
-
       if (!result.canceled && result.assets && result.assets.length > 0) {
         const asset = result.assets[0];
-        const uri = asset.base64 ? `data:image/jpeg;base64,${asset.base64}` : asset.uri;
-        setImageUrl(uri);
+        setImageUrl(asset.base64 ? `data:image/jpeg;base64,${asset.base64}` : asset.uri);
       }
     } catch {
-      Alert.alert('Lỗi', 'Không thể chọn ảnh từ thiết bị');
+      setFormError((e) => ({ ...e, submit: 'Không thể chọn ảnh từ thiết bị' }));
     }
-  };
-
-  const handleOpenEdit = (item: MenuItem) => {
-    setEditingItem(item);
-    setName(item.name);
-    setPrice(String(item.price));
-    setDescription(item.description || '');
-    setSelectedCatId(item.categoryId || undefined);
-    setImageUrl(item.imageUrl || '');
-    setEditModalVisible(true);
   };
 
   const handleSaveItem = () => {
-    if (!name.trim() || !price.trim()) {
-      Alert.alert('Thiếu thông tin', 'Vui lòng nhập tên món và giá bán');
-      return;
-    }
+    const errors: typeof formError = {};
+    if (!name.trim()) errors.name = 'Vui lòng nhập tên món';
     const numPrice = parseInt(price.replace(/\D/g, ''), 10);
-    if (isNaN(numPrice) || numPrice < 1000) {
-      Alert.alert('Giá không hợp lệ', 'Giá món tối thiểu là 1.000 VNĐ');
-      return;
-    }
+    if (!price.trim() || isNaN(numPrice)) errors.price = 'Vui lòng nhập giá bán';
+    else if (numPrice < MIN_PRICE) errors.price = 'Giá tối thiểu là 1.000 ₫';
+    else if (numPrice > MAX_PRICE) errors.price = 'Giá tối đa là 10.000.000 ₫';
+    setFormError(errors);
+    if (errors.name || errors.price) return;
 
-    if (editingItem) {
+    if (sheet?.kind === 'edit') {
+      // Gửi chuỗi rỗng để xoá được mô tả/ảnh (undefined = giữ nguyên ở backend)
       updateItemMutation.mutate({
-        id: editingItem.id,
+        id: sheet.item.id,
         data: {
           name: name.trim(),
           price: numPrice,
-          description: description.trim() || undefined,
+          description: description.trim(),
           categoryId: selectedCatId || undefined,
-          imageUrl: imageUrl.trim() || undefined,
+          imageUrl: imageUrl.trim(),
+          discountPercent: discount,
         },
       });
     } else {
@@ -201,15 +232,30 @@ export const OwnerMenuScreen: React.FC = () => {
         description: description.trim() || undefined,
         categoryId: selectedCatId || undefined,
         imageUrl: imageUrl.trim() || undefined,
+        discountPercent: discount,
       });
     }
   };
 
-  const handleDeleteItem = (item: MenuItem) => {
-    Alert.alert('Xoá món ăn', `Bạn có chắc muốn xoá món "${item.name}" khỏi thực đơn?`, [
-      { text: 'Hủy', style: 'cancel' },
-      { text: 'Xoá món', style: 'destructive', onPress: () => archiveItemMutation.mutate(item.id) },
-    ]);
+  const handleCreateCategory = () => {
+    if (!catName.trim()) {
+      setCatError('Vui lòng nhập tên nhóm');
+      return;
+    }
+    setCatError(undefined);
+    createCategoryMutation.mutate({ name: catName.trim() });
+  };
+
+  const stats = useMemo(() => {
+    const all = [...(detail?.categories?.flatMap((c) => c.menuItems ?? []) ?? []), ...(detail?.uncategorizedItems ?? [])];
+    const available = all.filter((m) => m.isAvailable).length;
+    return { total: all.length, available, soldOut: all.length - available };
+  }, [detail]);
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await refetch();
+    setRefreshing(false);
   };
 
   if (loadingRest || loadingDetail) {
@@ -218,439 +264,416 @@ export const OwnerMenuScreen: React.FC = () => {
 
   if (!restaurant || !detail) {
     return (
-      <SafeAreaView style={styles.container}>
-        <EmptyState title="Chưa có dữ liệu nhà hàng" />
-      </SafeAreaView>
+      <View className="flex-1 bg-canvas-subtle">
+        {isFocused && <StatusBar style="light" />}
+        <TabHeader title="Thực đơn" />
+        <EmptyState icon="storefront-outline" title="Chưa có dữ liệu nhà hàng" />
+      </View>
     );
   }
 
+  const isEdit = sheet?.kind === 'edit';
+  const saving = createItemMutation.isPending || updateItemMutation.isPending;
+  const sections = [
+    ...(detail.categories ?? []).map((c) => ({ id: c.id, title: c.name, items: c.menuItems ?? [] })),
+    ...(detail.uncategorizedItems?.length
+      ? [{ id: 'none', title: 'Chưa phân nhóm', items: detail.uncategorizedItems }]
+      : []),
+  ];
+
+  // Xác nhận xoá món: ConfirmDialog chạy được cả trên web (Alert.alert có nút thì không).
+  const confirmDelete = (
+    <ConfirmDialog
+      visible={!!deleting}
+      title="Xoá món này?"
+      message={deleting ? `"${deleting.name}" sẽ bị xoá khỏi thực đơn. Đơn hàng cũ vẫn giữ thông tin món.` : ''}
+      confirmLabel="Xoá món"
+      destructive
+      loading={archiveItemMutation.isPending}
+      onCancel={() => !archiveItemMutation.isPending && setDeleting(null)}
+      onConfirm={() => deleting && archiveItemMutation.mutate(deleting.id)}
+    />
+  );
+
   return (
-    <SafeAreaView style={styles.container}>
-      {/* Top Header */}
-      <View style={styles.header}>
-        <Text style={styles.title}>Quản lý Thực đơn & Món</Text>
-        <View style={styles.headerButtons}>
-          <TouchableOpacity style={styles.addCatBtn} onPress={() => setCatModalVisible(true)}>
-            <Ionicons name="folder-outline" size={16} color={colors.primary} />
-            <Text style={styles.addCatText}>+ Nhóm</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.addItemBtn}
-            onPress={() => {
-              resetItemForm();
-              setEditingItem(null);
-              setItemModalVisible(true);
-            }}
-          >
-            <Ionicons name="add" size={18} color={colors.white} />
-            <Text style={styles.addItemText}>+ Món mới</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
+    <View className="flex-1 bg-canvas-subtle">
+      {isFocused && <StatusBar style="light" />}
 
-      <ScrollView contentContainerStyle={styles.scroll}>
-        {/* Danh sách các nhóm danh mục */}
-        {detail.categories?.map((category) => (
-          <View key={category.id} style={styles.categorySection}>
-            <View style={styles.categoryHeader}>
-              <Ionicons name="restaurant-outline" size={18} color={colors.primary} />
-              <Text style={styles.categoryTitle}>{category.name}</Text>
-              <Text style={styles.itemCount}>({category.menuItems?.length || 0} món)</Text>
-            </View>
-
-            {category.menuItems?.map((item) => (
-              <Card key={item.id} style={styles.itemCard}>
-                <TouchableOpacity
-                  style={styles.itemInfo}
-                  onPress={() => handleOpenEdit(item)}
-                  activeOpacity={0.7}
-                >
-                  <View style={styles.itemRow}>
-                    {item.imageUrl ? (
-                      <Image source={{ uri: item.imageUrl }} style={styles.itemThumb} />
-                    ) : null}
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.itemName}>{item.name}</Text>
-                      <Text style={styles.itemPrice}>{formatVND(item.price)}</Text>
-                      {item.description ? (
-                        <Text style={styles.itemDesc} numberOfLines={2}>
-                          {item.description}
-                        </Text>
-                      ) : null}
-                    </View>
-                  </View>
-                </TouchableOpacity>
-
-                <View style={styles.itemActions}>
-                  <View style={styles.switchCol}>
-                    <Text style={styles.switchLabel}>{item.isAvailable ? 'Còn món' : 'Hết'}</Text>
-                    <Switch
-                      value={item.isAvailable}
-                      onValueChange={(val) =>
-                        toggleAvailableMutation.mutate({ id: item.id, isAvailable: val })
-                      }
-                      trackColor={{ false: '#CBD5E1', true: colors.primary }}
-                    />
-                  </View>
-                  <TouchableOpacity
-                    onPress={() => handleDeleteItem(item)}
-                    style={styles.deleteBtn}
-                  >
-                    <Ionicons name="trash-outline" size={20} color={colors.danger} />
-                  </TouchableOpacity>
-                </View>
-              </Card>
-            ))}
-          </View>
-        ))}
-
-        {/* Các món chưa phân loại */}
-        {detail.uncategorizedItems && detail.uncategorizedItems.length > 0 && (
-          <View style={styles.categorySection}>
-            <View style={styles.categoryHeader}>
-              <Ionicons name="help-circle-outline" size={18} color={colors.textMuted} />
-              <Text style={styles.categoryTitle}>Chưa phân nhóm</Text>
-              <Text style={styles.itemCount}>({detail.uncategorizedItems.length} món)</Text>
-            </View>
-
-            {detail.uncategorizedItems.map((item) => (
-              <Card key={item.id} style={styles.itemCard}>
-                <TouchableOpacity
-                  style={styles.itemInfo}
-                  onPress={() => handleOpenEdit(item)}
-                  activeOpacity={0.7}
-                >
-                  <View style={styles.itemRow}>
-                    {item.imageUrl ? (
-                      <Image source={{ uri: item.imageUrl }} style={styles.itemThumb} />
-                    ) : null}
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.itemName}>{item.name}</Text>
-                      <Text style={styles.itemPrice}>{formatVND(item.price)}</Text>
-                      {item.description ? (
-                        <Text style={styles.itemDesc} numberOfLines={2}>
-                          {item.description}
-                        </Text>
-                      ) : null}
-                    </View>
-                  </View>
-                </TouchableOpacity>
-
-                <View style={styles.itemActions}>
-                  <View style={styles.switchCol}>
-                    <Text style={styles.switchLabel}>{item.isAvailable ? 'Còn món' : 'Hết'}</Text>
-                    <Switch
-                      value={item.isAvailable}
-                      onValueChange={(val) =>
-                        toggleAvailableMutation.mutate({ id: item.id, isAvailable: val })
-                      }
-                      trackColor={{ false: '#CBD5E1', true: colors.primary }}
-                    />
-                  </View>
-                  <TouchableOpacity
-                    onPress={() => handleDeleteItem(item)}
-                    style={styles.deleteBtn}
-                  >
-                    <Ionicons name="trash-outline" size={20} color={colors.danger} />
-                  </TouchableOpacity>
-                </View>
-              </Card>
-            ))}
-          </View>
-        )}
-      </ScrollView>
-
-      {/* Modal: Thêm hoặc Sửa món ăn (Xử lý bàn phím chuẩn không bị che) */}
-      <Modal
-        visible={itemModalVisible || editModalVisible}
-        animationType="slide"
-        transparent
-        onRequestClose={() => {
-          setItemModalVisible(false);
-          setEditModalVisible(false);
-        }}
+      <ScrollView
+        contentContainerClassName={TAB_BAR_CLEARANCE}
+        showsVerticalScrollIndicator={false}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[palette.brand['500']]} />}
       >
-        <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          style={styles.modalOverlay}
-        >
-          <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
-            <View style={StyleSheet.absoluteFill} />
-          </TouchableWithoutFeedback>
-
-          <View style={styles.modalContent}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>
-                {editingItem ? 'Chỉnh sửa món ăn' : 'Thêm món ăn mới'}
-              </Text>
-              <TouchableOpacity
-                onPress={() => {
-                  setItemModalVisible(false);
-                  setEditModalVisible(false);
-                  setEditingItem(null);
-                }}
-                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-              >
-                <Ionicons name="close" size={24} color={colors.text} />
-              </TouchableOpacity>
-            </View>
-
-            <ScrollView
-              showsVerticalScrollIndicator={false}
-              keyboardShouldPersistTaps="handled"
-              contentContainerStyle={styles.modalScrollBody}
+        <TabHeader title="Thực đơn" subtitle={restaurant.name}>
+          <View className="flex-row gap-2">
+            <Stat label="Tổng món" value={stats.total} />
+            <Stat label="Đang bán" value={stats.available} />
+            <Stat label="Hết món" value={stats.soldOut} />
+          </View>
+          <View className="flex-row gap-2">
+            <Pressable
+              accessibilityRole="button"
+              onPress={openCreate}
+              className="min-h-touch flex-[2] flex-row items-center justify-center gap-2 rounded-full bg-surface active:opacity-85"
             >
-              <Input
-                label="Tên món ăn *"
-                placeholder="VD: Bún chả đặc biệt"
-                value={name}
-                onChangeText={setName}
-              />
-              <Input
-                label="Giá bán (VNĐ) *"
-                placeholder="VD: 55000"
-                keyboardType="numeric"
-                value={price}
-                onChangeText={setPrice}
-              />
-              <Input
-                label="Mô tả món ăn"
-                placeholder="VD: Thịt nướng than hoa thơm lừng"
-                value={description}
-                onChangeText={setDescription}
-              />
+              <Icon name="add-circle" size="md" tone="brand" />
+              <Text variant="body" weight="bold" tone="brand">
+                Thêm món
+              </Text>
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => {
+                setCatName('');
+                setCatError(undefined);
+                setCatSheet(true);
+              }}
+              className="min-h-touch flex-1 flex-row items-center justify-center gap-2 rounded-full border border-surface/40 active:opacity-80"
+            >
+              <Icon name="folder-open-outline" size="md" tone="inverse" />
+              <Text variant="body" weight="semibold" tone="inverse">
+                Thêm nhóm
+              </Text>
+            </Pressable>
+          </View>
+        </TabHeader>
 
-              {/* Upload ảnh từ thiết bị hoặc nhập URL */}
-              <Text style={styles.fieldLabel}>Hình ảnh món ăn:</Text>
-              <View style={styles.imagePickerRow}>
-                <TouchableOpacity style={styles.pickImageBtn} onPress={handlePickImage}>
-                  <Ionicons name="camera-outline" size={20} color={colors.primary} />
-                  <Text style={styles.pickImageText}>Chọn từ máy</Text>
-                </TouchableOpacity>
-                {imageUrl ? (
-                  <Image source={{ uri: imageUrl }} style={styles.imagePreview} />
-                ) : null}
+        <View className="gap-6 px-4 pt-5">
+          {sections.length === 0 || stats.total === 0 ? (
+            <EmptyState
+              variant="card"
+              icon="restaurant-outline"
+              title="Thực đơn đang trống"
+              description="Thêm món đầu tiên để khách có thể đặt món của quán."
+              actionLabel="Thêm món"
+              onAction={openCreate}
+            />
+          ) : null}
+
+          {sections.map((section) =>
+            section.items.length === 0 && section.id !== 'none' ? (
+              <View key={section.id} className="gap-2">
+                <SectionTitle title={section.title} count={0} />
+                <Text variant="caption" tone="muted" className="px-1">
+                  Nhóm này chưa có món. Khi thêm món, chọn nhóm "{section.title}".
+                </Text>
               </View>
-
-              <Input
-                label="Hoặc nhập Link ảnh (URL)"
-                placeholder="https://..."
-                value={imageUrl}
-                onChangeText={setImageUrl}
-              />
-
-              {/* Chọn danh mục */}
-              <Text style={styles.fieldLabel}>Chọn nhóm món ăn:</Text>
-              <View style={styles.catChipsList}>
-                {detail.categories?.map((cat) => (
-                  <TouchableOpacity
-                    key={cat.id}
-                    style={[
-                      styles.catSelectChip,
-                      selectedCatId === cat.id && styles.catSelectChipActive,
-                    ]}
-                    onPress={() =>
-                      setSelectedCatId(selectedCatId === cat.id ? undefined : cat.id)
-                    }
-                  >
-                    <Text
-                      style={[
-                        styles.catSelectText,
-                        selectedCatId === cat.id && styles.catSelectTextActive,
-                      ]}
-                    >
-                      {cat.name}
-                    </Text>
-                  </TouchableOpacity>
+            ) : (
+              <View key={section.id} className="gap-2.5">
+                <SectionTitle title={section.title} count={section.items.length} />
+                {section.items.map((item) => (
+                  <MenuItemCard
+                    key={item.id}
+                    item={item}
+                    onEdit={() => openEdit(item)}
+                    onDelete={() => setDeleting(item)}
+                    onToggle={(val) => toggleAvailableMutation.mutate({ id: item.id, isAvailable: val })}
+                  />
                 ))}
               </View>
+            ),
+          )}
+        </View>
+      </ScrollView>
 
-              <Button
-                title={editingItem ? 'Lưu thay đổi' : 'Tạo món ăn'}
-                onPress={handleSaveItem}
-                loading={createItemMutation.isPending || updateItemMutation.isPending}
-                style={{ marginTop: 16 }}
-              />
-
-              {editingItem && (
+      {/* Bảng thêm / sửa món */}
+      <BottomSheet
+        visible={!!sheet}
+        onClose={closeSheet}
+        title={isEdit ? 'Sửa món ăn' : 'Thêm món mới'}
+        footer={
+          <View className="gap-2 pb-2">
+            {!!formError.submit && (
+              <Text variant="caption" tone="danger" className="text-center">
+                {formError.submit}
+              </Text>
+            )}
+            <View className="flex-row gap-2">
+              {sheet?.kind === 'edit' && (
                 <Button
-                  title="Xoá món ăn này"
+                  label="Xoá món"
+                  leftIcon="trash-outline"
                   variant="outline"
-                  onPress={() => handleDeleteItem(editingItem)}
-                  style={{ marginTop: 10, borderColor: colors.danger }}
-                  textStyle={{ color: colors.danger }}
+                  size="lg"
+                  disabled={saving}
+                  onPress={() => setDeleting(sheet.item)}
+                  className="flex-1"
                 />
               )}
-            </ScrollView>
-          </View>
-        </KeyboardAvoidingView>
-      </Modal>
-
-      {/* Modal: Thêm danh mục mới */}
-      <Modal visible={catModalVisible} animationType="fade" transparent>
-        <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          style={styles.modalOverlay}
-        >
-          <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
-            <View style={StyleSheet.absoluteFill} />
-          </TouchableWithoutFeedback>
-
-          <View style={styles.modalContent}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Tạo nhóm món mới</Text>
-              <TouchableOpacity
-                onPress={() => setCatModalVisible(false)}
-                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-              >
-                <Ionicons name="close" size={24} color={colors.text} />
-              </TouchableOpacity>
+              <Button
+                label={isEdit ? 'Lưu thay đổi' : 'Thêm vào thực đơn'}
+                variant="primary"
+                size="lg"
+                loading={saving}
+                onPress={handleSaveItem}
+                className="flex-[2]"
+              />
             </View>
+          </View>
+        }
+      >
+        <ScrollView keyboardShouldPersistTaps="handled" contentContainerClassName="gap-4 pb-4">
+          {/* Ảnh món */}
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={imageUrl ? 'Đổi ảnh món' : 'Chọn ảnh món'}
+            onPress={handlePickImage}
+            className="active:opacity-85"
+          >
+            <AppImage uri={imageUrl} className="h-40 w-full rounded-xl" fallbackIcon="image-outline">
+              <View className="absolute bottom-2 right-2 flex-row items-center gap-1.5 rounded-full bg-scrim px-3 py-1.5">
+                <Icon name="camera-outline" size="sm" tone="inverse" />
+                <Text variant="caption" weight="semibold" tone="inverse">
+                  {imageUrl ? 'Đổi ảnh' : 'Chọn ảnh từ máy'}
+                </Text>
+              </View>
+            </AppImage>
+          </Pressable>
 
-            <Input
-              label="Tên nhóm danh mục"
-              placeholder="VD: Món Tráng Miệng, Lẩu..."
-              value={catName}
-              onChangeText={setCatName}
-            />
+          <Input
+            label="Tên món *"
+            placeholder="VD: Bún chả đặc biệt"
+            value={name}
+            onChangeText={setName}
+            error={formError.name}
+          />
+          <Input
+            label="Giá bán (₫) *"
+            placeholder="VD: 55000"
+            keyboardType="number-pad"
+            value={price}
+            onChangeText={(t) => setPrice(t.replace(/\D/g, ''))}
+            error={formError.price}
+            hint={price && !formError.price ? formatVND(parseInt(price, 10) || 0) : undefined}
+          />
+          <Input
+            label="Mô tả"
+            placeholder="VD: Thịt nướng than hoa, nước mắm chua ngọt"
+            value={description}
+            onChangeText={setDescription}
+            multiline
+          />
+          <Input
+            label="Hoặc dán đường dẫn ảnh"
+            placeholder="https://..."
+            autoCapitalize="none"
+            value={imageUrl.startsWith('data:') ? '' : imageUrl}
+            onChangeText={setImageUrl}
+          />
 
+          {/* Giảm giá */}
+          <View className="gap-2">
+            <Text variant="caption" tone="secondary">
+              Giảm giá
+            </Text>
+            <View className="flex-row flex-wrap gap-2">
+              {DISCOUNT_OPTIONS.map((p) => {
+                const selected = discount === p;
+                return (
+                  <Pressable
+                    key={p}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected }}
+                    accessibilityLabel={p ? `Giảm ${p} phần trăm` : 'Không giảm giá'}
+                    onPress={() => setDiscount(p)}
+                    className={`min-h-touch min-w-[56px] items-center justify-center rounded-full border px-3 active:opacity-75 ${
+                      selected ? (p ? 'border-accent-500 bg-accent-50' : 'border-brand-500 bg-brand-50') : 'border-line bg-surface'
+                    }`}
+                  >
+                    <Text
+                      variant="body"
+                      weight={selected ? 'bold' : 'medium'}
+                      tone={selected ? (p ? 'accent' : 'brand') : 'default'}
+                    >
+                      {p ? `${p}%` : 'Không giảm'}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+            {(() => {
+              const base = parseInt(price, 10);
+              const sale = base ? discountPriceFor(base, discount) : null;
+              if (!discount) return null;
+              return (
+                <View className="flex-row items-center gap-2 rounded-lg bg-accent-50 px-3 py-2">
+                  <Icon name="pricetag-outline" size="sm" tone="accent" />
+                  <Text variant="caption" className="flex-1">
+                    {sale
+                      ? `Khách trả ${formatVND(sale)} thay vì ${formatVND(base)} (bớt ${formatVND(base - sale)})`
+                      : 'Nhập giá bán để xem giá sau giảm'}
+                  </Text>
+                </View>
+              );
+            })()}
+          </View>
+
+          {/* Nhóm món */}
+          <View className="gap-2">
+            <Text variant="caption" tone="secondary">
+              Nhóm món
+            </Text>
+            {(detail.categories?.length ?? 0) === 0 ? (
+              <Text variant="caption" tone="muted">
+                Chưa có nhóm nào. Dùng nút "Thêm nhóm" ở đầu trang để tạo.
+              </Text>
+            ) : (
+              <View className="flex-row flex-wrap gap-2">
+                {detail.categories?.map((cat) => {
+                  const selected = selectedCatId === cat.id;
+                  return (
+                    <Pressable
+                      key={cat.id}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected }}
+                      // Khi sửa món, backend không cho bỏ nhóm (chỉ đổi sang nhóm khác)
+                      onPress={() => setSelectedCatId(selected && !isEdit ? undefined : cat.id)}
+                      className={`min-h-touch justify-center rounded-full border px-4 active:opacity-75 ${
+                        selected ? 'border-brand-500 bg-brand-50' : 'border-line bg-surface'
+                      }`}
+                    >
+                      <Text variant="caption" weight={selected ? 'bold' : 'medium'} tone={selected ? 'brand' : 'default'}>
+                        {cat.name}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            )}
+          </View>
+        </ScrollView>
+        {!!sheet && confirmDelete}
+      </BottomSheet>
+
+      {/* Bảng thêm nhóm */}
+      <BottomSheet
+        visible={catSheet}
+        onClose={() => setCatSheet(false)}
+        title="Thêm nhóm món"
+        footer={
+          <View className="pb-2">
             <Button
-              title="Tạo nhóm"
-              onPress={() =>
-                catName.trim() && createCategoryMutation.mutate({ name: catName.trim() })
-              }
+              label="Tạo nhóm"
+              variant="primary"
+              size="lg"
               loading={createCategoryMutation.isPending}
-              style={{ marginTop: 16 }}
+              onPress={handleCreateCategory}
             />
           </View>
-        </KeyboardAvoidingView>
-      </Modal>
-    </SafeAreaView>
+        }
+      >
+        <View className="pb-4">
+          <Input
+            label="Tên nhóm"
+            placeholder="VD: Món chính, Đồ uống, Tráng miệng"
+            value={catName}
+            onChangeText={setCatName}
+            error={catError}
+            autoFocus
+          />
+        </View>
+      </BottomSheet>
+
+      {/* Khi bảng sửa món đang mở, hộp xác nhận nằm trong bảng (iOS không mở được Modal chồng ngoài Modal) */}
+      {!sheet && confirmDelete}
+    </View>
   );
 };
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.background },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: 16,
-    backgroundColor: colors.white,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.borderLight,
-  },
-  title: { fontSize: 18, fontWeight: '800', color: colors.text },
-  headerButtons: { flexDirection: 'row', gap: 8 },
-  addCatBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: colors.primary,
-  },
-  addCatText: { fontSize: 13, fontWeight: '700', color: colors.primary },
-  addItemBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 8,
-    backgroundColor: colors.primary,
-  },
-  addItemText: { fontSize: 13, fontWeight: '700', color: colors.white },
-  scroll: { padding: 16, paddingBottom: 40 },
-  categorySection: { marginBottom: 20 },
-  categoryHeader: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 10 },
-  categoryTitle: { fontSize: 17, fontWeight: '800', color: colors.text },
-  itemCount: { fontSize: 13, color: colors.textMuted },
-  itemCard: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: 12,
-    marginBottom: 8,
-  },
-  itemInfo: { flex: 1, marginRight: 12 },
-  itemRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  itemThumb: { width: 50, height: 50, borderRadius: 6, backgroundColor: '#E5E7EB' },
-  itemName: { fontSize: 15, fontWeight: '700', color: colors.text, marginBottom: 2 },
-  itemPrice: { fontSize: 14, fontWeight: '800', color: colors.primary, marginBottom: 2 },
-  itemDesc: { fontSize: 12, color: colors.textMuted },
-  itemActions: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  switchCol: { alignItems: 'center' },
-  switchLabel: { fontSize: 10, color: colors.textMuted, marginBottom: 2 },
-  deleteBtn: { padding: 6 },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    justifyContent: 'flex-end',
-  },
-  modalBackdropTouch: {
-    flex: 1,
-  },
-  modalContent: {
-    backgroundColor: colors.white,
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    paddingHorizontal: 20,
-    paddingTop: 16,
-    paddingBottom: Platform.OS === 'ios' ? 40 : 24,
-    maxHeight: Platform.OS === 'ios' ? '80%' : '90%',
-    flexShrink: 1,
-  },
-  modalScrollBody: {
-    paddingBottom: 220,
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  modalTitle: { fontSize: 18, fontWeight: '700', color: colors.text },
-  fieldLabel: { fontSize: 14, fontWeight: '600', color: colors.text, marginBottom: 8 },
-  imagePickerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    marginBottom: 12,
-  },
-  pickImageBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: colors.primary,
-    backgroundColor: colors.primaryLight,
-  },
-  pickImageText: {
-    color: colors.primary,
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  imagePreview: {
-    width: 44,
-    height: 44,
-    borderRadius: 8,
-  },
-  catChipsList: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 12 },
-  catSelectChip: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.background,
-  },
-  catSelectChipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
-  catSelectText: { fontSize: 13, color: colors.textSecondary },
-  catSelectTextActive: { color: colors.white, fontWeight: '700' },
-});
+const Stat: React.FC<{ label: string; value: number }> = ({ label, value }) => (
+  <View className="flex-1 rounded-lg bg-surface/15 px-3 py-2.5">
+    <Text variant="title" weight="bold" tone="inverse">
+      {value}
+    </Text>
+    <Text variant="caption" tone="inverse" className="opacity-85">
+      {label}
+    </Text>
+  </View>
+);
+
+const SectionTitle: React.FC<{ title: string; count: number }> = ({ title, count }) => (
+  <View className="flex-row items-center gap-2 px-1">
+    <Text variant="headline" accessibilityRole="header" className="flex-1" numberOfLines={1}>
+      {title}
+    </Text>
+    <View className="rounded-full bg-surface px-2.5 py-0.5">
+      <Text variant="caption" tone="secondary">
+        {count} món
+      </Text>
+    </View>
+  </View>
+);
+
+const MenuItemCard: React.FC<{
+  item: MenuItem;
+  onEdit: () => void;
+  onDelete: () => void;
+  onToggle: (value: boolean) => void;
+}> = ({ item, onEdit, onDelete, onToggle }) => (
+  <View className="flex-row items-center gap-3 rounded-xl bg-surface p-3 shadow-card">
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={`Sửa món ${item.name}`}
+      onPress={onEdit}
+      className="flex-1 flex-row items-center gap-3 active:opacity-75"
+    >
+      <AppImage
+        uri={item.imageUrl}
+        className={`h-[72px] w-[72px] rounded-lg ${item.isAvailable ? '' : 'opacity-50'}`}
+      />
+      <View className="flex-1 gap-0.5">
+        <Text variant="body" weight="semibold" numberOfLines={2}>
+          {item.name}
+        </Text>
+        <View className="flex-row flex-wrap items-center gap-x-2">
+          <Text variant="body" weight="bold" tone="brand">
+            {formatVND(effectiveBasePrice(item))}
+          </Text>
+          {discountPercent(item) > 0 && (
+            <>
+              <Text variant="caption" tone="muted" className="line-through">
+                {formatVND(item.price)}
+              </Text>
+              <View className="rounded-full bg-accent-500 px-1.5 py-0.5">
+                <Text variant="micro" tone="inverse">
+                  -{discountPercent(item)}%
+                </Text>
+              </View>
+            </>
+          )}
+        </View>
+        {item.isAvailable ? (
+          !!item.description && (
+            <Text variant="caption" tone="muted" numberOfLines={1}>
+              {item.description}
+            </Text>
+          )
+        ) : (
+          <View className="self-start rounded-full bg-danger-soft px-2 py-0.5">
+            <Text variant="micro" className="text-danger-strong">
+              Tạm hết món
+            </Text>
+          </View>
+        )}
+      </View>
+    </Pressable>
+
+    <View className="items-center gap-1">
+      <Switch
+        accessibilityLabel={`${item.name}: ${item.isAvailable ? 'đang bán' : 'tạm hết'}`}
+        value={item.isAvailable}
+        onValueChange={onToggle}
+        trackColor={{ false: palette.line.DEFAULT, true: palette.brand['500'] }}
+        thumbColor={palette.surface}
+      />
+      <IconButton
+        icon="trash-outline"
+        variant="ghost"
+        size="sm"
+        tone="danger"
+        accessibilityLabel={`Xoá món ${item.name}`}
+        onPress={onDelete}
+      />
+    </View>
+  </View>
+);

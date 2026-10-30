@@ -25,6 +25,10 @@ export const mapsApi = {
   searchPlaces: (q: string, lat?: number, lng?: number): Promise<AutocompleteItem[]> =>
     apiClient.get('/maps/autocomplete', { params: { q, lat, lng } }),
 
+  /** Toạ độ chính xác của một kết quả tìm kiếm (placeId lấy từ searchPlaces). */
+  getPlaceDetail: (placeId: string): Promise<GeocodeResult | null> =>
+    apiClient.get('/maps/place-detail', { params: { placeId } }),
+
   getDistance: (
     originLat: number,
     originLng: number,

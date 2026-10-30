@@ -1,8 +1,9 @@
+import { Ionicons } from '@expo/vector-icons';
 import { useIsFocused, useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { StatusBar } from 'expo-status-bar';
 import React, { useState } from 'react';
-import { Modal, Pressable, ScrollView, View } from 'react-native';
+import { Pressable, ScrollView, View } from 'react-native';
 import {
   Avatar,
   cn,
@@ -14,7 +15,6 @@ import {
   TAB_BAR_CLEARANCE,
   Text,
 } from '../../components/ui';
-import { DevGallery } from '../../dev/DevGallery';
 import { useMyOrders } from '../../services/useOrders';
 import { useAddresses, useMe } from '../../services/useUser';
 import { useAuthStore } from '../../store/useAuthStore';
@@ -54,63 +54,107 @@ const Group: React.FC<{ title: string; children: React.ReactNode; className?: st
 export const ProfileScreen: React.FC = () => {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const isFocused = useIsFocused();
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   const { data: user, isLoading } = useMe();
   const { data: orders } = useMyOrders();
   const { data: addresses } = useAddresses();
   const favoriteCount = useFavoritesStore((s) => s.restaurants.length);
   const logout = useAuthStore((s) => s.logout);
   const [confirmLogout, setConfirmLogout] = useState(false);
-  const [galleryOpen, setGalleryOpen] = useState(false);
 
-  const goOrders = () => navigation.navigate('MainTabs', { screen: 'OrdersTab' });
+  const requireAuth = (callback: () => void) => {
+    if (!isAuthenticated) {
+      navigation.navigate('Login');
+      return;
+    }
+    callback();
+  };
+
+  const goOrders = () => requireAuth(() => navigation.navigate('MainTabs', { screen: 'OrdersTab' }));
   const goFavorites = () => navigation.navigate('MainTabs', { screen: 'FavoritesTab' });
-  const goAddresses = () => navigation.navigate('AddressManagement');
+  const goAddresses = () => requireAuth(() => navigation.navigate('AddressManagement'));
 
   return (
     <View className="flex-1 bg-canvas-subtle">
       {isFocused && <StatusBar style="light" />}
       <ScrollView contentContainerClassName={TAB_BAR_CLEARANCE}>
         <TabHeader title="Tài khoản">
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Sửa hồ sơ"
-            onPress={() => navigation.navigate('EditProfile')}
-            className="flex-row items-center gap-3 active:opacity-80"
-          >
-            <Avatar uri={user?.avatarUrl} name={user?.fullName} size="lg" className="border-2 border-surface/60" />
-            <View className="flex-1 gap-0.5">
-              {isLoading ? (
-                <>
-                  <Skeleton className="h-5 w-40 bg-surface/30" />
-                  <Skeleton className="h-4 w-52 bg-surface/30" />
-                </>
-              ) : (
-                <>
-                  <Text variant="headline" tone="inverse" numberOfLines={1}>
-                    {user?.fullName || 'Khách hàng'}
-                  </Text>
-                  <Text variant="body" tone="inverse" className="opacity-85" numberOfLines={1}>
-                    {user?.email}
-                  </Text>
-                  {!!user?.phone && (
-                    <Text variant="caption" weight="regular" tone="inverse" className="opacity-85">
-                      {user.phone}
+          {isAuthenticated ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Sửa hồ sơ"
+              onPress={() => navigation.navigate('EditProfile')}
+              className="flex-row items-center gap-3 active:opacity-80"
+            >
+              <Avatar uri={user?.avatarUrl} name={user?.fullName} size="lg" className="border-2 border-surface/60" />
+              <View className="flex-1 gap-0.5">
+                {isLoading ? (
+                  <>
+                    <Skeleton className="h-5 w-40 bg-surface/30" />
+                    <Skeleton className="h-4 w-52 bg-surface/30" />
+                  </>
+                ) : (
+                  <>
+                    <Text variant="headline" tone="inverse" numberOfLines={1}>
+                      {user?.fullName || 'Khách hàng'}
                     </Text>
-                  )}
-                </>
-              )}
+                    <Text variant="body" tone="inverse" className="opacity-85" numberOfLines={1}>
+                      {user?.email}
+                    </Text>
+                    {!!user?.phone && (
+                      <Text variant="caption" weight="regular" tone="inverse" className="opacity-85">
+                        {user.phone}
+                      </Text>
+                    )}
+                  </>
+                )}
+              </View>
+              <View className="rounded-full bg-surface/20 px-3 py-1.5">
+                <Text variant="caption" weight="semibold" tone="inverse">
+                  Sửa
+                </Text>
+              </View>
+            </Pressable>
+          ) : (
+            <View className="gap-3">
+              <View className="flex-row items-center gap-3">
+                <View className="h-14 w-14 items-center justify-center rounded-full bg-surface/20 border-2 border-surface/40">
+                  <Ionicons name="person" size={28} color="#FFFFFF" />
+                </View>
+                <View className="flex-1">
+                  <View className="flex-row items-center gap-1">
+                    <Text variant="headline" tone="inverse" weight="bold">
+                      Chào mừng bạn!
+                    </Text>
+                    <Text className="text-base">👋</Text>
+                  </View>
+                  <Text variant="caption" tone="inverse" className="opacity-85 mt-0.5">
+                    Đăng nhập để đặt món và nhận ngàn ưu đãi từ ZomZom.
+                  </Text>
+                </View>
+              </View>
+
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Đăng nhập hoặc đăng ký"
+                onPress={() => navigation.navigate('Login')}
+                className="mt-1 flex-row items-center justify-center gap-2 rounded-xl bg-surface py-2.5 px-4 shadow-card active:opacity-85"
+              >
+                <Ionicons name="log-in-outline" size={18} color="#0B7F90" />
+                <Text variant="body" weight="bold" tone="brand">
+                  Đăng nhập / Đăng ký ngay
+                </Text>
+              </Pressable>
             </View>
-            <View className="rounded-full bg-surface/20 px-3 py-1.5">
-              <Text variant="caption" weight="semibold" tone="inverse">
-                Sửa
-              </Text>
+          )}
+
+          {isAuthenticated && (
+            <View className="mt-1 flex-row gap-2">
+              <Stat label="Đơn hàng" value={orders?.items.length} onPress={goOrders} />
+              <Stat label="Yêu thích" value={favoriteCount} onPress={goFavorites} />
+              <Stat label="Địa chỉ" value={addresses?.length} onPress={goAddresses} />
             </View>
-          </Pressable>
-          <View className="mt-1 flex-row gap-2">
-            <Stat label="Đơn hàng" value={orders?.items.length} onPress={goOrders} />
-            <Stat label="Yêu thích" value={favoriteCount} onPress={goFavorites} />
-            <Stat label="Địa chỉ" value={addresses?.length} onPress={goAddresses} />
-          </View>
+          )}
         </TabHeader>
 
         <View className="gap-5 px-4 pt-5">
@@ -119,7 +163,7 @@ export const ProfileScreen: React.FC = () => {
               icon="person-outline"
               iconTone="brand"
               title="Thông tin cá nhân & mật khẩu"
-              onPress={() => navigation.navigate('EditProfile')}
+              onPress={() => requireAuth(() => navigation.navigate('EditProfile'))}
             />
             <Divider inset />
             <ListRow icon="location-outline" iconTone="brand" title="Địa chỉ đã lưu" onPress={goAddresses} />
@@ -131,25 +175,35 @@ export const ProfileScreen: React.FC = () => {
             <ListRow icon="heart-outline" iconTone="danger" title="Quán yêu thích" onPress={goFavorites} />
           </Group>
 
-          {__DEV__ && (
-            <Group title="Phát triển">
+          {isAuthenticated && user?.role === 'CUSTOMER' && (
+            <Group title="Hợp tác">
               <ListRow
-                icon="color-palette-outline"
-                title="Thư viện thành phần"
-                subtitle="Chỉ hiện ở chế độ phát triển"
-                onPress={() => setGalleryOpen(true)}
+                icon="briefcase-outline"
+                iconTone="brand"
+                title="Đăng ký mở quán / làm tài xế"
+                subtitle="Gửi yêu cầu để quản trị viên duyệt"
+                onPress={() => navigation.navigate('RoleUpgradeRequest')}
               />
             </Group>
           )}
 
           <View className="rounded-lg bg-surface px-3 shadow-card">
-            <ListRow
-              icon="log-out-outline"
-              title="Đăng xuất"
-              destructive
-              showChevron={false}
-              onPress={() => setConfirmLogout(true)}
-            />
+            {isAuthenticated ? (
+              <ListRow
+                icon="log-out-outline"
+                title="Đăng xuất"
+                destructive
+                showChevron={false}
+                onPress={() => setConfirmLogout(true)}
+              />
+            ) : (
+              <ListRow
+                icon="log-in-outline"
+                iconTone="brand"
+                title="Đăng nhập"
+                onPress={() => navigation.navigate('Login')}
+              />
+            )}
           </View>
         </View>
       </ScrollView>
@@ -167,11 +221,6 @@ export const ProfileScreen: React.FC = () => {
           logout();
         }}
       />
-      {__DEV__ && (
-        <Modal visible={galleryOpen} animationType="slide" onRequestClose={() => setGalleryOpen(false)}>
-          <DevGallery onClose={() => setGalleryOpen(false)} />
-        </Modal>
-      )}
     </View>
   );
 };

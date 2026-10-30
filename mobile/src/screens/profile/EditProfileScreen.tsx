@@ -3,36 +3,36 @@ import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import * as ImagePicker from 'expo-image-picker';
 import React, { useState } from 'react';
 import {
-  Alert,
   Image,
   KeyboardAvoidingView,
   Platform,
-  SafeAreaView,
+  Pressable,
   ScrollView,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
   View,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { usersApi } from '../../api/users';
-import { Button } from '../../components/common/Button';
-import { Card } from '../../components/common/Card';
-import { Input } from '../../components/common/Input';
-import { colors } from '../../constants/colors';
+import { Button, Input, Text, TopBar, useToast } from '../../components/ui';
+import { useUpdateProfile, useUploadAvatar } from '../../services/useUser';
 import { useAuthStore } from '../../store/useAuthStore';
 import { RootStackParamList } from '../../types/navigation';
+import { resolveImageUrl } from '../../utils/image';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'EditProfile'>;
 
 export const EditProfileScreen: React.FC<Props> = ({ navigation }) => {
   const user = useAuthStore((s) => s.user);
-  const updateUser = useAuthStore((s) => s.updateUser);
+  // Toast thay cho Alert.alert: Alert không hiện gì trên web.
+  const toast = useToast();
+  const updateProfileMutation = useUpdateProfile();
+  const uploadAvatarMutation = useUploadAvatar();
 
   // Profile fields
   const [fullName, setFullName] = useState(user?.fullName || '');
   const [phone, setPhone] = useState(user?.phone || '');
   const [email, setEmail] = useState(user?.email || '');
   const [avatarUrl, setAvatarUrl] = useState(user?.avatarUrl || '');
+  const [selectedImageUri, setSelectedImageUri] = useState<string | null>(null);
   const [isUpdatingProfile, setIsUpdatingProfile] = useState(false);
 
   // Password fields
@@ -46,48 +46,55 @@ export const EditProfileScreen: React.FC<Props> = ({ navigation }) => {
     try {
       const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (!permission.granted) {
-        Alert.alert('Quyền truy cập', 'Vui lòng cấp quyền truy cập ảnh để tải ảnh đại diện lên.');
+        toast('Vui lòng cấp quyền truy cập ảnh để tải ảnh đại diện lên.', 'error');
         return;
       }
 
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        mediaTypes: ['images'],
         allowsEditing: true,
         aspect: [1, 1],
-        quality: 0.7,
-        base64: true,
+        quality: 0.8,
       });
 
       if (!result.canceled && result.assets && result.assets.length > 0) {
         const asset = result.assets[0];
-        const uri = asset.base64 ? `data:image/jpeg;base64,${asset.base64}` : asset.uri;
-        setAvatarUrl(uri);
+        setAvatarUrl(asset.uri);
+        setSelectedImageUri(asset.uri);
       }
     } catch {
-      Alert.alert('Lỗi', 'Không thể mở thư viện ảnh.');
+      toast('Không thể mở thư viện ảnh.', 'error');
     }
   };
 
   // Cập nhật thông tin cá nhân
   const handleSaveProfile = async () => {
     if (!fullName.trim()) {
-      Alert.alert('Thiếu thông tin', 'Vui lòng nhập họ và tên');
+      toast('Vui lòng nhập họ và tên', 'error');
       return;
     }
 
     try {
       setIsUpdatingProfile(true);
-      const updated = await usersApi.updateProfile({
+
+      let finalAvatarUrl = avatarUrl;
+      if (selectedImageUri) {
+        const uploadRes = await uploadAvatarMutation.mutateAsync(selectedImageUri);
+        finalAvatarUrl = uploadRes.avatarUrl || avatarUrl;
+        setSelectedImageUri(null);
+      }
+
+      await updateProfileMutation.mutateAsync({
         fullName: fullName.trim(),
         phone: phone.trim() || undefined,
         email: email.trim() || undefined,
-        avatarUrl: avatarUrl.trim() || undefined,
+        avatarUrl: finalAvatarUrl?.trim() || undefined,
       });
 
-      updateUser(updated);
-      Alert.alert('Thành công', 'Đã cập nhật thông tin cá nhân thành công!');
+      toast('Đã cập nhật thông tin cá nhân.', 'success');
+      navigation.goBack();
     } catch (err: any) {
-      Alert.alert('Lỗi', err.response?.data?.message || 'Không thể cập nhật thông tin.');
+      toast(err.response?.data?.message || err.message || 'Không thể cập nhật thông tin.', 'error');
     } finally {
       setIsUpdatingProfile(false);
     }
@@ -96,15 +103,15 @@ export const EditProfileScreen: React.FC<Props> = ({ navigation }) => {
   // Đổi mật khẩu
   const handleChangePassword = async () => {
     if (!currentPassword) {
-      Alert.alert('Thiếu thông tin', 'Vui lòng nhập mật khẩu hiện tại');
+      toast('Vui lòng nhập mật khẩu hiện tại', 'error');
       return;
     }
     if (newPassword.length < 8) {
-      Alert.alert('Mật khẩu yếu', 'Mật khẩu mới phải có ít nhất 8 ký tự');
+      toast('Mật khẩu mới phải có ít nhất 8 ký tự', 'error');
       return;
     }
     if (newPassword !== confirmPassword) {
-      Alert.alert('Không khớp', 'Mật khẩu xác nhận không khớp');
+      toast('Mật khẩu xác nhận không khớp', 'error');
       return;
     }
 
@@ -118,202 +125,135 @@ export const EditProfileScreen: React.FC<Props> = ({ navigation }) => {
       setCurrentPassword('');
       setNewPassword('');
       setConfirmPassword('');
-      Alert.alert('Thành công', 'Đổi mật khẩu thành công! Vui lòng sử dụng mật khẩu mới cho lần đăng nhập tiếp theo.');
+      toast('Đổi mật khẩu thành công. Hãy dùng mật khẩu mới cho lần đăng nhập sau.', 'success');
     } catch (err: any) {
-      Alert.alert('Lỗi', err.response?.data?.message || 'Không thể đổi mật khẩu.');
+      toast(err.response?.data?.message || 'Không thể đổi mật khẩu.', 'error');
     } finally {
       setIsUpdatingPassword(false);
     }
   };
 
   return (
-    <SafeAreaView style={styles.container}>
-      {/* Top Header */}
-      <View style={styles.topHeader}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.headerBtn}>
-          <Ionicons name="arrow-back" size={24} color="#EE4D2D" />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Chỉnh sửa tài khoản</Text>
-        <View style={{ width: 40 }} />
-      </View>
+    <SafeAreaView edges={['top', 'bottom']} style={{ flex: 1 }} className="flex-1 bg-surface">
+      <TopBar title="Chỉnh sửa tài khoản" onLeadingPress={() => navigation.goBack()} />
 
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         style={{ flex: 1 }}
+        className="flex-1"
       >
         <ScrollView
-          contentContainerStyle={styles.scrollContent}
+          style={{ flex: 1 }}
+          className="flex-1"
+          contentContainerClassName="px-4 py-5 gap-6"
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
           {/* Avatar selector */}
-          <View style={styles.avatarSection}>
-            <TouchableOpacity onPress={handlePickAvatar} style={styles.avatarWrapper}>
+          <View className="items-center">
+            <Pressable onPress={handlePickAvatar} className="relative active:opacity-80">
               {avatarUrl ? (
-                <Image source={{ uri: avatarUrl }} style={styles.avatarImage} />
+                <Image
+                  source={{ uri: resolveImageUrl(avatarUrl) || avatarUrl }}
+                  className="h-24 w-24 rounded-full border-2 border-brand-500"
+                />
               ) : (
-                <View style={styles.avatarPlaceholder}>
-                  <Ionicons name="person" size={50} color={colors.textMuted} />
+                <View className="h-24 w-24 items-center justify-center rounded-full bg-canvas-subtle border border-line">
+                  <Ionicons name="person" size={48} color="#9A9EA5" />
                 </View>
               )}
-              <View style={styles.cameraIconBadge}>
-                <Ionicons name="camera" size={16} color={colors.white} />
+              <View className="absolute bottom-0 right-0 h-8 w-8 items-center justify-center rounded-full bg-brand-500 shadow-card">
+                <Ionicons name="camera" size={16} color="#FFFFFF" />
               </View>
-            </TouchableOpacity>
-            <Text style={styles.changeAvatarText}>Chạm để đổi ảnh đại diện</Text>
+            </Pressable>
+            <Text variant="caption" tone="secondary" className="mt-2">
+              Chạm để đổi ảnh đại diện
+            </Text>
           </View>
 
           {/* Form thông tin cá nhân */}
-          <Text style={styles.sectionTitle}>Thông tin cá nhân</Text>
-          <Card style={styles.formCard}>
-            <Input
-              label="Họ và tên *"
-              placeholder="VD: Nguyễn Văn A"
-              value={fullName}
-              onChangeText={setFullName}
-            />
-            <Input
-              label="Số điện thoại"
-              placeholder="VD: 0387466222"
-              value={phone}
-              onChangeText={setPhone}
-              keyboardType="phone-pad"
-            />
-            <Input
-              label="Email"
-              placeholder="VD: user@example.com"
-              value={email}
-              onChangeText={setEmail}
-              keyboardType="email-address"
-              autoCapitalize="none"
-            />
-            <Button
-              title="Lưu thông tin cá nhân"
-              onPress={handleSaveProfile}
-              loading={isUpdatingProfile}
-              style={{ marginTop: 8 }}
-            />
-          </Card>
+          <View className="gap-2.5">
+            <Text variant="caption" weight="bold" tone="secondary" className="px-1 uppercase">
+              Thông tin cá nhân
+            </Text>
+            <View className="rounded-xl border border-line bg-surface p-4 shadow-card gap-3.5">
+              <Input
+                label="Họ và tên *"
+                placeholder="VD: Nguyễn Văn A"
+                value={fullName}
+                onChangeText={setFullName}
+                leftIcon="person-outline"
+              />
+              <Input
+                label="Số điện thoại"
+                placeholder="VD: 0387466222"
+                value={phone}
+                onChangeText={setPhone}
+                keyboardType="phone-pad"
+                leftIcon="call-outline"
+              />
+              <Input
+                label="Email"
+                placeholder="VD: user@example.com"
+                value={email}
+                onChangeText={setEmail}
+                keyboardType="email-address"
+                autoCapitalize="none"
+                leftIcon="mail-outline"
+              />
+              <Button
+                label="Lưu thông tin cá nhân"
+                onPress={handleSaveProfile}
+                loading={isUpdatingProfile}
+                variant="primary"
+                size="md"
+                className="mt-1"
+              />
+            </View>
+          </View>
 
           {/* Form Đổi mật khẩu */}
-          <Text style={styles.sectionTitle}>Đổi mật khẩu đăng nhập</Text>
-          <Card style={styles.formCard}>
-            <Input
-              label="Mật khẩu hiện tại *"
-              placeholder="Nhập mật khẩu hiện tại"
-              value={currentPassword}
-              onChangeText={setCurrentPassword}
-              secureTextEntry
-            />
-            <Input
-              label="Mật khẩu mới (tối thiểu 8 ký tự) *"
-              placeholder="Nhập mật khẩu mới"
-              value={newPassword}
-              onChangeText={setNewPassword}
-              secureTextEntry
-            />
-            <Input
-              label="Xác nhận mật khẩu mới *"
-              placeholder="Nhập lại mật khẩu mới"
-              value={confirmPassword}
-              onChangeText={setConfirmPassword}
-              secureTextEntry
-            />
-            <Button
-              title="Đổi mật khẩu"
-              onPress={handleChangePassword}
-              loading={isUpdatingPassword}
-              variant="outline"
-              style={{ marginTop: 8 }}
-            />
-          </Card>
+          <View className="gap-2.5 mb-6">
+            <Text variant="caption" weight="bold" tone="secondary" className="px-1 uppercase">
+              Đổi mật khẩu đăng nhập
+            </Text>
+            <View className="rounded-xl border border-line bg-surface p-4 shadow-card gap-3.5">
+              <Input
+                label="Mật khẩu hiện tại *"
+                placeholder="Nhập mật khẩu hiện tại"
+                value={currentPassword}
+                onChangeText={setCurrentPassword}
+                password
+                leftIcon="lock-closed-outline"
+              />
+              <Input
+                label="Mật khẩu mới (tối thiểu 8 ký tự) *"
+                placeholder="Nhập mật khẩu mới"
+                value={newPassword}
+                onChangeText={setNewPassword}
+                password
+                leftIcon="lock-closed-outline"
+              />
+              <Input
+                label="Xác nhận mật khẩu mới *"
+                placeholder="Nhập lại mật khẩu mới"
+                value={confirmPassword}
+                onChangeText={setConfirmPassword}
+                password
+                leftIcon="lock-closed-outline"
+              />
+              <Button
+                label="Đổi mật khẩu"
+                onPress={handleChangePassword}
+                loading={isUpdatingPassword}
+                variant="outline"
+                size="md"
+                className="mt-1"
+              />
+            </View>
+          </View>
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
 };
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#F5F5F5',
-  },
-  topHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    backgroundColor: colors.white,
-    borderBottomWidth: 1,
-    borderBottomColor: '#EEEEEE',
-  },
-  headerBtn: {
-    padding: 6,
-  },
-  headerTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: colors.text,
-  },
-  scrollContent: {
-    padding: 16,
-    paddingBottom: 40,
-  },
-  avatarSection: {
-    alignItems: 'center',
-    marginBottom: 20,
-    marginTop: 8,
-  },
-  avatarWrapper: {
-    position: 'relative',
-    width: 96,
-    height: 96,
-    borderRadius: 48,
-  },
-  avatarImage: {
-    width: 96,
-    height: 96,
-    borderRadius: 48,
-  },
-  avatarPlaceholder: {
-    width: 96,
-    height: 96,
-    borderRadius: 48,
-    backgroundColor: '#E5E7EB',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  cameraIconBadge: {
-    position: 'absolute',
-    bottom: 0,
-    right: 0,
-    backgroundColor: '#EE4D2D',
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 2,
-    borderColor: colors.white,
-  },
-  changeAvatarText: {
-    marginTop: 8,
-    fontSize: 13,
-    color: colors.textSecondary,
-    fontWeight: '500',
-  },
-  sectionTitle: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: colors.text,
-    marginBottom: 8,
-    marginTop: 8,
-  },
-  formCard: {
-    padding: 16,
-    borderRadius: 10,
-    backgroundColor: colors.white,
-    marginBottom: 16,
-  },
-});

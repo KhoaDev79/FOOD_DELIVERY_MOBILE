@@ -8,6 +8,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { toPublicUser } from '../users/users.service';
 import { LoginDto, RegisterDto } from './dto/auth.dto';
 import { JwtPayload } from './strategies/jwt.strategy';
+import { generateUniqueUsername } from '../../common/utils/username.util';
 
 export interface TokenPair {
   accessToken: string;
@@ -32,6 +33,7 @@ export class AuthService {
     const user = await this.prisma.user.create({
       data: {
         email: dto.email,
+        username: await generateUniqueUsername(this.prisma, dto.email),
         phone: dto.phone,
         fullName: dto.fullName,
         role: dto.role ?? 'CUSTOMER',
@@ -43,10 +45,14 @@ export class AuthService {
   }
 
   async login(dto: LoginDto) {
-    const user = await this.prisma.user.findUnique({ where: { email: dto.email } });
-    // Thông báo chung chung để tránh lộ thông tin email nào tồn tại
+    // Ô đăng nhập nhận tên đăng nhập; có "@" thì coi là email (tài khoản/client cũ vẫn dùng được)
+    const identifier = (dto.username || dto.email || '').trim().toLowerCase();
+    const user = identifier.includes('@')
+      ? await this.prisma.user.findUnique({ where: { email: identifier } })
+      : await this.prisma.user.findUnique({ where: { username: identifier } });
+    // Thông báo chung chung để tránh lộ tài khoản nào tồn tại
     if (!user || !(await verifySecret(user.passwordHash, dto.password))) {
-      throw new UnauthorizedException('Email hoặc mật khẩu không đúng');
+      throw new UnauthorizedException('Tên đăng nhập hoặc mật khẩu không đúng');
     }
     if (!user.isActive) throw new ForbiddenException('Tài khoản đã bị khóa');
 

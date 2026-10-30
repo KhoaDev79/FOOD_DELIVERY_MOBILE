@@ -45,6 +45,7 @@ import { useCartStore } from '../../store/useCartStore';
 import { Banner, MenuItem, NearbyDish, Restaurant } from '../../types/api';
 import { RootStackParamList } from '../../types/navigation';
 import { filterRestaurants, pickFeatured, sortByDistance } from '../../utils/homeSections';
+import { hasChoices } from '../../utils/menuPricing';
 
 const COORD_LIKE = /^(t[oọ][aạ]\s*đ[oộ]|[-+]?\d+\.\d+)/i;
 /** Cuộn quá mức này thì hiện thanh tìm kiếm gọn dính trên cùng (ảnh mẫu 3–6). */
@@ -205,8 +206,15 @@ export const HomeScreen: React.FC = () => {
   const clearCart = useCartStore((s) => s.clearCart);
   const [pendingDish, setPendingDish] = useState<NearbyDish | null>(null);
 
-  // Cùng quy tắc với màn Chi tiết quán: giỏ chỉ chứa món của một quán.
+  // Nếu món có tuỳ chọn (size, topping...), điều hướng vào quán và mở bảng chọn thay vì thêm thẳng.
   const addDish = (d: NearbyDish) => {
+    if (hasChoices(d)) {
+      navigation.navigate('RestaurantDetail', {
+        restaurantId: d.restaurant.id,
+        openDishId: d.id,
+      });
+      return;
+    }
     const { restaurant, item } = toCartPayload(d);
     if (addItem(restaurant, item) === 'DIFFERENT_RESTAURANT') setPendingDish(d);
     else toast(`Đã thêm ${d.name} vào giỏ`, 'success');
@@ -220,7 +228,11 @@ export const HomeScreen: React.FC = () => {
     setPendingDish(null);
   };
   const openDish = useCallback(
-    (d: NearbyDish) => navigation.navigate('RestaurantDetail', { restaurantId: d.restaurant.id }),
+    (d: NearbyDish) =>
+      navigation.navigate('RestaurantDetail', {
+        restaurantId: d.restaurant.id,
+        openDishId: d.id,
+      }),
     [navigation],
   );
   const openBanner = (b: Banner) => {
@@ -276,9 +288,8 @@ export const HomeScreen: React.FC = () => {
             </Pressable>
             <SearchBar
               size="lg"
-              value={searchFilter}
-              onChangeText={setSearchFilter}
-              onClear={() => setSearchFilter('')}
+              placeholder="Bạn đang tìm kiếm món gì?"
+              onPressAsButton={() => navigation.navigate('Search')}
             />
           </View>
         </SafeAreaView>
@@ -478,9 +489,8 @@ export const HomeScreen: React.FC = () => {
             <View className="flex-row items-center gap-2 px-4 pb-2 pt-2">
               <SearchBar
                 className="flex-1"
-                value={searchFilter}
-                onChangeText={setSearchFilter}
-                onClear={() => setSearchFilter('')}
+                placeholder="Bạn đang tìm kiếm món gì?"
+                onPressAsButton={() => navigation.navigate('Search')}
               />
             </View>
           </SafeAreaView>

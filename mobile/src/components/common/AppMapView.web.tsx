@@ -10,6 +10,7 @@ export interface MapMarkerItem {
   title?: string;
   description?: string;
   pinColor?: string;
+  type?: 'restaurant' | 'delivery' | 'driver';
 }
 
 interface AppMapViewProps {

@@ -1,31 +1,85 @@
-import { Ionicons } from '@expo/vector-icons';
-import { useNavigation } from '@react-navigation/native';
+import { useIsFocused, useNavigation } from '@react-navigation/native';
 import { useQuery } from '@tanstack/react-query';
+import { StatusBar } from 'expo-status-bar';
 import React, { useState } from 'react';
-import {
-  RefreshControl,
-  SafeAreaView,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
-} from 'react-native';
+import { Pressable, RefreshControl, ScrollView, View } from 'react-native';
 import { adminApi } from '../../api/admin';
-import { Card } from '../../components/common/Card';
-import { LoadingSpinner } from '../../components/common/LoadingSpinner';
-import { colors } from '../../constants/colors';
+import { ROLE_META, SectionCard } from '../../components/modules/admin/adminShared';
+import {
+  CountBadge,
+  ErrorState,
+  Icon,
+  IconName,
+  IconTone,
+  IconButton,
+  OrderStatusBadge,
+  Skeleton,
+  TAB_BAR_CLEARANCE,
+  TabHeader,
+  Text,
+} from '../../components/ui';
+import { palette } from '../../theme';
+import { OrderStatus, Role } from '../../types/api';
 import { formatVND } from '../../utils/format';
+
+const ORDER_FLOW: OrderStatus[] = [
+  'PENDING',
+  'CONFIRMED',
+  'PREPARING',
+  'READY_FOR_PICKUP',
+  'PICKED_UP',
+  'DELIVERED',
+  'CANCELLED',
+];
+
+const ROLE_ORDER: Role[] = ['CUSTOMER', 'RESTAURANT_OWNER', 'DRIVER', 'ADMIN'];
+const ROLE_BAR: Record<Role, string> = {
+  CUSTOMER: 'bg-brand-500',
+  RESTAURANT_OWNER: 'bg-warning',
+  DRIVER: 'bg-success',
+  ADMIN: 'bg-danger',
+};
+
+/** Thẻ số liệu bo 2xl, bóng nhẹ, icon tròn nền nhạt như thẻ ở Trang chủ. */
+const MetricCard: React.FC<{
+  label: string;
+  value: string;
+  caption?: string;
+  icon: IconName;
+  iconTone?: IconTone;
+  iconBg?: string;
+  onPress?: () => void;
+}> = ({ label, value, caption, icon, iconTone = 'brand', iconBg = 'bg-brand-50', onPress }) => (
+  <Pressable
+    accessibilityRole={onPress ? 'button' : undefined}
+    accessibilityLabel={`${label}: ${value}`}
+    disabled={!onPress}
+    onPress={onPress}
+    className="min-w-36 flex-1 basis-[46%] gap-1.5 rounded-2xl bg-surface p-4 shadow-card active:opacity-90"
+  >
+    <View className={`h-10 w-10 items-center justify-center rounded-full ${iconBg}`}>
+      <Icon name={icon} size="md" tone={iconTone} />
+    </View>
+    <Text variant="title" weight="bold" numberOfLines={1} adjustsFontSizeToFit>
+      {value}
+    </Text>
+    <Text variant="caption" tone="secondary" numberOfLines={1}>
+      {label}
+    </Text>
+    {!!caption && (
+      <Text variant="micro" weight="regular" tone="muted" numberOfLines={2}>
+        {caption}
+      </Text>
+    )}
+  </Pressable>
+);
 
 export const AdminDashboardScreen: React.FC = () => {
   const navigation = useNavigation<any>();
+  const isFocused = useIsFocused();
   const [refreshing, setRefreshing] = useState(false);
 
-  const {
-    data: stats,
-    isLoading,
-    refetch,
-  } = useQuery({
+  const { data: stats, isLoading, isError, refetch } = useQuery({
     queryKey: ['admin', 'stats'],
     queryFn: () => adminApi.getStats(),
   });
@@ -36,308 +90,183 @@ export const AdminDashboardScreen: React.FC = () => {
     setRefreshing(false);
   };
 
-  if (isLoading && !refreshing) {
-    return <LoadingSpinner message="Đang tải dữ liệu tổng quan hệ thống..." />;
-  }
-
-  const userRoles = stats?.users.roles || {};
-  const orderStatuses = stats?.orders.statuses || {};
+  const users = stats?.users;
+  const orders = stats?.orders;
+  const statuses = orders?.statuses ?? {};
+  const delivered = statuses.DELIVERED ?? 0;
+  const successRate = orders?.total ? Math.round((delivered / orders.total) * 100) : null;
+  const pendingRequests = stats?.roleRequests.pending ?? 0;
 
   return (
-    <SafeAreaView style={styles.container}>
+    <View className="flex-1 bg-canvas-subtle">
+      {isFocused && <StatusBar style="light" />}
       <ScrollView
-        contentContainerStyle={styles.scrollContent}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={onRefresh}
-            colors={[colors.primary]}
-          />
-        }
+        contentContainerClassName={TAB_BAR_CLEARANCE}
+        showsVerticalScrollIndicator={false}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[palette.brand['500']]} />}
       >
-        {/* Header */}
-        <View style={styles.header}>
-          <View>
-            <Text style={styles.headerTitle}>Hệ thống Quản trị</Text>
-            <Text style={styles.headerSubtitle}>Tổng quan vận hành toàn sàn Food Delivery</Text>
+        <TabHeader
+          title="Tổng quan Quản trị"
+          trailing={
+            <IconButton
+              icon="refresh"
+              variant="glass"
+              accessibilityLabel="Làm mới số liệu"
+              onPress={onRefresh}
+            />
+          }
+        >
+          {/* Doanh thu toàn sàn */}
+          <View className="gap-0.5 rounded-xl bg-surface/15 p-4">
+            <Text variant="caption" tone="inverse" className="opacity-85">
+              Doanh thu sàn (GMV) – đơn giao thành công
+            </Text>
+            {isLoading ? (
+              <Skeleton className="mt-1 h-8 w-40 bg-surface/30" />
+            ) : (
+              <Text variant="display" tone="inverse">
+                {formatVND(orders?.totalRevenue ?? 0)}
+              </Text>
+            )}
           </View>
-          <TouchableOpacity onPress={onRefresh} style={styles.refreshBtn}>
-            <Ionicons name="reload" size={18} color={colors.primary} />
-          </TouchableOpacity>
-        </View>
+        </TabHeader>
 
-        {/* Doanh thu toàn hệ thống */}
-        <Card style={styles.revenueCard}>
-          <View style={styles.revenueHeader}>
-            <Ionicons name="trending-up" size={24} color={colors.white} />
-            <Text style={styles.revenueLabel}>Tổng Doanh thu Sàn (GMV)</Text>
-          </View>
-          <Text style={styles.revenueAmount}>
-            {formatVND(stats?.orders.totalRevenue || 0)}
-          </Text>
-          <Text style={styles.revenueHint}>
-            Được tính từ tất cả đơn hàng đã giao thành công
-          </Text>
-        </Card>
+        {isError ? (
+          <ErrorState onRetry={refetch} />
+        ) : (
+          <View className="gap-4 px-4 pt-4">
+            {/* Yêu cầu chờ duyệt */}
+            {pendingRequests > 0 && (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={`${pendingRequests} yêu cầu nâng cấp vai trò đang chờ duyệt`}
+                onPress={() => navigation.navigate('AdminUsersTab', { openRequests: true })}
+                className="flex-row items-center gap-3 rounded-2xl border border-warning/40 bg-warning-soft p-4 active:opacity-85"
+              >
+                <View className="h-10 w-10 items-center justify-center rounded-full bg-surface">
+                  <Icon name="person-add" size="md" tone="accent" />
+                </View>
+                <View className="flex-1">
+                  <Text variant="body" weight="semibold">
+                    Yêu cầu mở quán / làm tài xế
+                  </Text>
+                  <Text variant="caption" tone="secondary">
+                    Có {pendingRequests} yêu cầu đang chờ bạn duyệt
+                  </Text>
+                </View>
+                <CountBadge count={pendingRequests} />
+                <Icon name="chevron-forward" size="md" tone="muted" />
+              </Pressable>
+            )}
 
-        {/* Grid 4 chỉ số chính */}
-        <View style={styles.grid}>
-          {/* Card Người dùng */}
-          <Card style={styles.gridCard}>
-            <View style={[styles.iconCircle, { backgroundColor: '#E0F2FE' }]}>
-              <Ionicons name="people" size={20} color="#0284C7" />
+            {/* Lưới chỉ số */}
+            <View className="flex-row flex-wrap gap-3">
+              <MetricCard
+                label="Người dùng"
+                value={isLoading ? '—' : String(users?.total ?? 0)}
+                caption={users?.inactive ? `${users.inactive} tài khoản đang bị khoá` : 'Tất cả đang hoạt động'}
+                icon="people"
+                onPress={() => navigation.navigate('AdminUsersTab')}
+              />
+              <MetricCard
+                label="Quán ăn"
+                value={isLoading ? '—' : String(stats?.restaurants.total ?? 0)}
+                caption={`${stats?.restaurants.open ?? 0} đang mở • ${stats?.restaurants.closed ?? 0} tạm ngưng`}
+                icon="storefront"
+                iconTone="accent"
+                iconBg="bg-accent-50"
+                onPress={() => navigation.navigate('AdminRestaurantsTab', { filter: 'all' })}
+              />
+              <MetricCard
+                label="Tổng đơn hàng"
+                value={isLoading ? '—' : String(orders?.total ?? 0)}
+                caption={`${delivered} đơn hoàn thành`}
+                icon="receipt"
+                iconTone="success"
+                iconBg="bg-success-soft"
+              />
+              <MetricCard
+                label="Tỷ lệ giao thành công"
+                value={successRate === null ? '—' : `${successRate}%`}
+                caption={`${statuses.CANCELLED ?? 0} đơn đã huỷ`}
+                icon="checkmark-done-circle"
+                iconTone="success"
+                iconBg="bg-success-soft"
+              />
             </View>
-            <Text style={styles.gridNumber}>{stats?.users.total || 0}</Text>
-            <Text style={styles.gridLabel}>Người dùng</Text>
-            <Text style={styles.gridSub}>
-              {userRoles['CUSTOMER'] || 0} khách • {userRoles['RESTAURANT_OWNER'] || 0} quán • {userRoles['DRIVER'] || 0} xế
-            </Text>
-          </Card>
 
-          {/* Card Quán ăn */}
-          <Card style={styles.gridCard}>
-            <View style={[styles.iconCircle, { backgroundColor: '#FEF3C7' }]}>
-              <Ionicons name="restaurant" size={20} color="#D97706" />
-            </View>
-            <Text style={styles.gridNumber}>{stats?.restaurants.total || 0}</Text>
-            <Text style={styles.gridLabel}>Nhà hàng</Text>
-            <Text style={styles.gridSub}>
-              {stats?.restaurants.open || 0} Đang mở • {stats?.restaurants.closed || 0} Đóng
-            </Text>
-          </Card>
+            {/* Quán chưa có chủ */}
+            {!!stats?.restaurants.unassigned && (
+              <Pressable
+                accessibilityRole="button"
+                onPress={() => navigation.navigate('AdminRestaurantsTab', { filter: 'unassigned' })}
+                className="flex-row items-center gap-3 rounded-2xl bg-surface p-4 shadow-card active:opacity-85"
+              >
+                <View className="h-10 w-10 items-center justify-center rounded-full bg-danger-soft">
+                  <Icon name="key-outline" size="md" tone="danger" />
+                </View>
+                <Text variant="body" weight="medium" className="flex-1">
+                  {stats.restaurants.unassigned} quán chưa có chủ quán – cần gán người quản lý
+                </Text>
+                <Icon name="chevron-forward" size="md" tone="muted" />
+              </Pressable>
+            )}
 
-          {/* Card Đơn hàng */}
-          <Card style={styles.gridCard}>
-            <View style={[styles.iconCircle, { backgroundColor: '#DCFCE7' }]}>
-              <Ionicons name="receipt" size={20} color="#16A34A" />
-            </View>
-            <Text style={styles.gridNumber}>{stats?.orders.total || 0}</Text>
-            <Text style={styles.gridLabel}>Tổng đơn hàng</Text>
-            <Text style={styles.gridSub}>
-              {orderStatuses['DELIVERED'] || 0} hoàn thành
-            </Text>
-          </Card>
+            {/* Cơ cấu người dùng: tổng = các vai trò cộng lại */}
+            <SectionCard title="Cơ cấu người dùng" icon="people-outline">
+              {users && users.total > 0 && (
+                <View className="h-2.5 flex-row overflow-hidden rounded-full bg-canvas-subtle">
+                  {ROLE_ORDER.map((r) =>
+                    users.roles[r] ? (
+                      <View key={r} className={ROLE_BAR[r]} style={{ flex: users.roles[r] }} />
+                    ) : null,
+                  )}
+                </View>
+              )}
+              {ROLE_ORDER.map((r) => (
+                <View key={r} className="flex-row items-center gap-2 py-1">
+                  <View className={`h-2.5 w-2.5 rounded-full ${ROLE_BAR[r]}`} />
+                  <Text variant="body" tone="secondary" className="flex-1">
+                    {ROLE_META[r].label}
+                  </Text>
+                  <Text variant="body" weight="semibold">
+                    {users?.roles[r] ?? 0}
+                  </Text>
+                </View>
+              ))}
+              <View className="mt-1 flex-row items-center justify-between border-t border-line-subtle pt-2">
+                <Text variant="body" weight="semibold">
+                  Tổng cộng
+                </Text>
+                <Text variant="body" weight="bold" tone="brand">
+                  {users?.total ?? 0}
+                </Text>
+              </View>
+            </SectionCard>
 
-          {/* Card Tỷ lệ thành công */}
-          <Card style={styles.gridCard}>
-            <View style={[styles.iconCircle, { backgroundColor: '#FEE2E2' }]}>
-              <Ionicons name="checkmark-done-circle" size={20} color="#DC2626" />
-            </View>
-            <Text style={styles.gridNumber}>
-              {stats?.orders.total
-                ? `${Math.round(((orderStatuses['DELIVERED'] || 0) / stats.orders.total) * 100)}%`
-                : '100%'}
-            </Text>
-            <Text style={styles.gridLabel}>Tỷ lệ giao đạt</Text>
-            <Text style={styles.gridSub}>
-              {orderStatuses['CANCELLED'] || 0} đơn huỷ
-            </Text>
-          </Card>
-        </View>
-
-        {/* Trạng thái các đơn hàng */}
-        <Card style={styles.sectionCard}>
-          <Text style={styles.sectionTitle}>Phân bổ trạng thái đơn</Text>
-          <View style={styles.statusRow}>
-            <Text style={styles.statusName}>Chờ quán xác nhận (PENDING)</Text>
-            <Text style={styles.statusCount}>{orderStatuses['PENDING'] || 0}</Text>
+            {/* Phân bổ trạng thái đơn */}
+            <SectionCard title="Trạng thái đơn hàng" icon="receipt-outline">
+              {ORDER_FLOW.map((s) => {
+                const n = statuses[s] ?? 0;
+                const pct = orders?.total ? (n / orders.total) * 100 : 0;
+                return (
+                  <View key={s} className="gap-1 py-1">
+                    <View className="flex-row items-center justify-between">
+                      <OrderStatusBadge status={s} />
+                      <Text variant="body" weight="semibold">
+                        {n}
+                      </Text>
+                    </View>
+                    <View className="h-1.5 overflow-hidden rounded-full bg-canvas-subtle">
+                      <View className="h-full rounded-full bg-brand-300" style={{ width: `${pct}%` }} />
+                    </View>
+                  </View>
+                );
+              })}
+            </SectionCard>
           </View>
-          <View style={styles.divider} />
-          <View style={styles.statusRow}>
-            <Text style={styles.statusName}>Đang nấu (PREPARING)</Text>
-            <Text style={styles.statusCount}>{orderStatuses['PREPARING'] || 0}</Text>
-          </View>
-          <View style={styles.divider} />
-          <View style={styles.statusRow}>
-            <Text style={styles.statusName}>Chờ tài xế lấy (READY_FOR_PICKUP)</Text>
-            <Text style={styles.statusCount}>{orderStatuses['READY_FOR_PICKUP'] || 0}</Text>
-          </View>
-          <View style={styles.divider} />
-          <View style={styles.statusRow}>
-            <Text style={styles.statusName}>Đang trên đường giao (PICKED_UP)</Text>
-            <Text style={styles.statusCount}>{orderStatuses['PICKED_UP'] || 0}</Text>
-          </View>
-          <View style={styles.divider} />
-          <View style={styles.statusRow}>
-            <Text style={styles.statusName}>Giao thành công (DELIVERED)</Text>
-            <Text style={[styles.statusCount, { color: colors.success }]}>
-              {orderStatuses['DELIVERED'] || 0}
-            </Text>
-          </View>
-          <View style={styles.divider} />
-          <View style={styles.statusRow}>
-            <Text style={styles.statusName}>Đã huỷ (CANCELLED)</Text>
-            <Text style={[styles.statusCount, { color: colors.danger }]}>
-              {orderStatuses['CANCELLED'] || 0}
-            </Text>
-          </View>
-        </Card>
-
-        {/* Lối tắt quản lý */}
-        <View style={styles.quickActions}>
-          <TouchableOpacity
-            style={styles.actionBtn}
-            onPress={() => navigation.navigate('AdminUsersTab')}
-          >
-            <Ionicons name="people-outline" size={20} color={colors.primary} />
-            <Text style={styles.actionBtnText}>Quản lý Người dùng</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.actionBtn}
-            onPress={() => navigation.navigate('AdminRestaurantsTab')}
-          >
-            <Ionicons name="restaurant-outline" size={20} color={colors.primary} />
-            <Text style={styles.actionBtnText}>Quản lý Quán ăn</Text>
-          </TouchableOpacity>
-        </View>
+        )}
       </ScrollView>
-    </SafeAreaView>
+    </View>
   );
 };
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: colors.background,
-  },
-  scrollContent: {
-    padding: 16,
-    paddingBottom: 40,
-  },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  headerTitle: {
-    fontSize: 20,
-    fontWeight: '800',
-    color: colors.text,
-  },
-  headerSubtitle: {
-    fontSize: 13,
-    color: colors.textMuted,
-    marginTop: 2,
-  },
-  refreshBtn: {
-    padding: 8,
-    borderRadius: 8,
-    backgroundColor: colors.white,
-  },
-  revenueCard: {
-    backgroundColor: '#1E293B',
-    padding: 18,
-    marginBottom: 16,
-  },
-  revenueHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  revenueLabel: {
-    color: '#94A3B8',
-    fontSize: 13,
-    fontWeight: '600',
-    marginLeft: 8,
-  },
-  revenueAmount: {
-    fontSize: 26,
-    fontWeight: '800',
-    color: '#38BDF8',
-  },
-  revenueHint: {
-    color: '#64748B',
-    fontSize: 11,
-    marginTop: 6,
-  },
-  grid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'space-between',
-    marginBottom: 16,
-  },
-  gridCard: {
-    width: '48%',
-    padding: 14,
-    marginBottom: 12,
-  },
-  iconCircle: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  gridNumber: {
-    fontSize: 20,
-    fontWeight: '800',
-    color: colors.text,
-  },
-  gridLabel: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: colors.textSecondary,
-    marginTop: 2,
-  },
-  gridSub: {
-    fontSize: 11,
-    color: colors.textMuted,
-    marginTop: 4,
-  },
-  sectionCard: {
-    padding: 16,
-    marginBottom: 16,
-  },
-  sectionTitle: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: colors.text,
-    marginBottom: 12,
-  },
-  statusRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: 6,
-  },
-  statusName: {
-    fontSize: 13,
-    color: colors.textSecondary,
-  },
-  statusCount: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: colors.text,
-  },
-  divider: {
-    height: 1,
-    backgroundColor: colors.borderLight,
-    marginVertical: 4,
-  },
-  quickActions: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-  },
-  actionBtn: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colors.white,
-    paddingVertical: 14,
-    borderRadius: 10,
-    marginHorizontal: 4,
-    borderWidth: 1,
-    borderColor: colors.borderLight,
-  },
-  actionBtnText: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: colors.primary,
-    marginLeft: 8,
-  },
-});
-

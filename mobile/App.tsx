@@ -2,15 +2,19 @@ import './global.css';
 import './src/theme/interop';
 
 import { NavigationContainer } from '@react-navigation/native';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query';
 import { useFonts } from 'expo-font';
 import { StatusBar } from 'expo-status-bar';
-import { Platform } from 'react-native';
+import { useEffect, useRef } from 'react';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { ToastProvider } from './src/components/ui/Overlays';
-import { DevGallery } from './src/dev/DevGallery';
 import { AppNavigator } from './src/navigation/AppNavigator';
+import { useAuthStore } from './src/store/useAuthStore';
 import { fontAssets } from './src/theme';
+import { installWebAlert } from './src/utils/webAlert';
+
+// Alert.alert có nút không chạy trên web: thay bằng hộp thoại của trình duyệt (xem utils/webAlert.ts)
+installWebAlert();
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -31,9 +35,23 @@ const linking = {
   },
 };
 
-// Trang thư viện thành phần: chỉ ở chế độ phát triển, trên web mở bằng ?gallery
-const showGallery =
-  __DEV__ && Platform.OS === 'web' && typeof window !== 'undefined' && window.location.search.includes('gallery');
+/**
+ * Đổi tài khoản (đăng nhập, đăng xuất, đổi vai trò) thì xoá toàn bộ dữ liệu đã tải, để tài khoản
+ * sau không thấy dữ liệu cũ của tài khoản trước (vd. chủ quán đổi tên quán rồi đăng nhập lại bằng
+ * tài khoản khách hàng vẫn thấy tên cũ trong bộ nhớ đệm).
+ */
+function ResetCacheOnAccountChange() {
+  const queryClient = useQueryClient();
+  const userId = useAuthStore((s) => s.user?.id ?? null);
+  const previous = useRef(userId);
+  useEffect(() => {
+    if (previous.current !== userId) {
+      previous.current = userId;
+      queryClient.clear();
+    }
+  }, [userId, queryClient]);
+  return null;
+}
 
 export default function App() {
   const [fontsLoaded, fontError] = useFonts(fontAssets);
@@ -43,15 +61,12 @@ export default function App() {
   return (
     <SafeAreaProvider className="flex-1 min-h-full">
       <QueryClientProvider client={queryClient}>
+        <ResetCacheOnAccountChange />
         <ToastProvider>
-        {showGallery ? (
-          <DevGallery />
-        ) : (
           <NavigationContainer linking={linking}>
             <StatusBar style="dark" />
             <AppNavigator />
           </NavigationContainer>
-        )}
         </ToastProvider>
       </QueryClientProvider>
     </SafeAreaProvider>

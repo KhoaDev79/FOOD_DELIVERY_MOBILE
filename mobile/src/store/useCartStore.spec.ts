@@ -58,6 +58,29 @@ describe('useCartStore – giá khớp backend', () => {
       'DIFFERENT_RESTAURANT',
     );
   });
+
+  it('cập nhật tuỳ chọn của món đã có trong giỏ', () => {
+    useCartStore.getState().addItem(quan, pho, 1);
+    const item = useCartStore.getState().items[0];
+    expect(item.unitPrice).toBe(55000);
+
+    useCartStore.getState().updateLineItem(item.id ?? item.menuItem.id, 2, {
+      sizeId: 'dac_biet',
+      size: 'Tô đặc biệt',
+      toppingIds: ['quay'],
+      toppings: ['Quẩy'],
+      note: 'Ít bánh',
+    });
+
+    const updated = useCartStore.getState().items[0];
+    expect(updated.quantity).toBe(2);
+    expect(updated.sizeId).toBe('dac_biet');
+    expect(updated.size).toBe('Tô đặc biệt');
+    expect(updated.toppingIds).toEqual(['quay']);
+    expect(updated.note).toBe('Ít bánh');
+    expect(updated.unitPrice).toBe(55000 + 15000 + 8000);
+    expect(useCartStore.getState().getSubtotal()).toBe((55000 + 15000 + 8000) * 2);
+  });
 });
 
 describe('useCartStore – nâng cấp giỏ cũ (v1 → v2)', () => {

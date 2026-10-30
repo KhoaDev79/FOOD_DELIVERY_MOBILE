@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Image, View } from 'react-native';
+import { Image, StyleProp, StyleSheet, View, ViewStyle } from 'react-native';
 import { resolveImageUrl } from '../../utils/image';
 import { cn } from './cn';
 import { Icon, IconName } from './Icon';
@@ -9,6 +9,7 @@ export interface AppImageProps {
   uri?: string | null;
   /** Kích thước, bo góc, tỉ lệ ảnh... đặt trên khung ngoài. */
   className?: string;
+  style?: StyleProp<ViewStyle>;
   fallbackIcon?: IconName;
   /** Nhãn cho ảnh quan trọng; bỏ trống nếu ảnh chỉ để trang trí. */
   accessibilityLabel?: string;
@@ -23,6 +24,7 @@ export interface AppImageProps {
 export const AppImage: React.FC<AppImageProps> = ({
   uri,
   className,
+  style,
   fallbackIcon = 'restaurant-outline',
   accessibilityLabel,
   resizeMode = 'cover',
@@ -36,6 +38,7 @@ export const AppImage: React.FC<AppImageProps> = ({
   return (
     <View
       className={cn('overflow-hidden bg-canvas-subtle', className)}
+      style={style}
       accessible={!!accessibilityLabel}
       accessibilityRole={accessibilityLabel ? 'image' : undefined}
       accessibilityLabel={accessibilityLabel}
@@ -49,7 +52,7 @@ export const AppImage: React.FC<AppImageProps> = ({
           <Image
             source={{ uri: resolved }}
             resizeMode={resizeMode}
-            className="absolute inset-0 h-full w-full"
+            style={StyleSheet.absoluteFill}
             onLoadEnd={() => setLoading(false)}
             onError={() => {
               setLoading(false);

@@ -1,12 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { LayoutChangeEvent, Pressable, View } from 'react-native';
 import Animated, {
-  Extrapolation,
-  interpolate,
   SharedValue,
   useAnimatedRef,
   useAnimatedScrollHandler,
-  useAnimatedStyle,
   useReducedMotion,
   useSharedValue,
 } from 'react-native-reanimated';
@@ -16,7 +13,6 @@ import { formatDistance } from '../../../utils/format';
 
 const GAP = 12;
 const AUTO_MS = 4000;
-const SIDE_SCALE = 0.86;
 
 const FeaturedCard: React.FC<{
   restaurant: Restaurant;
@@ -26,31 +22,20 @@ const FeaturedCard: React.FC<{
   scrollX: SharedValue<number>;
   reduced: boolean;
   onPress: (r: Restaurant) => void;
-}> = ({ restaurant: r, index, width, step, scrollX, reduced, onPress }) => {
-  // NGOẠI LỆ style: độ phóng to phụ thuộc vị trí cuộn (giá trị hoạt hình).
-  const animated = useAnimatedStyle(() => {
-    if (reduced) return { transform: [{ scale: 1 }] };
-    const scale = interpolate(
-      scrollX.value,
-      [(index - 1) * step, index * step, (index + 1) * step],
-      [SIDE_SCALE, 1, SIDE_SCALE],
-      Extrapolation.CLAMP,
-    );
-    return { transform: [{ scale }] };
-  });
+}> = ({ restaurant: r, width, onPress }) => {
   const rating = r.rating.toLocaleString('vi-VN', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
   const distance = formatDistance(r.distanceKm);
 
   return (
-    // NGOẠI LỆ style: chiều rộng thẻ tính từ chiều rộng khung (giá trị động).
-    <Animated.View style={[{ width }, animated]}>
+    // Chiều rộng thẻ tính từ chiều rộng khung (giá trị động) để tỉ lệ luôn đồng nhất.
+    <View style={{ width }}>
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={`${r.name}, ${rating} sao${distance ? `, cách ${distance}` : ''}`}
         onPress={() => onPress(r)}
         className="overflow-hidden rounded-xl bg-surface shadow-card active:opacity-90"
       >
-        <AppImage uri={r.imageUrl} className="aspect-square w-full" fallbackIcon="restaurant-outline">
+        <AppImage uri={r.imageUrl} className="w-full" style={{ width: '100%', height: width }} fallbackIcon="restaurant-outline">
           {!r.isOpen && (
             <View className="absolute inset-0 items-center justify-center bg-scrim">
               <Text variant="caption" tone="inverse">
@@ -59,7 +44,7 @@ const FeaturedCard: React.FC<{
             </View>
           )}
         </AppImage>
-        <View className="min-h-20 gap-1 px-3 pb-3 pt-3">
+        <View className="h-20 gap-1 px-3 pb-3 pt-3">
           <Text variant="body-lg" weight="medium" numberOfLines={2}>
             {r.name}
           </Text>
@@ -76,7 +61,7 @@ const FeaturedCard: React.FC<{
           </View>
         </View>
       </Pressable>
-    </Animated.View>
+    </View>
   );
 };
 
@@ -158,7 +143,7 @@ export const FeaturedCarousel: React.FC<{
               }}
               scrollEventThrottle={16}
               // NGOẠI LỆ style: lề hai bên để thẻ đầu/cuối nằm giữa khung, tính từ chiều rộng đo được.
-              contentContainerStyle={{ paddingHorizontal: sidePad, gap: GAP, alignItems: 'center' }}
+              contentContainerStyle={{ paddingHorizontal: sidePad, gap: GAP, alignItems: 'flex-start' }}
             >
               {restaurants.map((r, i) => (
                 <FeaturedCard

@@ -7,14 +7,12 @@ import {
   Image,
   KeyboardAvoidingView,
   Platform,
-  SafeAreaView,
-  StyleSheet,
-  Text,
+  Pressable,
   TextInput,
-  TouchableOpacity,
   View,
 } from 'react-native';
-import { colors } from '../../constants/colors';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { Text } from '../../components/ui';
 import { RootStackParamList } from '../../types/navigation';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Chat'>;
@@ -49,16 +47,17 @@ const INITIAL_MESSAGES: Message[] = [
   {
     id: 'm4',
     sender: 'other',
-    text: 'Dạ vâng, em vừa dặn chủ quán bỏ thêm đầy đủ tương ớt và muỗng đũa rồi ạ.',
-    time: '12:06',
+    text: 'Dạ em vừa dặn thu ngân rồi ạ. Em đang trên đường giao tới đây!',
+    time: '12:08',
   },
 ];
 
 const QUICK_REPLIES = [
-  'Đã tới chưa bạn ơi?',
-  'Cho mình xin thêm đũa muỗng nhé',
-  'Cứ để trước cửa phòng giúp mình',
-  'Gọi điện khi tới nơi nhé',
+  'Đến nơi gọi mình nhé!',
+  'Để trước cửa giúp mình',
+  'Mình xuống ngay đây',
+  'Xin thêm muỗng đũa',
+  'Giao nhanh giúp mình với',
 ];
 
 export const ChatScreen: React.FC<Props> = ({ navigation, route }) => {
@@ -139,35 +138,40 @@ export const ChatScreen: React.FC<Props> = ({ navigation, route }) => {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView edges={['top', 'bottom']} style={{ flex: 1 }} className="flex-1 bg-canvas-subtle">
       {/* Top Header */}
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
-          <Ionicons name="arrow-back" size={24} color={colors.text} />
-        </TouchableOpacity>
+      <View className="flex-row items-center border-b border-line bg-surface px-3 py-2.5">
+        <Pressable onPress={() => navigation.goBack()} className="mr-1 p-2 active:opacity-70">
+          <Ionicons name="arrow-back" size={24} color="#1A1A1A" />
+        </Pressable>
 
-        <View style={styles.avatarWrap}>
-          <Text style={styles.avatarText}>{recipientName.charAt(0).toUpperCase()}</Text>
-          <View style={styles.activeDot} />
+        <View className="relative mr-2.5 h-10 w-10 items-center justify-center rounded-full bg-brand-500">
+          <Text variant="body" weight="bold" tone="inverse">
+            {recipientName.charAt(0).toUpperCase()}
+          </Text>
+          <View className="absolute bottom-0 right-0 h-3 w-3 rounded-full border-2 border-surface bg-success" />
         </View>
 
-        <View style={styles.headerInfo}>
-          <Text style={styles.headerName} numberOfLines={1}>
+        <View className="flex-1">
+          <Text variant="body" weight="bold" numberOfLines={1}>
             {recipientName}
           </Text>
-          <Text style={styles.headerRole}>{recipientRole}</Text>
+          <Text variant="caption" tone="secondary">
+            {recipientRole}
+          </Text>
         </View>
 
-        <View style={styles.headerActions}>
-          <TouchableOpacity onPress={handleOpenCall} style={styles.headerActionBtn}>
-            <Ionicons name="call" size={20} color="#EE4D2D" />
-          </TouchableOpacity>
-        </View>
+        <Pressable
+          onPress={handleOpenCall}
+          className="h-10 w-10 items-center justify-center rounded-full bg-brand-50 active:opacity-70"
+        >
+          <Ionicons name="call" size={20} color="#1EB9CE" />
+        </Pressable>
       </View>
 
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        style={{ flex: 1 }}
+        className="flex-1"
         keyboardVerticalOffset={Platform.OS === 'ios' ? 10 : 0}
       >
         {/* Messages Stream */}
@@ -175,28 +179,43 @@ export const ChatScreen: React.FC<Props> = ({ navigation, route }) => {
           ref={flatListRef}
           data={messages}
           keyExtractor={(item) => item.id}
-          contentContainerStyle={styles.messagesList}
+          contentContainerClassName="p-4 pb-2.5 gap-3"
           onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: false })}
           renderItem={({ item }) => {
             const isUser = item.sender === 'user';
             return (
-              <View style={[styles.messageRow, isUser ? styles.userRow : styles.otherRow]}>
+              <View className={`flex-row items-end ${isUser ? 'justify-end' : 'justify-start'}`}>
                 {!isUser && (
-                  <View style={styles.otherAvatarCircle}>
-                    <Text style={styles.otherAvatarChar}>{recipientName.charAt(0)}</Text>
+                  <View className="mr-2 h-8 w-8 items-center justify-center rounded-full bg-brand-500">
+                    <Text variant="caption" weight="bold" tone="inverse">
+                      {recipientName.charAt(0)}
+                    </Text>
                   </View>
                 )}
 
-                <View style={[styles.bubble, isUser ? styles.userBubble : styles.otherBubble]}>
+                <View
+                  className={`max-w-[78%] rounded-2xl p-3 ${
+                    isUser
+                      ? 'rounded-br-sm bg-brand-500'
+                      : 'rounded-bl-sm border border-line bg-surface'
+                  }`}
+                >
                   {item.imageUri ? (
-                    <Image source={{ uri: item.imageUri }} style={styles.messageImage} />
+                    <Image source={{ uri: item.imageUri }} className="mb-1.5 h-36 w-44 rounded-lg" />
                   ) : null}
                   {item.text ? (
-                    <Text style={[styles.bubbleText, isUser ? styles.userText : styles.otherText]}>
+                    <Text
+                      variant="body"
+                      tone={isUser ? 'inverse' : 'default'}
+                    >
                       {item.text}
                     </Text>
                   ) : null}
-                  <Text style={[styles.timeText, isUser ? styles.userTime : styles.otherTime]}>
+                  <Text
+                    variant="micro"
+                    tone={isUser ? 'inverse' : 'muted'}
+                    className="mt-1 self-end opacity-75"
+                  >
                     {item.time}
                   </Text>
                 </View>
@@ -206,172 +225,53 @@ export const ChatScreen: React.FC<Props> = ({ navigation, route }) => {
         />
 
         {/* Quick Replies Carousel */}
-        <View style={styles.quickRepliesWrap}>
+        <View className="border-t border-line bg-surface py-2">
           <FlatList
             horizontal
             showsHorizontalScrollIndicator={false}
             data={QUICK_REPLIES}
             keyExtractor={(_, idx) => String(idx)}
-            contentContainerStyle={styles.quickRepliesContent}
+            contentContainerClassName="px-3 gap-2"
             renderItem={({ item }) => (
-              <TouchableOpacity
-                style={styles.quickChip}
+              <Pressable
+                className="rounded-full border border-brand-100 bg-brand-50 px-3 py-1.5 active:opacity-70"
                 onPress={() => handleSendText(item)}
-                activeOpacity={0.7}
               >
-                <Text style={styles.quickChipText}>{item}</Text>
-              </TouchableOpacity>
+                <Text variant="caption" weight="medium" tone="brand">
+                  {item}
+                </Text>
+              </Pressable>
             )}
           />
         </View>
 
         {/* Input Bar */}
-        <View style={styles.inputBar}>
-          <TouchableOpacity onPress={handlePickImage} style={styles.iconBtn}>
-            <Ionicons name="image-outline" size={24} color="#EE4D2D" />
-          </TouchableOpacity>
+        <View className="flex-row items-center gap-2 border-t border-line bg-surface px-3 py-2">
+          <Pressable onPress={handlePickImage} className="p-1.5 active:opacity-70">
+            <Ionicons name="image-outline" size={24} color="#1EB9CE" />
+          </Pressable>
 
           <TextInput
-            style={styles.input}
+            className="max-h-24 flex-1 rounded-full bg-canvas-subtle px-4 py-2 font-body text-body text-ink"
             placeholder="Nhắn tin cho tài xế..."
-            placeholderTextColor={colors.textMuted}
+            placeholderTextColor="#9A9EA5"
             value={inputText}
             onChangeText={setInputText}
             onSubmitEditing={() => handleSendText()}
             returnKeyType="send"
           />
 
-          <TouchableOpacity
-            style={[styles.sendBtn, !inputText.trim() && styles.sendBtnDisabled]}
+          <Pressable
+            className={`h-10 w-10 items-center justify-center rounded-full active:opacity-70 ${
+              inputText.trim() ? 'bg-brand-500' : 'bg-line'
+            }`}
             onPress={() => handleSendText()}
             disabled={!inputText.trim()}
           >
-            <Ionicons name="send" size={18} color={colors.white} />
-          </TouchableOpacity>
+            <Ionicons name="send" size={18} color="#FFFFFF" />
+          </Pressable>
         </View>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
 };
-
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#F8F9FA' },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    backgroundColor: colors.white,
-    borderBottomWidth: 1,
-    borderBottomColor: '#EEEEEE',
-  },
-  backBtn: { padding: 6, marginRight: 4 },
-  avatarWrap: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    backgroundColor: '#EE4D2D',
-    alignItems: 'center',
-    justifyContent: 'center',
-    position: 'relative',
-    marginRight: 10,
-  },
-  avatarText: { color: colors.white, fontSize: 16, fontWeight: '700' },
-  activeDot: {
-    position: 'absolute',
-    bottom: 0,
-    right: 0,
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    backgroundColor: colors.success,
-    borderWidth: 2,
-    borderColor: colors.white,
-  },
-  headerInfo: { flex: 1 },
-  headerName: { fontSize: 15, fontWeight: '700', color: colors.text },
-  headerRole: { fontSize: 12, color: colors.textMuted },
-  headerActions: { flexDirection: 'row', gap: 6 },
-  headerActionBtn: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    backgroundColor: '#FFF0ED',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  messagesList: { padding: 16, paddingBottom: 10 },
-  messageRow: { flexDirection: 'row', marginBottom: 14, alignItems: 'flex-end' },
-  userRow: { justifyContent: 'flex-end' },
-  otherRow: { justifyContent: 'flex-start' },
-  otherAvatarCircle: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: '#EE4D2D',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 8,
-  },
-  otherAvatarChar: { color: colors.white, fontSize: 13, fontWeight: '700' },
-  bubble: { maxWidth: '78%', borderRadius: 16, padding: 12 },
-  userBubble: {
-    backgroundColor: '#EE4D2D',
-    borderBottomRightRadius: 4,
-  },
-  otherBubble: {
-    backgroundColor: colors.white,
-    borderBottomLeftRadius: 4,
-    borderWidth: 1,
-    borderColor: '#EEEEEE',
-  },
-  bubbleText: { fontSize: 14, lineHeight: 20 },
-  userText: { color: colors.white },
-  otherText: { color: colors.text },
-  messageImage: { width: 180, height: 140, borderRadius: 10, marginBottom: 6 },
-  timeText: { fontSize: 10, marginTop: 4, alignSelf: 'flex-end' },
-  userTime: { color: 'rgba(255,255,255,0.7)' },
-  otherTime: { color: colors.textMuted },
-  quickRepliesWrap: { backgroundColor: colors.white, paddingVertical: 8, borderTopWidth: 1, borderTopColor: '#F0F0F0' },
-  quickRepliesContent: { paddingHorizontal: 12, gap: 8 },
-  quickChip: {
-    backgroundColor: '#FFF0ED',
-    borderWidth: 1,
-    borderColor: '#FFD5CC',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 16,
-  },
-  quickChipText: { fontSize: 12, color: '#EE4D2D', fontWeight: '500' },
-  inputBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    backgroundColor: colors.white,
-    borderTopWidth: 1,
-    borderTopColor: '#EEEEEE',
-    gap: 8,
-  },
-  iconBtn: { padding: 6 },
-  input: {
-    flex: 1,
-    backgroundColor: '#F3F4F6',
-    borderRadius: 20,
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    fontSize: 14,
-    color: colors.text,
-    maxHeight: 100,
-  },
-  sendBtn: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    backgroundColor: '#EE4D2D',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  sendBtnDisabled: { backgroundColor: '#E5E7EB' },
-});
-

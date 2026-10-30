@@ -1,5 +1,5 @@
 import { Transform } from 'class-transformer';
-import { IsEmail, IsIn, IsOptional, IsString, Matches, MaxLength, MinLength } from 'class-validator';
+import { IsEmail, IsIn, IsOptional, IsString, Matches, MaxLength, MinLength, ValidateIf } from 'class-validator';
 import { Role } from '@prisma/client';
 
 /** Role được phép tự đăng ký. ADMIN chỉ được tạo qua seed/console. */
@@ -30,9 +30,19 @@ export class RegisterDto {
 }
 
 export class LoginDto {
+  /** Tên đăng nhập (hoặc email). Bắt buộc nếu không gửi `email`. */
   @Transform(({ value }) => (typeof value === 'string' ? value.trim().toLowerCase() : value))
+  @ValidateIf((o: LoginDto) => !o.email)
+  @IsString({ message: 'Vui lòng nhập tên đăng nhập' })
+  @MinLength(1, { message: 'Vui lòng nhập tên đăng nhập' })
+  @MaxLength(254)
+  username?: string;
+
+  /** Giữ để tương thích với client cũ đăng nhập bằng email. */
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim().toLowerCase() : value))
+  @IsOptional()
   @IsEmail()
-  email: string;
+  email?: string;
 
   @IsString()
   password: string;

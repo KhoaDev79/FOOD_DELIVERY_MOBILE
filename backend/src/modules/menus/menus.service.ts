@@ -3,6 +3,7 @@ import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { PrismaService } from '../prisma/prisma.service';
 import { RestaurantsService } from '../restaurants/restaurants.service';
 import { CreateCategoryDto, CreateMenuItemDto, UpdateMenuItemDto } from './dto/menus.dto';
+import { discountPercentOf, discountPriceFor } from './menu-discount';
 
 @Injectable()
 export class MenusService {
@@ -19,14 +20,24 @@ export class MenusService {
   async createItem(restaurantId: string, user: AuthUser, dto: CreateMenuItemDto) {
     await this.restaurants.assertCanManage(restaurantId, user);
     if (dto.categoryId) await this.assertCategoryBelongs(dto.categoryId, restaurantId);
-    return this.prisma.menuItem.create({ data: { ...dto, restaurantId } });
+    const { discountPercent, ...data } = dto;
+    return this.prisma.menuItem.create({
+      data: { ...data, restaurantId, discountPrice: discountPriceFor(data.price, discountPercent ?? 0) },
+    });
   }
 
   async updateItem(itemId: string, user: AuthUser, dto: UpdateMenuItemDto) {
     const item = await this.findActiveItem(itemId);
     await this.restaurants.assertCanManage(item.restaurantId, user);
     if (dto.categoryId) await this.assertCategoryBelongs(dto.categoryId, item.restaurantId);
-    return this.prisma.menuItem.update({ where: { id: itemId }, data: dto });
+    const { discountPercent, ...data } = dto;
+    const price = data.price ?? item.price;
+    // Đổi mức giảm, hoặc đổi giá mà giữ nguyên mức giảm cũ: tính lại giá giảm từ giá mới
+    const percent = discountPercent ?? (data.price !== undefined ? discountPercentOf(item.price, item.discountPrice) : undefined);
+    return this.prisma.menuItem.update({
+      where: { id: itemId },
+      data: percent === undefined ? data : { ...data, discountPrice: discountPriceFor(price, percent) },
+    });
   }
 
   /** Soft delete: món cũ vẫn được OrderItem tham chiếu. */

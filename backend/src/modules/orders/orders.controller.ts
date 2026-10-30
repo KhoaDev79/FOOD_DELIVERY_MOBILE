@@ -2,7 +2,7 @@ import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post, Query } from 
 import { Role } from '@prisma/client';
 import { AuthUser, CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
-import { CreateOrderDto, ListOrdersQueryDto, UpdateOrderStatusDto } from './dto/orders.dto';
+import { CreateOrderDto, ListOrdersQueryDto, ReviewOrderDto, UpdateOrderStatusDto } from './dto/orders.dto';
 import { OrdersService } from './orders.service';
 
 @Controller('orders')
@@ -23,8 +23,8 @@ export class OrdersController {
 
   @Roles(Role.DRIVER)
   @Get('available')
-  available(@Query() q: ListOrdersQueryDto) {
-    return this.orders.findAvailableForDrivers(q);
+  available(@CurrentUser('id') driverId: string, @Query() q: ListOrdersQueryDto) {
+    return this.orders.findAvailableForDrivers(driverId, q);
   }
 
   @Roles(Role.DRIVER)
@@ -43,6 +43,13 @@ export class OrdersController {
     return this.orders.findForRestaurant(restaurantId, user, q);
   }
 
+  @Roles(Role.DRIVER)
+  @Get('driver/stats')
+  driverStats(@CurrentUser('id') userId: string, @Query('days') days?: string) {
+    const parsedDays = Number(days ?? 7);
+    return this.orders.getDriverStats(userId, parsedDays);
+  }
+
   @Get(':id')
   findOne(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: AuthUser) {
     return this.orders.findOne(id, user);
@@ -55,6 +62,17 @@ export class OrdersController {
     @Body() dto: UpdateOrderStatusDto,
   ) {
     return this.orders.updateStatus(id, user, dto.status);
+  }
+
+  /** POST /orders/:id/review – khách chấm điểm quán (1–5 sao) cho đơn đã giao. */
+  @Roles(Role.CUSTOMER)
+  @Post(':id/review')
+  review(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser('id') userId: string,
+    @Body() dto: ReviewOrderDto,
+  ) {
+    return this.orders.review(id, userId, dto.rating, dto.comment);
   }
 
   @Roles(Role.DRIVER)
