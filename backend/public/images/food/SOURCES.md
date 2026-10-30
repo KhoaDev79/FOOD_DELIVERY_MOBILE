@@ -27,3 +27,8 @@ Tất cả ảnh món ăn được lưu cục bộ trong `backend/public/images/
 - **che** (Chè Khúc Bạch): `/public/images/food/che.jpg` (dự phòng: `/public/images/food/che.png`)
 - **traicay** (Trái Cây): `/public/images/food/traicay.jpg` (dự phòng: `/public/images/food/traicay.png`)
 - **default** (Món Ăn): `/public/images/food/default.jpg` (dự phòng: `/public/images/food/default.png`)
+
+## Cập nhật 30/10/2026
+- **trasua.jpg**: ảnh cũ là khối màu giữ chỗ (URL Unsplash gốc đã bị gỡ, trả 404). Thay bằng
+  "Hand holding a refreshing bubble tea" – Malcolm Broström, https://unsplash.com/photos/OFPGkd2swUM
+  (Unsplash License, đã kiểm tra trên trang ảnh). Cắt vuông 800×800.

@@ -60,25 +60,30 @@ const CategoryTile: React.FC<{ item: HomeCategory; selected: boolean; onPress: (
     accessibilityLabel={`Danh mục ${item.label}`}
     accessibilityState={{ selected }}
     onPress={onPress}
-    className={cn(
-      'h-32 w-24 overflow-hidden rounded-md border active:opacity-80',
-      selected ? 'border-brand-500 bg-brand-50' : 'border-line-subtle bg-canvas-subtle',
-    )}
+    className="w-20 items-center gap-1.5 active:opacity-70"
   >
+    {/* Ảnh tròn + nhãn dưới (ảnh mẫu 7). Vòng màu thương hiệu khi đang chọn. */}
+    <View
+      className={cn(
+        'h-[68px] w-[68px] items-center justify-center rounded-full border-2',
+        selected ? 'border-brand-500' : 'border-transparent',
+      )}
+    >
+      <AppImage
+        uri={item.image}
+        className="h-16 w-16 rounded-full shadow-raised"
+        fallbackIcon="fast-food-outline"
+      />
+    </View>
     <Text
-      variant="body"
+      variant="caption"
       weight={selected ? 'semibold' : 'medium'}
       tone={selected ? 'brand' : 'default'}
       numberOfLines={2}
-      className="px-2.5 pt-2"
+      className="text-center"
     >
       {item.label}
     </Text>
-    <AppImage
-      uri={item.image}
-      className="absolute -bottom-2 -right-2 h-16 w-16 rounded-full"
-      fallbackIcon="fast-food-outline"
-    />
   </Pressable>
 );
 
@@ -215,19 +220,19 @@ export const HomeScreen: React.FC = () => {
             />
           </View>
         </SafeAreaView>
-      </Gradient>
 
-      {/* Lối tắt danh mục (ảnh mẫu 1) */}
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerClassName="gap-3 px-4 pb-2">
-        {HOME_CATEGORIES.map((c) => (
-          <CategoryTile
-            key={c.id}
-            item={c}
-            selected={c.id === categoryId}
-            onPress={() => setCategoryId((id) => (id === c.id ? null : c.id))}
-          />
-        ))}
-      </ScrollView>
+        {/* Lối tắt danh mục nằm ở phần gradient đã nhạt (ảnh mẫu 1, 7) */}
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerClassName="gap-2 px-3 pb-2">
+          {HOME_CATEGORIES.map((c) => (
+            <CategoryTile
+              key={c.id}
+              item={c}
+              selected={c.id === categoryId}
+              onPress={() => setCategoryId((id) => (id === c.id ? null : c.id))}
+            />
+          ))}
+        </ScrollView>
+      </Gradient>
 
       {expanded?.isExpandedRadius && (
         <View className="mx-4 mt-3 flex-row items-start gap-2 rounded-md bg-warning-soft p-3">

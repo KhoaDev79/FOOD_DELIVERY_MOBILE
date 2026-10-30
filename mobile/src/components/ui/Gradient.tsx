@@ -5,7 +5,7 @@ import { palette } from '../../theme';
 // Các gradient dùng trong thiết kế, lấy màu từ token.
 const PRESETS = {
   /** Đầu trang chủ: xanh ngọc đậm nhạt dần sang trắng (ảnh mẫu 1). */
-  header: `linear-gradient(180deg, ${palette.brand['900']} 0%, ${palette.brand['700']} 45%, ${palette.canvas.DEFAULT} 100%)`,
+  header: `linear-gradient(180deg, ${palette.brand['900']} 0%, ${palette.brand['700']} 30%, ${palette.brand['100']} 58%, ${palette.canvas.DEFAULT} 78%)`,
   /** Nền khối chủ đề màu xanh nhạt (ảnh mẫu 3, 5). */
   sectionBrand: `linear-gradient(180deg, ${palette.brand['50']} 0%, ${palette.canvas.DEFAULT} 70%)`,
   /** Nền khối chủ đề màu cam nhạt (ảnh mẫu 4, 5). */

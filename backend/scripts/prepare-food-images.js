@@ -22,7 +22,7 @@ const FOODS = [
   { key: 'garan', name: 'Gà Rán', url: 'https://images.unsplash.com/photo-1626082927389-6cd097cdc6ec?w=800&q=80', color: [217, 119, 6] },
   { key: 'pizza', name: 'Pizza', url: 'https://images.unsplash.com/photo-1565299624946-b28f40a0ae38?w=800&q=80', color: [225, 29, 72] },
   { key: 'lau', name: 'Lẩu Thái', url: 'https://images.unsplash.com/photo-1547592180-85f173990554?w=800&q=80', color: [194, 65, 12] },
-  { key: 'trasua', name: 'Trà Sữa', url: 'https://images.unsplash.com/photo-1558857563-b37cf5957d07?w=800&q=80', color: [147, 51, 234] },
+  { key: 'trasua', name: 'Trà Sữa', url: 'https://images.unsplash.com/photo-1745883949374-baeba0ed57c3?w=800&q=80', color: [147, 51, 234] },
   { key: 'caphe', name: 'Cà Phê', url: 'https://images.unsplash.com/photo-1514432324607-a09d9b4aefdd?w=800&q=80', color: [120, 53, 15] },
   { key: 'che', name: 'Chè Khúc Bạch', url: 'https://images.unsplash.com/photo-1563805042-7684c019e1cb?w=800&q=80', color: [16, 185, 129] },
   { key: 'traicay', name: 'Trái Cây', url: 'https://images.unsplash.com/photo-1519996529931-28324d5a630e?w=800&q=80', color: [236, 72, 153] },

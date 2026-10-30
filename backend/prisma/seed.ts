@@ -146,28 +146,28 @@ async function main() {
     data: [
       {
         title: 'Miễn Phí Giao Hàng - Nhập FREESHIP',
-        imageUrl: '/public/images/food/.jpg',
+        imageUrl: '/public/images/food/default.jpg',
         actionType: 'COLLECTION',
         actionValue: 'freeship',
         sortOrder: 1,
       },
       {
         title: 'Món Ngon Gần Bạn - Giao Dưới 20 Phút',
-        imageUrl: '/public/images/food/.jpg',
+        imageUrl: '/public/images/food/comtam.jpg',
         actionType: 'COLLECTION',
         actionValue: 'nearby',
         sortOrder: 2,
       },
       {
         title: 'Quán Hot Đánh Giá 5 Sao - Giảm 20K',
-        imageUrl: '/public/images/food/.jpg',
+        imageUrl: '/public/images/food/pho.jpg',
         actionType: 'COLLECTION',
         actionValue: 'top_rated',
         sortOrder: 3,
       },
       {
         title: 'Thực Đơn Tiết Kiệm - Chỉ Từ 25.000đ',
-        imageUrl: '/public/images/food/.jpg',
+        imageUrl: '/public/images/food/banhmi.jpg',
         actionType: 'COLLECTION',
         actionValue: 'budget',
         sortOrder: 4,
@@ -330,7 +330,7 @@ async function main() {
     {
       name: 'Phở Bò Gia Truyền Phố Cổ',
       description: 'Nước dùng ninh xương bò 24 giờ thơm lừng, thịt bò tươi mềm ngọt',
-      imageUrl: '/public/images/food/.jpg',
+      imageUrl: '/public/images/food/pho.jpg',
       address: '45 Lê Thánh Tôn, Phường Bến Nghé, TP. Hồ Chí Minh',
       latitude: 10.7782,
       longitude: 106.7011,
@@ -344,18 +344,18 @@ async function main() {
         {
           name: 'Phở Bò Đậm Vị',
           items: [
-            { name: 'Phở Tái Nạm Gầu Bò', price: 65000, discountPrice: 55000, description: 'Bò tái mềm, nạm giòn ngọt thơm ngậy', imageUrl: '/public/images/food/.jpg', options: noodleOptions, isAvailable: true },
-            { name: 'Phở Tái Lăn Phố Cổ', price: 75000, description: 'Thịt bò xào lăn lửa lớn dậy mùi tỏi tiêu', imageUrl: '/public/images/food/.jpg', options: noodleOptions, isAvailable: true },
-            { name: 'Phở Bắp Bò Hoa Thượng Hạng', price: 85000, description: 'Bắp hoa bò giòn sần sật nhúng vừa chín tới', imageUrl: '/public/images/food/.jpg', options: noodleOptions, isAvailable: true },
-            { name: 'Phở Gầu Giòn Hết Hàng', price: 70000, description: 'Món đã tạm ngưng phục vụ trong ngày', imageUrl: '/public/images/food/.jpg', isAvailable: false },
+            { name: 'Phở Tái Nạm Gầu Bò', price: 65000, discountPrice: 55000, description: 'Bò tái mềm, nạm giòn ngọt thơm ngậy', imageUrl: '/public/images/food/pho.jpg', options: noodleOptions, isAvailable: true },
+            { name: 'Phở Tái Lăn Phố Cổ', price: 75000, description: 'Thịt bò xào lăn lửa lớn dậy mùi tỏi tiêu', imageUrl: '/public/images/food/pho.jpg', options: noodleOptions, isAvailable: true },
+            { name: 'Phở Bắp Bò Hoa Thượng Hạng', price: 85000, description: 'Bắp hoa bò giòn sần sật nhúng vừa chín tới', imageUrl: '/public/images/food/pho.jpg', options: noodleOptions, isAvailable: true },
+            { name: 'Phở Gầu Giòn Hết Hàng', price: 70000, description: 'Món đã tạm ngưng phục vụ trong ngày', imageUrl: '/public/images/food/pho.jpg', isAvailable: false },
           ],
         },
         {
           name: 'Đồ Ăn Kèm & Nước',
           items: [
-            { name: 'Quẩy Giòn Nóng Hổi', price: 10000, description: 'Quẩy vàng ruộm chấm nước phở', imageUrl: '/public/images/food/.jpg', isAvailable: true },
-            { name: 'Trứng Chần Nước Béo', price: 8000, description: 'Trứng gà ta chần lòng đào', imageUrl: '/public/images/food/.jpg', isAvailable: true },
-            { name: 'Trà Chanh Hà Nội', price: 15000, description: 'Trà lài chanh tươi mát lạnh', imageUrl: '/public/images/food/.jpg', isAvailable: true },
+            { name: 'Quẩy Giòn Nóng Hổi', price: 10000, description: 'Quẩy vàng ruộm chấm nước phở', imageUrl: '/public/images/food/pho.jpg', isAvailable: true },
+            { name: 'Trứng Chần Nước Béo', price: 8000, description: 'Trứng gà ta chần lòng đào', imageUrl: '/public/images/food/pho.jpg', isAvailable: true },
+            { name: 'Trà Chanh Hà Nội', price: 15000, description: 'Trà lài chanh tươi mát lạnh', imageUrl: '/public/images/food/traicay.jpg', isAvailable: true },
           ],
         },
       ],
@@ -363,7 +363,7 @@ async function main() {
     {
       name: 'Cơm Tấm Đêm Sài Gòn',
       description: 'Sườn nướng than hoa vàng óng mật ong, bì thơm chả bùi',
-      imageUrl: '/public/images/food/.jpg',
+      imageUrl: '/public/images/food/comtam.jpg',
       address: '18 Nguyễn Du, Phường Bến Nghé, TP. Hồ Chí Minh',
       latitude: 10.7758,
       longitude: 106.6995,
@@ -377,16 +377,16 @@ async function main() {
         {
           name: 'Cơm Tấm Truyền Thống',
           items: [
-            { name: 'Cơm Tấm Sườn Cốt Lết', price: 45000, description: 'Sườn cốt lết dày thịt ướp gia vị đậm đà', imageUrl: '/public/images/food/.jpg', options: riceOptions, isAvailable: true },
-            { name: 'Cơm Tấm Sườn Bì Chả Trứng', price: 65000, discountPrice: 58000, description: 'Phần đặc biệt đầy đủ topping', imageUrl: '/public/images/food/.jpg', options: riceOptions, isAvailable: true },
-            { name: 'Cơm Tấm Đùi Gà Xối Mỡ', price: 55000, description: 'Đùi gà vàng rụm sốt nước mắm tỏi', imageUrl: '/public/images/food/.jpg', options: riceOptions, isAvailable: true },
+            { name: 'Cơm Tấm Sườn Cốt Lết', price: 45000, description: 'Sườn cốt lết dày thịt ướp gia vị đậm đà', imageUrl: '/public/images/food/comtam.jpg', options: riceOptions, isAvailable: true },
+            { name: 'Cơm Tấm Sườn Bì Chả Trứng', price: 65000, discountPrice: 58000, description: 'Phần đặc biệt đầy đủ topping', imageUrl: '/public/images/food/comtam.jpg', options: riceOptions, isAvailable: true },
+            { name: 'Cơm Tấm Đùi Gà Xối Mỡ', price: 55000, description: 'Đùi gà vàng rụm sốt nước mắm tỏi', imageUrl: '/public/images/food/comga.jpg', options: riceOptions, isAvailable: true },
           ],
         },
         {
           name: 'Canh & Tráng Miệng',
           items: [
-            { name: 'Canh Rong Biển Thịt Bằm', price: 15000, imageUrl: '/public/images/food/.jpg', isAvailable: true },
-            { name: 'Trà Sâm Dứa Hạt É', price: 10000, imageUrl: '/public/images/food/.jpg', isAvailable: true },
+            { name: 'Canh Rong Biển Thịt Bằm', price: 15000, imageUrl: '/public/images/food/comtam.jpg', isAvailable: true },
+            { name: 'Trà Sâm Dứa Hạt É', price: 10000, imageUrl: '/public/images/food/trasua.jpg', isAvailable: true },
           ],
         },
       ],
@@ -394,7 +394,7 @@ async function main() {
     {
       name: 'Bún Bò Huế Cố Đô',
       description: 'Chuẩn vị cay nồng sa tế xứ Huế, chả cua tươi ngon',
-      imageUrl: '/public/images/food/.jpg',
+      imageUrl: '/public/images/food/bunbo.jpg',
       address: '78 Bạch Đằng, Phường Gia Định, TP. Hồ Chí Minh',
       latitude: 10.8012,
       longitude: 106.7105,
@@ -408,8 +408,8 @@ async function main() {
         {
           name: 'Bún Bò',
           items: [
-            { name: 'Bún Bò Nạm Chả Cua', price: 50000, description: 'Thịt bò nạm mềm thơm cùng chả cua vàng ươm', imageUrl: '/public/images/food/.jpg', options: noodleOptions, isAvailable: true },
-            { name: 'Bún Bò Gân Bắp Giò Heo', price: 65000, description: 'Tô lớn đầy đặn khoanh giò nạc', imageUrl: '/public/images/food/.jpg', options: noodleOptions, isAvailable: true },
+            { name: 'Bún Bò Nạm Chả Cua', price: 50000, description: 'Thịt bò nạm mềm thơm cùng chả cua vàng ươm', imageUrl: '/public/images/food/bunbo.jpg', options: noodleOptions, isAvailable: true },
+            { name: 'Bún Bò Gân Bắp Giò Heo', price: 65000, description: 'Tô lớn đầy đặn khoanh giò nạc', imageUrl: '/public/images/food/bunbo.jpg', options: noodleOptions, isAvailable: true },
           ],
         },
       ],
@@ -417,7 +417,7 @@ async function main() {
     {
       name: 'Bánh Mì Giòn Rụm Sài Gòn',
       description: 'Vỏ bánh nóng giòn tan, pate bơ nhà làm béo ngậy',
-      imageUrl: '/public/images/food/.jpg',
+      imageUrl: '/public/images/food/banhmi.jpg',
       address: '18 Nguyễn Trãi, Phường Bến Thành, TP. Hồ Chí Minh',
       latitude: 10.768,
       longitude: 106.6935,
@@ -431,9 +431,9 @@ async function main() {
         {
           name: 'Bánh Mì Thịt & Chả',
           items: [
-            { name: 'Bánh Mì Thập Cẩm Đặc Biệt', price: 35000, discountPrice: 29000, description: 'Pate, giò thủ, chả lụa, xá xíu, dưa chua', imageUrl: '/public/images/food/.jpg', isAvailable: true },
-            { name: 'Bánh Mì Xíu Mại Trứng Muối', price: 40000, description: 'Viên xíu mại đẫm sốt cùng trứng muối béo', imageUrl: '/public/images/food/.jpg', isAvailable: true },
-            { name: 'Bánh Mì Gà Xé Bơ Tỏi', price: 30000, description: 'Gà xé sốt bơ trứng nhà làm', imageUrl: '/public/images/food/.jpg', isAvailable: true },
+            { name: 'Bánh Mì Thập Cẩm Đặc Biệt', price: 35000, discountPrice: 29000, description: 'Pate, giò thủ, chả lụa, xá xíu, dưa chua', imageUrl: '/public/images/food/banhmi.jpg', isAvailable: true },
+            { name: 'Bánh Mì Xíu Mại Trứng Muối', price: 40000, description: 'Viên xíu mại đẫm sốt cùng trứng muối béo', imageUrl: '/public/images/food/banhmi.jpg', isAvailable: true },
+            { name: 'Bánh Mì Gà Xé Bơ Tỏi', price: 30000, description: 'Gà xé sốt bơ trứng nhà làm', imageUrl: '/public/images/food/banhmi.jpg', isAvailable: true },
           ],
         },
       ],
@@ -441,7 +441,7 @@ async function main() {
     {
       name: 'Trà Sữa Nhà Làm Trân Châu',
       description: 'Trà sữa đậm vị lá trà tự nhiên kết hợp sữa tươi thanh trùng',
-      imageUrl: '/public/images/food/.jpg',
+      imageUrl: '/public/images/food/trasua.jpg',
       address: '240 Tô Hiến Thành, Phường Hoà Hưng, TP. Hồ Chí Minh',
       latitude: 10.7731,
       longitude: 106.6667,
@@ -455,8 +455,8 @@ async function main() {
         {
           name: 'Trà Sữa Đậm Vị',
           items: [
-            { name: 'Trà Sữa Ô Long Nướng Trân Châu', price: 35000, discountPrice: 28000, description: 'Vị trà rang thơm ngậy, topping trân châu dai giòn', imageUrl: '/public/images/food/.jpg', options: drinkOptions, isAvailable: true },
-            { name: 'Trà Sữa Matcha Nhật Bản', price: 42000, description: 'Bột matcha nguyên chất từ Uji Nhật', imageUrl: '/public/images/food/.jpg', options: drinkOptions, isAvailable: true },
+            { name: 'Trà Sữa Ô Long Nướng Trân Châu', price: 35000, discountPrice: 28000, description: 'Vị trà rang thơm ngậy, topping trân châu dai giòn', imageUrl: '/public/images/food/trasua.jpg', options: drinkOptions, isAvailable: true },
+            { name: 'Trà Sữa Matcha Nhật Bản', price: 42000, description: 'Bột matcha nguyên chất từ Uji Nhật', imageUrl: '/public/images/food/trasua.jpg', options: drinkOptions, isAvailable: true },
           ],
         },
       ],
@@ -464,7 +464,7 @@ async function main() {
     {
       name: 'Gà Rán Giòn Cay Hương Việt',
       description: 'Gà tươi rán giòn tan, nước sốt cay ngọt Hàn Quốc',
-      imageUrl: '/public/images/food/.jpg',
+      imageUrl: '/public/images/food/garan.jpg',
       address: '89 Phan Xích Long, Phường Cầu Kiệu, TP. Hồ Chí Minh',
       latitude: 10.7985,
       longitude: 106.678,
@@ -478,8 +478,8 @@ async function main() {
         {
           name: 'Gà Rán Miếng',
           items: [
-            { name: 'Gà Rán Sốt Cay Ngọt (2 miếng)', price: 79000, description: 'Gà sốt đỏ cay ngọt chuẩn vị', imageUrl: '/public/images/food/.jpg', isAvailable: true },
-            { name: 'Khoai Tây Chiên Lắc Phô Mai', price: 35000, imageUrl: '/public/images/food/.jpg', isAvailable: true },
+            { name: 'Gà Rán Sốt Cay Ngọt (2 miếng)', price: 79000, description: 'Gà sốt đỏ cay ngọt chuẩn vị', imageUrl: '/public/images/food/garan.jpg', isAvailable: true },
+            { name: 'Khoai Tây Chiên Lắc Phô Mai', price: 35000, imageUrl: '/public/images/food/garan.jpg', isAvailable: true },
           ],
         },
       ],
@@ -487,7 +487,7 @@ async function main() {
     {
       name: 'Hủ Tiếu Nam Vang Miền Tây',
       description: 'Hủ tiếu khô trộn sốt đặc biệt, nước lèo xương tôm mực ngọt lịm',
-      imageUrl: '/public/images/food/.jpg',
+      imageUrl: '/public/images/food/hutieu.jpg',
       address: '154 Trần Hưng Đạo, Phường Chợ Quán, TP. Hồ Chí Minh',
       latitude: 10.7554,
       longitude: 106.6622,
@@ -501,7 +501,7 @@ async function main() {
         {
           name: 'Hủ Tiếu Đặc Sắc',
           items: [
-            { name: 'Hủ Tiếu Nam Vang Khô Đặc Biệt', price: 60000, discountPrice: 52000, description: 'Tôm tươi, tim, cật, thịt bằm, trứng cút', imageUrl: '/public/images/food/.jpg', isAvailable: true },
+            { name: 'Hủ Tiếu Nam Vang Khô Đặc Biệt', price: 60000, discountPrice: 52000, description: 'Tôm tươi, tim, cật, thịt bằm, trứng cút', imageUrl: '/public/images/food/hutieu.jpg', isAvailable: true },
           ],
         },
       ],
@@ -509,7 +509,7 @@ async function main() {
     {
       name: 'Cà Phê Muối Cố Đô',
       description: 'Cà phê phin truyền thống quyện lớp kem muối béo ngậy ngọt mặn',
-      imageUrl: '/public/images/food/.jpg',
+      imageUrl: '/public/images/food/caphe.jpg',
       address: '123 Nguyễn Văn Lượng, Phường An Hội, TP. Hồ Chí Minh',
       latitude: 10.842,
       longitude: 106.671,
@@ -523,8 +523,8 @@ async function main() {
         {
           name: 'Cà Phê & Kem Muối',
           items: [
-            { name: 'Cà Phê Muối Đặc Biệt', price: 29000, discountPrice: 25000, description: 'Lớp kem béo mịn màng cùng cà phê thơm nồng', imageUrl: '/public/images/food/.jpg', options: drinkOptions, isAvailable: true },
-            { name: 'Bạc Xỉu Ba Tầng Sữa Dừa', price: 32000, imageUrl: '/public/images/food/.jpg', options: drinkOptions, isAvailable: true },
+            { name: 'Cà Phê Muối Đặc Biệt', price: 29000, discountPrice: 25000, description: 'Lớp kem béo mịn màng cùng cà phê thơm nồng', imageUrl: '/public/images/food/caphe.jpg', options: drinkOptions, isAvailable: true },
+            { name: 'Bạc Xỉu Ba Tầng Sữa Dừa', price: 32000, imageUrl: '/public/images/food/caphe.jpg', options: drinkOptions, isAvailable: true },
           ],
         },
       ],
@@ -532,7 +532,7 @@ async function main() {
     {
       name: 'Mì Cay Hàn Quốc 7 Cấp Độ',
       description: 'Nước lẩu tomyum chua cay đậm đà, hải sản tôm mực tươi ngon',
-      imageUrl: '/public/images/food/.jpg',
+      imageUrl: '/public/images/food/micay.jpg',
       address: '312 Hoàng Văn Thụ, Phường Tân Bình, TP. Hồ Chí Minh',
       latitude: 10.795,
       longitude: 106.652,
@@ -546,7 +546,7 @@ async function main() {
         {
           name: 'Mì Cay Thố Đất',
           items: [
-            { name: 'Mì Cay Hải Sản Cấp 2', price: 55000, description: 'Tôm càng, mực, nghêu, chả cá Hàn Quốc', imageUrl: '/public/images/food/.jpg', options: noodleOptions, isAvailable: true },
+            { name: 'Mì Cay Hải Sản Cấp 2', price: 55000, description: 'Tôm càng, mực, nghêu, chả cá Hàn Quốc', imageUrl: '/public/images/food/micay.jpg', options: noodleOptions, isAvailable: true },
           ],
         },
       ],
@@ -554,7 +554,7 @@ async function main() {
     {
       name: 'Bún Chả Hà Nội Hương Xưa',
       description: 'Chả nướng than hoa thơm lừng ăn kèm nước mắm đu đủ chua ngọt',
-      imageUrl: '/public/images/food/.jpg',
+      imageUrl: '/public/images/food/buncha.jpg',
       address: '26 Lê Duẩn, Phường Bến Nghé, TP. Hồ Chí Minh',
       latitude: 10.778,
       longitude: 106.702,
@@ -568,8 +568,8 @@ async function main() {
         {
           name: 'Bún Chả & Nem Rán',
           items: [
-            { name: 'Bún Chả Nướng Đầy Đủ', price: 60000, description: 'Chả viên, chả miếng nướng than, rau ghém tươi', imageUrl: '/public/images/food/.jpg', isAvailable: true },
-            { name: 'Nem Cua Bể Giòn Rụm (2 chiếc)', price: 35000, imageUrl: '/public/images/food/.jpg', isAvailable: true },
+            { name: 'Bún Chả Nướng Đầy Đủ', price: 60000, description: 'Chả viên, chả miếng nướng than, rau ghém tươi', imageUrl: '/public/images/food/buncha.jpg', isAvailable: true },
+            { name: 'Nem Cua Bể Giòn Rụm (2 chiếc)', price: 35000, imageUrl: '/public/images/food/buncha.jpg', isAvailable: true },
           ],
         },
       ],
@@ -577,7 +577,7 @@ async function main() {
     {
       name: 'Chè Bưởi & Tráng Miệng Ngọt Ngào',
       description: 'Chè khúc bạch thanh mát, chè bưởi An Giang cùi giòn sần sật',
-      imageUrl: '/public/images/food/.jpg',
+      imageUrl: '/public/images/food/che.jpg',
       address: '35 Nơ Trang Long, Phường Bình Thạnh, TP. Hồ Chí Minh',
       latitude: 10.812,
       longitude: 106.695,
@@ -591,8 +591,8 @@ async function main() {
         {
           name: 'Chè Truyền Thống',
           items: [
-            { name: 'Chè Bưởi Cốt Dừa Béo', price: 28000, imageUrl: '/public/images/food/.jpg', isAvailable: true },
-            { name: 'Chè Khúc Bạch Phô Mai Hạnh Nhân', price: 35000, imageUrl: '/public/images/food/.jpg', isAvailable: true },
+            { name: 'Chè Bưởi Cốt Dừa Béo', price: 28000, imageUrl: '/public/images/food/che.jpg', isAvailable: true },
+            { name: 'Chè Khúc Bạch Phô Mai Hạnh Nhân', price: 35000, imageUrl: '/public/images/food/che.jpg', isAvailable: true },
           ],
         },
       ],
@@ -601,7 +601,7 @@ async function main() {
     {
       name: 'Bánh Cuốn Nóng Tây Hồ',
       description: 'Bánh cuốn tráng tay nóng hổi chả quế lá chuối (Hiện quán đang đóng)',
-      imageUrl: '/public/images/food/.jpg',
+      imageUrl: '/public/images/food/banhcuon.jpg',
       address: '90 Nguyễn Đình Chiểu, Phường Đa Kao, TP. Hồ Chí Minh',
       latitude: 10.785,
       longitude: 106.682,
@@ -615,7 +615,7 @@ async function main() {
         {
           name: 'Bánh Cuốn Nóng',
           items: [
-            { name: 'Bánh Cuốn Nhân Thịt Mộc Nhĩ', price: 35000, imageUrl: '/public/images/food/.jpg', isAvailable: true },
+            { name: 'Bánh Cuốn Nhân Thịt Mộc Nhĩ', price: 35000, imageUrl: '/public/images/food/banhcuon.jpg', isAvailable: true },
           ],
         },
       ],
@@ -623,7 +623,7 @@ async function main() {
     {
       name: 'Cơm Gà Xối Mỡ Da Giòn',
       description: 'Cơm chiên hạt ngọc vàng ươm, gà xối mỡ giòn rụm',
-      imageUrl: '/public/images/food/.jpg',
+      imageUrl: '/public/images/food/comga.jpg',
       address: '42 Châu Văn Liêm, Phường Chợ Lớn, TP. Hồ Chí Minh',
       latitude: 10.758,
       longitude: 106.671,
@@ -637,7 +637,7 @@ async function main() {
         {
           name: 'Cơm Gà',
           items: [
-            { name: 'Cơm Gà Xối Mỡ Đùi Góc Tư', price: 55000, discountPrice: 49000, imageUrl: '/public/images/food/.jpg', options: riceOptions, isAvailable: true },
+            { name: 'Cơm Gà Xối Mỡ Đùi Góc Tư', price: 55000, discountPrice: 49000, imageUrl: '/public/images/food/comga.jpg', options: riceOptions, isAvailable: true },
           ],
         },
       ],
@@ -645,7 +645,7 @@ async function main() {
     {
       name: 'Trà Trái Cây Nhiệt Đới',
       description: 'Trái cây tươi ngâm trong ngày, mát lạnh sảng khoái',
-      imageUrl: '/public/images/food/.jpg',
+      imageUrl: '/public/images/food/traicay.jpg',
       address: '512 Sư Vạn Hạnh, Phường Vườn Lài, TP. Hồ Chí Minh',
       latitude: 10.769,
       longitude: 106.672,
@@ -659,7 +659,7 @@ async function main() {
         {
           name: 'Trà Trái Cây Tươi',
           items: [
-            { name: 'Trà Ổi Hồng Dã Tay', price: 35000, imageUrl: '/public/images/food/.jpg', options: drinkOptions, isAvailable: true },
+            { name: 'Trà Ổi Hồng Dã Tay', price: 35000, imageUrl: '/public/images/food/traicay.jpg', options: drinkOptions, isAvailable: true },
           ],
         },
       ],
@@ -668,7 +668,7 @@ async function main() {
     {
       name: 'Lẩu & Nướng Tự Chọn Phố Đêm',
       description: 'Buffet nướng lẩu tự chọn với hơn 20 món đa dạng giá rẻ',
-      imageUrl: '/public/images/food/.jpg',
+      imageUrl: '/public/images/food/lau.jpg',
       address: '68 Quang Trung, Phường Gò Vấp, TP. Hồ Chí Minh',
       latitude: 10.828,
       longitude: 106.689,
@@ -685,7 +685,7 @@ async function main() {
             name: `Món Nướng Đặc Biệt Số ${i + 1}`,
             price: 45000 + i * 5000,
             description: `Thịt nướng ướp sốt cay thơm lừng loại ${i + 1}`,
-            imageUrl: '/public/images/food/.jpg',
+            imageUrl: '/public/images/food/lau.jpg',
             isAvailable: true,
           })),
         },
@@ -695,7 +695,7 @@ async function main() {
             name: `Topping Thả Lẩu Loại ${i + 1}`,
             price: 15000 + i * 3000,
             description: `Thực phẩm thả lẩu tươi sạch loại ${i + 1}`,
-            imageUrl: '/public/images/food/.jpg',
+            imageUrl: '/public/images/food/lau.jpg',
             isAvailable: true,
           })),
         },
@@ -704,7 +704,7 @@ async function main() {
     {
       name: 'Pizza Ý Lò Củi Thủ Công',
       description: 'Đế bánh bột ủ 48 giờ nướng lò củi thơm mùi khói sồi',
-      imageUrl: '/public/images/food/.jpg',
+      imageUrl: '/public/images/food/pizza.jpg',
       address: '12 Xuân Thủy, Phường Thảo Điền, TP. Thủ Đức',
       latitude: 10.805,
       longitude: 106.735,
@@ -718,7 +718,7 @@ async function main() {
         {
           name: 'Pizza Thủ Công',
           items: [
-            { name: 'Pizza Margherita Phô Mai Tươi', price: 145000, description: 'Sốt cà chua Ý, Mozzarella tươi, lá quế tây', imageUrl: '/public/images/food/.jpg', isAvailable: true },
+            { name: 'Pizza Margherita Phô Mai Tươi', price: 145000, description: 'Sốt cà chua Ý, Mozzarella tươi, lá quế tây', imageUrl: '/public/images/food/pizza.jpg', isAvailable: true },
           ],
         },
       ],
@@ -727,7 +727,7 @@ async function main() {
     {
       name: 'Hải Sản Tươi Sống Cần Giờ',
       description: 'Cua biển, tôm hùm tươi sống vùng duyên hải Cần Giờ (khoảng cách >25km)',
-      imageUrl: '/public/images/food/.jpg',
+      imageUrl: '/public/images/food/default.jpg',
       address: 'Đường Duyên Hải, Xã Long Hòa, TP. Hồ Chí Minh',
       latitude: 10.412,
       longitude: 106.96,
@@ -741,7 +741,7 @@ async function main() {
         {
           name: 'Hải Sản Tươi Sống',
           items: [
-            { name: 'Cua Biển Rang Me Cần Giờ (1 con)', price: 250000, imageUrl: '/public/images/food/.jpg', isAvailable: true },
+            { name: 'Cua Biển Rang Me Cần Giờ (1 con)', price: 250000, imageUrl: '/public/images/food/default.jpg', isAvailable: true },
           ],
         },
       ],

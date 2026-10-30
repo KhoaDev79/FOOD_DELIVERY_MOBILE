@@ -114,16 +114,9 @@ export const RestaurantRow = memo<CardProps>(({ restaurant: r, onPress, classNam
         {!r.isOpen && <ClosedOverlay />}
       </AppImage>
       <View className="flex-1 justify-between py-0.5">
-        <View className="gap-1">
-          <Text variant="body-lg" weight="medium" numberOfLines={2}>
-            {r.name}
-          </Text>
-          {!!r.description && (
-            <Text variant="caption" weight="regular" tone="secondary" numberOfLines={1}>
-              {r.description}
-            </Text>
-          )}
-        </View>
+        <Text variant="body-lg" weight="semibold" numberOfLines={2}>
+          {r.name}
+        </Text>
         <View className="gap-1.5">
           <View className="flex-row flex-wrap items-center gap-x-3 gap-y-1">
             {m.rating && (

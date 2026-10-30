@@ -41,8 +41,8 @@ export const AppImage: React.FC<AppImageProps> = ({
       accessibilityLabel={accessibilityLabel}
     >
       {showFallback ? (
-        <View className="flex-1 items-center justify-center bg-brand-50">
-          <Icon name={fallbackIcon} size="xl" tone="brand" />
+        <View className="flex-1 items-center justify-center bg-canvas-subtle">
+          <Icon name={fallbackIcon} size="lg" tone="muted" />
         </View>
       ) : (
         <>
