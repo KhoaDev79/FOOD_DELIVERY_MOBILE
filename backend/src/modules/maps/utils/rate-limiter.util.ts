@@ -1,3 +1,5 @@
+import { LruCache } from '../../../common/utils/lru-cache.util';
+
 /**
  * Tiện ích giới hạn tốc độ gọi API (Rate Limiter) bảo đảm tuân thủ nghiêm ngặt chính sách của nhà cung cấp.
  */
@@ -18,32 +20,12 @@ export class RateLimiter {
 }
 
 /**
- * Bộ nhớ đệm (In-memory Cache) lưu kết quả phân giải địa chỉ và gợi ý tìm kiếm có thời hạn (TTL).
+ * Bộ nhớ đệm (In-memory Cache) lưu kết quả phân giải địa chỉ và gợi ý tìm kiếm có thời hạn (TTL)
+ * và giới hạn kích thước LRU (tối đa 10.000 khoá).
  */
-export class SimpleCache<T> {
-  private cache = new Map<string, { value: T; expiresAt: number }>();
-
-  constructor(private readonly defaultTtlMs = 24 * 60 * 60 * 1000) {}
-
-  get(key: string): T | undefined {
-    const item = this.cache.get(key);
-    if (!item) return undefined;
-    if (Date.now() > item.expiresAt) {
-      this.cache.delete(key);
-      return undefined;
-    }
-    return item.value;
-  }
-
-  set(key: string, value: T, ttlMs = this.defaultTtlMs): void {
-    this.cache.set(key, {
-      value,
-      expiresAt: Date.now() + ttlMs,
-    });
-  }
-
-  clear(): void {
-    this.cache.clear();
+export class SimpleCache<T> extends LruCache<T> {
+  constructor(defaultTtlMs = 24 * 60 * 60 * 1000, maxSize = 10000) {
+    super(defaultTtlMs, maxSize);
   }
 }
 

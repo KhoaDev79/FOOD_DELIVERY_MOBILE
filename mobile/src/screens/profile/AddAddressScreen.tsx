@@ -69,8 +69,8 @@ export const AddAddressScreen: React.FC<Props> = ({ navigation, route }) => {
     if (!receiverName && user?.fullName) {
       setReceiverName(user.fullName);
     }
-    if (!receiverPhone && (user?.phone || '0387466222')) {
-      setReceiverPhone(user?.phone || '0387466222');
+    if (!receiverPhone && user?.phone) {
+      setReceiverPhone(user.phone);
     }
     if (initialTag) {
       setSelectedTag(initialTag);
@@ -95,7 +95,7 @@ export const AddAddressScreen: React.FC<Props> = ({ navigation, route }) => {
 
   const handleOpenMapPicker = () => {
     // Kết quả chọn trên bản đồ được ghi thẳng vào useAddressDraftStore mà màn này đang đọc
-    navigation.navigate('AddressPicker', { initialCoords: pickedCoords || coords });
+    navigation.navigate('AddressPicker', { initialCoords: pickedCoords || coords || undefined });
   };
 
   const missingFields = getMissingFields();
@@ -233,7 +233,7 @@ export const AddAddressScreen: React.FC<Props> = ({ navigation, route }) => {
                     ? `✓ Đã ghim toạ độ (${pickedCoords?.latitude.toFixed(4)}, ${pickedCoords?.longitude.toFixed(4)})`
                     : '⚠ Chưa xác nhận vị trí ghim giao hàng'}
                 </Text>
-                {!isPinConfirmed && (
+                {!isPinConfirmed && coords && (
                   <Pressable
                     onPress={() => confirmPin(coords)}
                     className="rounded bg-warning-soft px-2.5 py-1 active:opacity-75"

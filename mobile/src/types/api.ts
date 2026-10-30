@@ -5,6 +5,31 @@ export type OrderStatus =
 
 export type PaymentMethod = 'COD' | 'VNPAY';
 export type PaymentStatus = 'UNPAID' | 'PAID' | 'FAILED' | 'REFUNDED';
+export type DistanceSource = 'ROAD' | 'ESTIMATED';
+
+export interface OrderQuoteLine {
+  menuItemId: string;
+  name: string;
+  quantity: number;
+  unitPrice: number;
+  lineTotal: number;
+  note?: string;
+}
+
+export interface OrderQuoteResponse {
+  lines: OrderQuoteLine[];
+  subtotal: number;
+  distanceKm: number;
+  distanceSource: DistanceSource;
+  baseDeliveryFee: number;
+  peakSurcharge: number;
+  deliveryFee: number;
+  total: number;
+  isPeak: boolean;
+  estimatedMinutes: { min: number; max: number };
+  expiresAt: string;
+  quoteToken: string;
+}
 
 export interface ApiResponse<T> {
   success: boolean;
@@ -183,11 +208,16 @@ export interface OrderDetail {
   paymentStatus: PaymentStatus;
   subtotal: number;
   deliveryFee: number;
+  peakSurcharge?: number;
+  platformCommission?: number;
+  driverEarning?: number;
   total: number;
   distanceKm: number;
+  distanceSource?: DistanceSource;
   deliveryAddress: string;
   deliveryLat: number;
   deliveryLng: number;
+  estimatedDeliveryAt?: string | null;
   note?: string | null;
   createdAt: string;
   updatedAt: string;
@@ -237,9 +267,14 @@ export interface OrderSummary {
   paymentStatus: PaymentStatus;
   subtotal: number;
   deliveryFee: number;
+  peakSurcharge?: number;
+  platformCommission?: number;
+  driverEarning?: number;
   total: number;
   distanceKm: number;
+  distanceSource?: DistanceSource;
   deliveryAddress: string;
+  estimatedDeliveryAt?: string | null;
   createdAt: string;
   items: { name: string; quantity: number }[];
   restaurant: {

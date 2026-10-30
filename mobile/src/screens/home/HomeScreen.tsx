@@ -42,12 +42,12 @@ import { useBanners, useNearbyDishes, useNearbyRestaurants } from '../../service
 import { useAddresses } from '../../services/useUser';
 import { palette } from '../../theme';
 import { useCartStore } from '../../store/useCartStore';
+import { resolveActiveDeliveryAddress, useDeliveryAddressStore } from '../../store/useDeliveryAddressStore';
 import { Banner, MenuItem, NearbyDish, Restaurant } from '../../types/api';
 import { RootStackParamList } from '../../types/navigation';
 import { filterRestaurants, pickFeatured, sortByDistance } from '../../utils/homeSections';
 import { hasChoices } from '../../utils/menuPricing';
 
-const COORD_LIKE = /^(t[oọ][aạ]\s*đ[oộ]|[-+]?\d+\.\d+)/i;
 /** Cuộn quá mức này thì hiện thanh tìm kiếm gọn dính trên cùng (ảnh mẫu 3–6). */
 const COMPACT_THRESHOLD = 120;
 
@@ -122,24 +122,37 @@ export const HomeScreen: React.FC = () => {
   const isFocused = useIsFocused();
   const { coords, isLoading: locationLoading } = useLocation();
   const { data: addresses } = useAddresses();
+  const selectedAddressId = useDeliveryAddressStore((s) => s.selectedAddressId);
+  const isAddrInitialized = useDeliveryAddressStore((s) => s.isInitialized);
+  const loadSavedSelection = useDeliveryAddressStore((s) => s.loadSavedSelection);
   const [streetName, setStreetName] = useState<string>('');
   const [searchFilter, setSearchFilter] = useState('');
   const [categoryId, setCategoryId] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [compact, setCompact] = useState(false);
 
-  // Giữ nguyên logic cũ: lấy tên đường từ vị trí GPS hiện tại.
+  useEffect(() => {
+    if (!isAddrInitialized) {
+      loadSavedSelection();
+    }
+  }, [isAddrInitialized, loadSavedSelection]);
+
+  // Lấy tên đường từ vị trí GPS hiện tại (nếu có cấp quyền GPS)
   useEffect(() => {
     let isMounted = true;
     async function resolveCurrentAddress() {
+      if (!coords) return;
       try {
-        const results = await Location.reverseGeocodeAsync({ latitude: coords.latitude, longitude: coords.longitude });
+        const results = await Location.reverseGeocodeAsync({
+          latitude: coords.latitude,
+          longitude: coords.longitude,
+        });
         if (results && results.length > 0 && isMounted) {
           const item = results[0];
           const parts = [item.name || item.streetNumber, item.street, item.subregion || item.district]
             .filter(Boolean)
             .join(' ');
-          setStreetName(parts || `${coords.latitude.toFixed(3)}, ${coords.longitude.toFixed(3)}`);
+          setStreetName(parts || '');
         }
       } catch {
         // Không lấy được tên đường: giữ nhãn mặc định.
@@ -151,22 +164,29 @@ export const HomeScreen: React.FC = () => {
     };
   }, [coords]);
 
-  const activeAddress = addresses?.find((a) => a.isDefault) || addresses?.[0];
-  let displayAddress = 'Vị trí hiện tại (TP.HCM)';
-  if (activeAddress?.addressLine && !COORD_LIKE.test(activeAddress.addressLine)) {
-    displayAddress = activeAddress.addressLine;
-  } else if (streetName && !COORD_LIKE.test(streetName)) {
-    displayAddress = streetName;
-  }
+  // Nguồn địa chỉ giao hàng duy nhất (Single Source of Truth)
+  const addressResolution = useMemo(
+    () => resolveActiveDeliveryAddress(addresses, selectedAddressId, coords, streetName),
+    [addresses, selectedAddressId, coords, streetName],
+  );
+  const displayAddress = addressResolution.displayText;
+  const activeLat = addressResolution.roundedCoords?.latitude ?? null;
+  const activeLng = addressResolution.roundedCoords?.longitude ?? null;
+  const hasActiveCoords = activeLat !== null && activeLng !== null;
 
   const { data, isLoading, isError, refetch } = useNearbyRestaurants({
-    lat: coords.latitude,
-    lng: coords.longitude,
+    lat: activeLat,
+    lng: activeLng,
     radiusKm: 15,
   });
 
   const bannersQuery = useBanners();
-  const dishesQuery = useNearbyDishes({ lat: coords.latitude, lng: coords.longitude, radiusKm: 15, limit: 20 });
+  const dishesQuery = useNearbyDishes({
+    lat: activeLat,
+    lng: activeLng,
+    radiusKm: 15,
+    limit: 20,
+  });
 
   const { refetch: refetchBanners } = bannersQuery;
   const { refetch: refetchDishes } = dishesQuery;
@@ -434,7 +454,16 @@ export const HomeScreen: React.FC = () => {
           </View>
         )}
         ListEmptyComponent={
-          loading ? undefined : isError ? (
+          loading ? undefined : !hasActiveCoords ? (
+            <EmptyState
+              icon="location-outline"
+              title="Chọn địa chỉ giao hàng để xem quán quanh bạn"
+              description="Vui lòng chọn hoặc thêm địa chỉ giao hàng, hoặc bật định vị GPS để xem các quán ăn gần bạn."
+              actionLabel="Chọn địa chỉ giao hàng"
+              onAction={openAddresses}
+              className="bg-brand-50 pt-4"
+            />
+          ) : isError ? (
             <ErrorState onRetry={onRefresh} className="bg-canvas" />
           ) : (
             <EmptyState

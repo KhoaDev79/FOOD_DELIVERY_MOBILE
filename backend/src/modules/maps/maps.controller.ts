@@ -1,14 +1,15 @@
 import { Controller, Get, HttpException, HttpStatus, Query } from '@nestjs/common';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Public } from '../../common/decorators/public.decorator';
+import { LruCache } from '../../common/utils/lru-cache.util';
 import { MapsService } from './maps.service';
 
 /**
  * Bộ kiểm soát tốc độ gọi API bản đồ theo từng tài khoản (Per-User Rate Limiter)
- * Ngăn chặn một cá nhân gửi quá nhiều request gây cạn kiệt hạn mức 1.000 req/ngày của hệ thống.
+ * Dùng LruCache giới hạn kích thước (10.000 khoá) để tránh phình bộ nhớ.
  */
 class UserMapRateLimiter {
-  private userRequests = new Map<string, number[]>();
+  private userRequests = new LruCache<number[]>(60 * 1000, 10000);
   private readonly windowMs = 60 * 1000; // 60 giây
   private readonly maxPerWindow = 30; // Tối đa 30 request / phút / user
 
@@ -25,7 +26,7 @@ class UserMapRateLimiter {
     }
 
     active.push(now);
-    this.userRequests.set(userId, active);
+    this.userRequests.set(userId, active, this.windowMs);
   }
 }
 

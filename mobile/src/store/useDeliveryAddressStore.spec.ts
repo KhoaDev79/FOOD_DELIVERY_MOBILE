@@ -116,8 +116,8 @@ describe('useDeliveryAddressStore & resolveActiveDeliveryAddress (Single Source 
     });
 
     // Toạ độ query quán của 2 địa chỉ phải khác nhau hoàn toàn
-    expect(resAddr2.roundedCoords.latitude).not.toEqual(resAddr3.roundedCoords.latitude);
-    expect(resAddr2.roundedCoords.longitude).not.toEqual(resAddr3.roundedCoords.longitude);
+    expect(resAddr2.roundedCoords?.latitude).not.toEqual(resAddr3.roundedCoords?.latitude);
+    expect(resAddr2.roundedCoords?.longitude).not.toEqual(resAddr3.roundedCoords?.longitude);
   });
 
   test('Tình huống 3: Xoá địa chỉ đang chọn thì tự động chuyển sang địa chỉ mặc định, không còn hiện địa chỉ đã xoá', () => {
@@ -149,9 +149,11 @@ describe('useDeliveryAddressStore & resolveActiveDeliveryAddress (Single Source 
     expect(resGps.displayText).toBe('Đường Quang Trung, Gò Vấp');
     expect(resGps.coordinates).toEqual(gpsCoords);
 
-    // 3. Không có địa chỉ trong DB, không có GPS
+    // 3. Không có địa chỉ trong DB, không có GPS -> coordinates = null (không bịa vị trí mặc định)
     const resNone = resolveActiveDeliveryAddress([], null, undefined, undefined);
     expect(resNone.source).toBe('none');
     expect(resNone.displayText).toBe('Chọn địa chỉ giao hàng');
+    expect(resNone.coordinates).toBeNull();
+    expect(resNone.roundedCoords).toBeNull();
   });
 });

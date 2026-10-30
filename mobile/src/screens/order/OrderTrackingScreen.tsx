@@ -107,7 +107,14 @@ export const OrderTrackingScreen: React.FC<Props> = ({ route, navigation }) => {
   const isCancelled = order.status === 'CANCELLED';
   const statusConfig = ORDER_STATUS_CONFIG[order.status];
   const currentStep = getStepIndex(order.status);
-  const eta = estimateDeliveryTime(order.distanceKm);
+  const eta = order.estimatedDeliveryAt
+    ? (() => {
+        const dt = new Date(order.estimatedDeliveryAt);
+        const hh = String(dt.getHours()).padStart(2, '0');
+        const mm = String(dt.getMinutes()).padStart(2, '0');
+        return `Khoảng ${hh}:${mm}`;
+      })()
+    : estimateDeliveryTime(order.distanceKm);
 
   const markers: MapMarkerItem[] = [
     {

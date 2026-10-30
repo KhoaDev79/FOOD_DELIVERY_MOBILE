@@ -1,18 +1,38 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, Headers, Param, ParseUUIDPipe, Patch, Post, Query } from '@nestjs/common';
 import { Role } from '@prisma/client';
 import { AuthUser, CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
-import { CreateOrderDto, ListOrdersQueryDto, ReviewOrderDto, UpdateOrderStatusDto } from './dto/orders.dto';
+import {
+  CreateOrderDto,
+  ListOrdersQueryDto,
+  QuoteOrderDto,
+  ReviewOrderDto,
+  UpdateOrderStatusDto,
+} from './dto/orders.dto';
+import { OrderPricingService } from './order-pricing.service';
 import { OrdersService } from './orders.service';
 
 @Controller('orders')
 export class OrdersController {
-  constructor(private readonly orders: OrdersService) {}
+  constructor(
+    private readonly orders: OrdersService,
+    private readonly orderPricing: OrderPricingService,
+  ) {}
+
+  @Roles(Role.CUSTOMER)
+  @Post('quote')
+  quote(@CurrentUser('id') userId: string, @Body() dto: QuoteOrderDto) {
+    return this.orderPricing.quote(userId, dto);
+  }
 
   @Roles(Role.CUSTOMER)
   @Post()
-  create(@CurrentUser('id') userId: string, @Body() dto: CreateOrderDto) {
-    return this.orders.create(userId, dto);
+  create(
+    @CurrentUser('id') userId: string,
+    @Body() dto: CreateOrderDto,
+    @Headers('idempotency-key') idempotencyKey?: string,
+  ) {
+    return this.orders.create(userId, dto, idempotencyKey);
   }
 
   @Roles(Role.CUSTOMER)

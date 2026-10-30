@@ -1,27 +1,39 @@
 import { apiClient } from './client';
-import { DriverStats, OrderDetail, OrderSummary, PaginatedResult, PaymentMethod } from '../types/api';
+import { DriverStats, OrderDetail, OrderQuoteResponse, OrderSummary, PaginatedResult } from '../types/api';
+
+export interface OrderItemPayload {
+  menuItemId: string;
+  quantity: number;
+  note?: string;
+  /** Mã tuỳ chọn của món; backend tra giá theo các mã này. */
+  sizeId?: string;
+  toppingIds?: string[];
+  level?: string;
+}
+
+export interface QuoteOrderPayload {
+  restaurantId: string;
+  items: OrderItemPayload[];
+  addressId: string;
+}
 
 export interface CreateOrderPayload {
   restaurantId: string;
-  items: {
-    menuItemId: string;
-    quantity: number;
-    note?: string;
-    /** Mã tuỳ chọn của món; backend tra giá theo các mã này. */
-    sizeId?: string;
-    toppingIds?: string[];
-    level?: string;
-  }[];
-  addressId?: string;
-  deliveryAddress?: string;
-  deliveryLat?: number;
-  deliveryLng?: number;
-  paymentMethod: PaymentMethod;
+  items: OrderItemPayload[];
+  addressId: string;
+  quoteToken: string;
   note?: string;
 }
 
 export const ordersApi = {
-  create: (payload: CreateOrderPayload) => apiClient.post<any, OrderDetail>('/orders', payload),
+  quote: (payload: QuoteOrderPayload) => apiClient.post<any, OrderQuoteResponse>('/orders/quote', payload),
+
+  create: (payload: CreateOrderPayload, idempotencyKey?: string) =>
+    apiClient.post<any, OrderDetail>(
+      '/orders',
+      payload,
+      idempotencyKey ? { headers: { 'Idempotency-Key': idempotencyKey } } : undefined,
+    ),
 
   getMine: (params?: { status?: string; page?: number; limit?: number }) =>
     apiClient.get<any, PaginatedResult<OrderSummary>>('/orders/my', { params }),

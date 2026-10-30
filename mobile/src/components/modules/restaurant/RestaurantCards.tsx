@@ -4,14 +4,15 @@ import { AppImage, Badge, cn, Icon, IconButton, InfoChip, Text } from '../../ui'
 import { useToggleFavorite } from '../../../hooks/useFavorites';
 import { useFavoritesStore } from '../../../store/useFavoritesStore';
 import { Restaurant } from '../../../types/api';
-import { calculateDeliveryFee, estimateDeliveryTime } from '../../../utils/fee';
+import { estimateDeliveryTime } from '../../../utils/fee';
 import { formatDistance, formatVND } from '../../../utils/format';
 
-/** Mọi thông tin trên thẻ đều lấy từ dữ liệu quán hoặc tính từ khoảng cách. */
+/** Mọi thông tin trên thẻ đều lấy từ dữ liệu quán do backend trả về. */
 const useMeta = (r: Restaurant) => {
-  const distance = formatDistance(r.distanceKm);
+  const rawDist = formatDistance(r.distanceKm);
+  const distance = rawDist ? `khoảng ${rawDist}` : null;
   const time = r.distanceKm !== undefined ? estimateDeliveryTime(r.distanceKm) : null;
-  const fee = r.distanceKm !== undefined ? calculateDeliveryFee(r.distanceKm).fee : null;
+  const fee = r.estimatedDeliveryFee !== undefined ? r.estimatedDeliveryFee : null;
   const rating =
     r.rating > 0 ? r.rating.toLocaleString('vi-VN', { minimumFractionDigits: 1, maximumFractionDigits: 1 }) : null;
   const hours = r.openTime && r.closeTime ? `giờ mở cửa ${r.openTime} đến ${r.closeTime}` : null;
@@ -105,7 +106,7 @@ export const RestaurantCardVertical = memo<CardProps>(({ restaurant: r, onPress,
           </Text>
         )}
       </View>
-      {m.fee !== null && <InfoChip label={`Ship ${formatVND(m.fee)}`} tone="freeship" icon="cube-outline" />}
+      {m.fee !== null && <InfoChip label={`Từ ${formatVND(m.fee)}`} tone="freeship" icon="cube-outline" />}
     </Pressable>
   );
 });
@@ -177,7 +178,7 @@ export const RestaurantRow = memo<CardProps>(({ restaurant: r, onPress, classNam
             )}
             {/* Quán ngoài vùng giao không có phí ship: không đặt được */}
             {m.fee !== null && r.canDeliver !== false && (
-              <InfoChip label={`Ship ${formatVND(m.fee)}`} tone="freeship" icon="cube-outline" />
+              <InfoChip label={`Từ ${formatVND(m.fee)}`} tone="freeship" icon="cube-outline" />
             )}
             {r.canDeliver === false && (
               <InfoChip label="Ngoài vùng giao hàng" tone="danger" icon="alert-circle-outline" />

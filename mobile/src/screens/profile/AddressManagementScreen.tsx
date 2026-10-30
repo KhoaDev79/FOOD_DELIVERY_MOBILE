@@ -68,7 +68,7 @@ export const AddressManagementScreen: React.FC<Props> = ({ navigation }) => {
         onLeadingPress={() => navigation.goBack()}
         trailing={
           <Pressable
-            onPress={() => navigation.navigate('AddressPicker', { initialCoords: coords })}
+            onPress={() => navigation.navigate('AddressPicker', { initialCoords: coords || undefined })}
             className="p-1 active:opacity-70"
           >
             <Ionicons name="map-outline" size={24} color="#1EB9CE" />

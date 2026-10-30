@@ -24,7 +24,8 @@ export function useOrderDetail(orderId: string) {
 export function useCreateOrder() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (payload: CreateOrderPayload) => ordersApi.create(payload),
+    mutationFn: ({ payload, idempotencyKey }: { payload: CreateOrderPayload; idempotencyKey?: string }) =>
+      ordersApi.create(payload, idempotencyKey),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.orders.all });
     },

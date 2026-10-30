@@ -16,6 +16,8 @@ import { AppImage, EmptyState, LoadingSpinner, Skeleton, Text } from '../../comp
 import { useDebounce } from '../../hooks/useDebounce';
 import { useLocation } from '../../hooks/useLocation';
 import { useNearbyRestaurants } from '../../services/useRestaurants';
+import { useAddresses } from '../../services/useUser';
+import { resolveActiveDeliveryAddress, useDeliveryAddressStore } from '../../store/useDeliveryAddressStore';
 import { Restaurant } from '../../types/api';
 import { RootStackParamList } from '../../types/navigation';
 
@@ -93,7 +95,14 @@ export const SearchScreen: React.FC = () => {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const route = useRoute<SearchScreenRouteProp>();
   const { coords } = useLocation();
+  const { data: addresses } = useAddresses();
+  const selectedAddressId = useDeliveryAddressStore((s) => s.selectedAddressId);
   const { width: screenWidth } = useWindowDimensions();
+
+  const addressResolution = resolveActiveDeliveryAddress(addresses, selectedAddressId, coords);
+  const activeLat = addressResolution.roundedCoords?.latitude ?? null;
+  const activeLng = addressResolution.roundedCoords?.longitude ?? null;
+  const hasActiveCoords = activeLat !== null && activeLng !== null;
 
   // Chiều rộng mỗi thẻ quán trong lưới 3 cột (trừ lề 16px mỗi bên và khoảng cách giữa 3 cột 10px)
   const itemWidth = Math.floor((screenWidth - 32 - 20) / 3);
@@ -106,16 +115,16 @@ export const SearchScreen: React.FC = () => {
 
   // Lấy danh sách quán gợi ý khi chưa tìm kiếm
   const { data: recommendedData, isLoading: isRecommendedLoading } = useNearbyRestaurants({
-    lat: coords.latitude,
-    lng: coords.longitude,
+    lat: activeLat,
+    lng: activeLng,
     radiusKm: 20,
     limit: 12,
   });
 
   // Lấy kết quả tìm kiếm khi người dùng đã nhập từ khoá
   const { data: searchData, isLoading: isSearchLoading } = useNearbyRestaurants({
-    lat: coords.latitude,
-    lng: coords.longitude,
+    lat: activeLat,
+    lng: activeLng,
     q: isSearching ? debouncedQuery.trim() : undefined,
     openOnly,
     radiusKm: 20,
@@ -164,7 +173,17 @@ export const SearchScreen: React.FC = () => {
       </View>
 
       {/* Nội dung màn hình */}
-      {isSearching ? (
+      {!hasActiveCoords ? (
+        <View className="flex-1 justify-center p-4">
+          <EmptyState
+            icon="location-outline"
+            title="Chọn địa chỉ giao hàng để xem quán quanh bạn"
+            description="Vui lòng chọn địa chỉ giao hàng hoặc bật định vị để tìm kiếm quán ăn quanh bạn."
+            actionLabel="Chọn địa chỉ giao hàng"
+            onAction={() => navigation.navigate('AddressManagement')}
+          />
+        </View>
+      ) : isSearching ? (
         // ================= KẾT QUẢ TÌM KIẾM =================
         <View className="flex-1">
           {/* Bộ lọc đang mở cửa */}

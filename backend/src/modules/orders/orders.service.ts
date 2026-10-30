@@ -6,17 +6,15 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { OrderStatus, Prisma } from '@prisma/client';
+import { OrderStatus, PaymentMethod, Prisma } from '@prisma/client';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
-import { calcDeliveryFee, haversineKm } from '../../common/utils/geo.util';
-import { isWithinOpeningHours } from '../../common/utils/opening-hours';
 import { PrismaService } from '../prisma/prisma.service';
 import { OrdersGateway } from '../realtime/orders.gateway';
 import { RestaurantsService } from '../restaurants/restaurants.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { CreateOrderDto, ListOrdersQueryDto } from './dto/orders.dto';
 import { canViewOrder } from './order-access';
-import { lineKey, OrderPricingError, priceOrderLine } from './order-pricing';
+import { OrderPricingService } from './order-pricing.service';
 import {
   actorMayTransition,
   DRIVER_ACCEPTABLE_STATUSES,
@@ -74,102 +72,96 @@ export class OrdersService {
     private readonly gateway: OrdersGateway,
     private readonly restaurants: RestaurantsService,
     private readonly notifications: NotificationsService,
+    private readonly orderPricing: OrderPricingService,
   ) {}
 
   // =========================================================================
-  //  ĐẶT ĐƠN — toàn bộ trong 1 transaction, giá luôn lấy từ DB
+  //  ĐẶT ĐƠN — kiểm tra quoteToken + idempotency + toàn bộ trong 1 transaction
   // =========================================================================
-  async create(customerId: string, dto: CreateOrderDto): Promise<OrderDetail> {
-    const location = await this.resolveDeliveryLocation(customerId, dto);
-    const requested = this.mergeItems(dto.items);
-    const menuItemIds = [...new Set([...requested.values()].map((l) => l.menuItemId))];
-    const deliveryCfg = this.config.getOrThrow('delivery');
+  async create(customerId: string, dto: CreateOrderDto, idempotencyKey?: string): Promise<OrderDetail> {
+    const cleanIdemKey = idempotencyKey?.trim() ? idempotencyKey.trim().slice(0, 100) : null;
 
-    const order = await this.prisma.$transaction(async (tx) => {
-      const restaurant = await tx.restaurant.findUnique({ where: { id: dto.restaurantId } });
-      if (!restaurant) throw new NotFoundException('Không tìm thấy nhà hàng');
-      if (!restaurant.isOpen) throw new BadRequestException('Nhà hàng hiện đang đóng cửa');
-      if (!isWithinOpeningHours(restaurant.openTime, restaurant.closeTime)) {
-        throw new BadRequestException(
-          `Quán chỉ nhận đơn từ ${restaurant.openTime} đến ${restaurant.closeTime}. Vui lòng quay lại sau.`,
-        );
-      }
-
-      const distanceKm = haversineKm(
-        { lat: restaurant.latitude, lng: restaurant.longitude },
-        { lat: location.lat, lng: location.lng },
-      );
-      if (distanceKm > restaurant.deliveryRadiusKm) {
-        throw new BadRequestException(
-          `Địa chỉ nằm ngoài bán kính giao hàng của quán (${restaurant.deliveryRadiusKm} km)`,
-        );
-      }
-
-      const menuItems = await tx.menuItem.findMany({
+    if (cleanIdemKey) {
+      const existing = await this.prisma.order.findUnique({
         where: {
-          id: { in: menuItemIds },
-          restaurantId: restaurant.id, // chặn trộn món của quán khác
-          isAvailable: true,
-          isArchived: false,
-        },
-        select: { id: true, name: true, price: true, discountPrice: true, options: true },
-      });
-      if (menuItems.length !== menuItemIds.length) {
-        const found = new Set(menuItems.map((m) => m.id));
-        throw new BadRequestException({
-          message: 'Một số món không tồn tại hoặc đã hết',
-          unavailableItemIds: menuItemIds.filter((id) => !found.has(id)),
-        });
-      }
-
-      // Đơn giá tính lại hoàn toàn từ DB: giá giảm (nếu có) + size + topping của chính món đó.
-      const byId = new Map(menuItems.map((m) => [m.id, m]));
-      const lines = [...requested.values()].map((req) => {
-        const m = byId.get(req.menuItemId)!;
-        let priced: ReturnType<typeof priceOrderLine>;
-        try {
-          priced = priceOrderLine(m, req);
-        } catch (e) {
-          if (e instanceof OrderPricingError) throw new BadRequestException(e.message);
-          throw e;
-        }
-        return {
-          menuItemId: m.id,
-          name: m.name,
-          unitPrice: priced.unitPrice,
-          quantity: req.quantity,
-          lineTotal: priced.unitPrice * req.quantity,
-          note: req.note,
-          options: priced.selected ? (priced.selected as unknown as Prisma.InputJsonValue) : undefined,
-        };
-      });
-      const subtotal = lines.reduce((sum, l) => sum + l.lineTotal, 0);
-      const deliveryFee = calcDeliveryFee(distanceKm, deliveryCfg);
-
-      return tx.order.create({
-        data: {
-          customerId,
-          restaurantId: restaurant.id,
-          paymentMethod: dto.paymentMethod,
-          subtotal,
-          deliveryFee,
-          total: subtotal + deliveryFee,
-          distanceKm: Math.round(distanceKm * 100) / 100,
-          deliveryAddress: location.address,
-          deliveryLat: location.lat,
-          deliveryLng: location.lng,
-          note: dto.note,
-          items: { create: lines },
-          statusHistory: { create: { status: 'PENDING', changedBy: customerId } },
+          customerId_idempotencyKey: {
+            customerId,
+            idempotencyKey: cleanIdemKey,
+          },
         },
         include: ORDER_DETAIL_INCLUDE,
       });
+      // Cùng khách + cùng key trong 10 phút -> trả lại đơn đã tạo, không tạo đơn mới
+      if (existing && Date.now() - existing.createdAt.getTime() <= 10 * 60 * 1000) {
+        return existing;
+      }
+    }
+
+    // Kiểm tra số lần giao thất bại trong 30 ngày gần nhất của khách (C5)
+    const maxFailed = Number(this.config.get<number>('business.customerMaxFailedDeliveries') ?? 2);
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    const recentFailedCount = await this.prisma.order.count({
+      where: {
+        customerId,
+        status: OrderStatus.DELIVERY_FAILED,
+        createdAt: { gte: thirtyDaysAgo },
+      },
     });
+    if (recentFailedCount >= maxFailed) {
+      throw new ForbiddenException(
+        'Tài khoản tạm thời không thể đặt đơn tiền mặt, liên hệ hỗ trợ',
+      );
+    }
+
+    let order: OrderDetail;
+    try {
+      order = await this.prisma.$transaction(async (tx) => {
+        const priced = await this.orderPricing.verifyAndPriceOrder(customerId, dto, tx);
+
+        return tx.order.create({
+          data: {
+            customerId,
+            restaurantId: dto.restaurantId,
+            paymentMethod: PaymentMethod.COD,
+            subtotal: priced.quote.subtotal,
+            deliveryFee: priced.quote.deliveryFee,
+            peakSurcharge: priced.quote.peakSurcharge,
+            platformCommission: priced.platformCommission,
+            driverEarning: priced.driverEarning,
+            total: priced.quote.total,
+            distanceKm: priced.quote.distanceKm,
+            distanceSource: priced.quote.distanceSource,
+            deliveryAddress: priced.deliveryAddress,
+            deliveryLat: priced.deliveryLat,
+            deliveryLng: priced.deliveryLng,
+            estimatedDeliveryAt: priced.estimatedDeliveryAt,
+            idempotencyKey: cleanIdemKey,
+            note: dto.note,
+            items: { create: priced.dbLines },
+            statusHistory: { create: { status: 'PENDING', changedBy: customerId } },
+          },
+          include: ORDER_DETAIL_INCLUDE,
+        });
+      });
+    } catch (err: any) {
+      if (cleanIdemKey && err?.code === 'P2002') {
+        const existing = await this.prisma.order.findUnique({
+          where: {
+            customerId_idempotencyKey: {
+              customerId,
+              idempotencyKey: cleanIdemKey,
+            },
+          },
+          include: ORDER_DETAIL_INCLUDE,
+        });
+        if (existing) return existing;
+      }
+      throw err;
+    }
 
     // Chỉ phát sự kiện sau khi transaction đã commit
     this.gateway.emitOrderUpdated('order:created', order);
-    // Đơn VNPay: quán chỉ được báo khi thanh toán thành công (xem PaymentsService)
-    if (order.paymentMethod === 'COD') this.notifications.notifyOrderCreated(order);
+    this.notifications.notifyOrderCreated(order);
     return order;
   }
 
@@ -382,56 +374,5 @@ export class OrdersService {
     if (user.role === 'DRIVER' && order.driverId === user.id) return 'DRIVER';
     if (user.role === 'CUSTOMER' && order.customerId === user.id) return 'CUSTOMER';
     return null;
-  }
-
-  /**
-   * Gộp các dòng cùng món và cùng tuỳ chọn. Giới hạn 50 tính trên tổng số lượng của mỗi món
-   * (kể cả khi tách nhiều dòng với tuỳ chọn khác nhau) để client không né được giới hạn.
-   */
-  private mergeItems(items: CreateOrderDto['items']) {
-    type Line = {
-      menuItemId: string;
-      quantity: number;
-      note?: string;
-      sizeId?: string;
-      toppingIds?: string[];
-      level?: string;
-    };
-    const map = new Map<string, Line>();
-    const perItem = new Map<string, number>();
-    for (const it of items) {
-      const key = lineKey(it.menuItemId, it);
-      const prev = map.get(key);
-      if (prev) {
-        prev.quantity += it.quantity;
-        if (it.note) prev.note = [prev.note, it.note].filter(Boolean).join('; ');
-      } else {
-        map.set(key, {
-          menuItemId: it.menuItemId,
-          quantity: it.quantity,
-          note: it.note,
-          sizeId: it.sizeId,
-          toppingIds: it.toppingIds,
-          level: it.level,
-        });
-      }
-      perItem.set(it.menuItemId, (perItem.get(it.menuItemId) ?? 0) + it.quantity);
-    }
-    for (const [, total] of perItem) {
-      if (total > 50) throw new BadRequestException('Số lượng mỗi món tối đa là 50');
-    }
-    return map;
-  }
-
-  private async resolveDeliveryLocation(customerId: string, dto: CreateOrderDto) {
-    if (dto.addressId) {
-      const addr = await this.prisma.address.findFirst({ where: { id: dto.addressId, userId: customerId } });
-      if (!addr) throw new NotFoundException('Không tìm thấy địa chỉ giao hàng');
-      return { address: addr.addressLine, lat: addr.latitude, lng: addr.longitude };
-    }
-    if (!dto.deliveryAddress || dto.deliveryLat === undefined || dto.deliveryLng === undefined) {
-      throw new BadRequestException('Cần cung cấp addressId hoặc deliveryAddress + deliveryLat + deliveryLng');
-    }
-    return { address: dto.deliveryAddress, lat: dto.deliveryLat, lng: dto.deliveryLng };
   }
 }

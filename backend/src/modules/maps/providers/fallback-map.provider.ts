@@ -7,16 +7,22 @@ import {
   IMapProvider,
   PlaceAutocompleteItem,
 } from '../interfaces/map-provider.interface';
+import { RateLimiter } from '../utils/rate-limiter.util';
 
 export class FallbackMapProvider implements IMapProvider {
   readonly name = 'OpenStreetMap & Local Fallback';
   private readonly logger = new Logger(FallbackMapProvider.name);
+  private readonly limiter = new RateLimiter(1100);
+  private readonly userAgent = 'FoodDeliveryBackend/1.0 (contact: admin@fooddelivery.com)';
+
+  constructor(private readonly fallbackFactor = 1.3) {}
 
   async reverseGeocode(lat: number, lng: number): Promise<GeocodeResult> {
     try {
+      await this.limiter.throttle();
       const url = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1`;
       const res = await fetch(url, {
-        headers: { 'User-Agent': 'FoodDeliveryBackend/1.0 (contact: admin@fooddelivery.com)' },
+        headers: { 'User-Agent': this.userAgent, Accept: 'application/json' },
       });
       if (res.ok) {
         const data = await res.json();
@@ -42,10 +48,11 @@ export class FallbackMapProvider implements IMapProvider {
 
   async searchPlaces(query: string, _lat?: number, _lng?: number): Promise<PlaceAutocompleteItem[]> {
     try {
+      await this.limiter.throttle();
       const encoded = encodeURIComponent(query.trim());
       const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encoded}&countrycodes=vn&limit=8&addressdetails=1`;
       const res = await fetch(url, {
-        headers: { 'User-Agent': 'FoodDeliveryBackend/1.0 (contact: admin@fooddelivery.com)' },
+        headers: { 'User-Agent': this.userAgent, Accept: 'application/json' },
       });
       if (res.ok) {
         const list = await res.json();
@@ -66,9 +73,10 @@ export class FallbackMapProvider implements IMapProvider {
 
   async getPlaceDetail(placeId: string): Promise<GeocodeResult | null> {
     try {
+      await this.limiter.throttle();
       const url = `https://nominatim.openstreetmap.org/details?format=json&place_id=${placeId}&addressdetails=1`;
       const res = await fetch(url, {
-        headers: { 'User-Agent': 'FoodDeliveryBackend/1.0 (contact: admin@fooddelivery.com)' },
+        headers: { 'User-Agent': this.userAgent, Accept: 'application/json' },
       });
       if (res.ok) {
         const data = await res.json();
@@ -91,9 +99,9 @@ export class FallbackMapProvider implements IMapProvider {
     origin: { lat: number; lng: number },
     destination: { lat: number; lng: number },
   ): Promise<DistanceMatrixResult> {
-    // Tính khoảng cách đường bộ bằng Haversine x hệ số uốn lượn đường phố nội đô (1.35)
+    // Tính khoảng cách đường bộ bằng Haversine x ROAD_DISTANCE_FALLBACK_FACTOR
     const directKm = haversineKm(origin, destination);
-    const distanceKm = Math.max(0.5, Math.round(directKm * 1.35 * 10) / 10);
+    const distanceKm = Math.max(0.5, Math.round(directKm * this.fallbackFactor * 10) / 10);
 
     // Thời gian xe máy tại nội đô: ~22-25 km/h + 8 phút đèn đỏ/chờ
     const durationMinutes = Math.max(5, Math.round(distanceKm * 2.8 + 8));

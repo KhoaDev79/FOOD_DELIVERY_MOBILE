@@ -21,7 +21,9 @@ export const RestaurantCard: React.FC<RestaurantCardProps> = ({
   onToggleFavorite,
 }) => {
   const deliveryTime = estimateDeliveryTime(restaurant.distanceKm);
-  const freeship = isFreeDelivery(restaurant.distanceKm || 1.5);
+  const freeship = isFreeDelivery(restaurant.distanceKm || 1.5, {
+    estimatedDeliveryFee: restaurant.estimatedDeliveryFee,
+  });
 
   return (
     <Card onPress={onPress} style={styles.card}>

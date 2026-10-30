@@ -23,6 +23,8 @@ export class NominatimMapProvider implements IMapProvider {
   // User-Agent định danh theo đúng yêu cầu chính sách OSMF
   private readonly userAgent = 'FoodDeliveryApp-Dev/1.0 (contact: admin@fooddelivery.local)';
 
+  constructor(private readonly fallbackFactor = 1.3) {}
+
   async reverseGeocode(lat: number, lng: number): Promise<GeocodeResult> {
     const cacheKey = `rev_${lat.toFixed(4)}_${lng.toFixed(4)}`;
     const cached = this.geocodeCache.get(cacheKey);
@@ -128,9 +130,9 @@ export class NominatimMapProvider implements IMapProvider {
     origin: { lat: number; lng: number },
     destination: { lat: number; lng: number },
   ): Promise<DistanceMatrixResult> {
-    // Tính khoảng cách đường bộ bằng Haversine x hệ số uốn lượn đường phố nội đô (1.35)
+    // Tính khoảng cách đường bộ bằng Haversine x ROAD_DISTANCE_FALLBACK_FACTOR
     const directKm = haversineKm(origin, destination);
-    const distanceKm = Math.max(0.5, Math.round(directKm * 1.35 * 10) / 10);
+    const distanceKm = Math.max(0.5, Math.round(directKm * this.fallbackFactor * 10) / 10);
     // Vận tốc xe máy trung bình 24 km/h + 8 phút đèn đỏ & giao lộ
     const durationMinutes = Math.max(5, Math.round(distanceKm * 2.5 + 8));
 

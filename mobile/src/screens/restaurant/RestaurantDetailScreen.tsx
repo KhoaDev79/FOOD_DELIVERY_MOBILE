@@ -21,12 +21,14 @@ import {
 } from '../../components/ui';
 import { useLocation } from '../../hooks/useLocation';
 import { useRestaurantDetail } from '../../services/useRestaurants';
+import { useAddresses } from '../../services/useUser';
 import { useCartStore } from '../../store/useCartStore';
+import { resolveActiveDeliveryAddress, useDeliveryAddressStore } from '../../store/useDeliveryAddressStore';
 import { useToggleFavorite } from '../../hooks/useFavorites';
 import { useFavoritesStore } from '../../store/useFavoritesStore';
 import { MenuItem } from '../../types/api';
 import { RootStackParamList } from '../../types/navigation';
-import { calculateDeliveryFee, calculateDistance, estimateDeliveryTime } from '../../utils/fee';
+import { calculateDistance, estimateDeliveryTime } from '../../utils/fee';
 import { formatDistance, formatVND } from '../../utils/format';
 import { discountPercent, hasChoices, linePrice } from '../../utils/menuPricing';
 
@@ -65,7 +67,9 @@ const DetailSkeleton: React.FC = () => (
 export const RestaurantDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   const { restaurantId, openDishId } = route.params;
   const { data: restaurant, isLoading, isError, refetch } = useRestaurantDetail(restaurantId);
-  const { coords, isLoading: locating, errorMsg } = useLocation();
+  const { coords } = useLocation();
+  const { data: addresses } = useAddresses();
+  const selectedAddressId = useDeliveryAddressStore((s) => s.selectedAddressId);
   const toast = useToast();
 
   const addItem = useCartStore((s) => s.addItem);
@@ -132,11 +136,16 @@ export const RestaurantDetailScreen: React.FC<Props> = ({ route, navigation }) =
   }
 
   const canOrder = restaurant.isOpen;
-  // Khoảng cách chỉ hiện khi có vị trí thật của người dùng (không dùng toạ độ mặc định).
-  const distanceKm =
-    !locating && !errorMsg
-      ? calculateDistance(coords.latitude, coords.longitude, restaurant.latitude, restaurant.longitude)
-      : undefined;
+  // Nguồn địa chỉ giao hàng duy nhất (địa chỉ đã chọn -> mặc định -> GPS)
+  const addressResolution = resolveActiveDeliveryAddress(addresses, selectedAddressId, coords);
+  const distanceKm = addressResolution.coordinates
+    ? calculateDistance(
+        addressResolution.coordinates.latitude,
+        addressResolution.coordinates.longitude,
+        restaurant.latitude,
+        restaurant.longitude,
+      )
+    : restaurant.distanceKm;
   // Theo vị trí hiện tại của khách: quán có giao tới không. Chỉ cảnh báo (không chặn), vì khách có thể
   // chọn địa chỉ giao khác ở bước thanh toán; backend kiểm tra lại bán kính khi đặt đơn.
   const outOfRange = distanceKm !== undefined && distanceKm > restaurant.deliveryRadiusKm;
@@ -236,7 +245,9 @@ export const RestaurantDetailScreen: React.FC<Props> = ({ route, navigation }) =
           )}
           <View className="flex-row flex-wrap gap-x-4 gap-y-2">
             {rating && <MetaItem icon="star" tone="rating" label={rating} />}
-            {distanceKm !== undefined && <MetaItem icon="navigate-outline" label={formatDistance(distanceKm) ?? ''} />}
+            {distanceKm !== undefined && (
+              <MetaItem icon="navigate-outline" label={`Khoảng ${formatDistance(distanceKm) ?? ''}`} />
+            )}
             {distanceKm !== undefined && <MetaItem icon="bicycle-outline" label={estimateDeliveryTime(distanceKm)} />}
             {restaurant.openTime && restaurant.closeTime && (
               <MetaItem icon="time-outline" label={`${restaurant.openTime} - ${restaurant.closeTime}`} />
@@ -258,15 +269,14 @@ export const RestaurantDetailScreen: React.FC<Props> = ({ route, navigation }) =
               {restaurant.address}
             </Text>
           </View>
-          {distanceKm !== undefined && (
-            <View className="flex-row items-center gap-1.5 rounded-md bg-brand-50 px-3 py-2">
-              <Icon name="cube-outline" size="sm" tone="brand" />
-              <Text variant="caption" weight="medium" tone="brand" className="flex-1">
-                Phí giao ước tính {formatVND(calculateDeliveryFee(distanceKm).fee)} · bán kính giao{' '}
-                {restaurant.deliveryRadiusKm} km
-              </Text>
-            </View>
-          )}
+          <View className="flex-row items-center gap-1.5 rounded-md bg-brand-50 px-3 py-2">
+            <Icon name="cube-outline" size="sm" tone="brand" />
+            <Text variant="caption" weight="medium" tone="brand" className="flex-1">
+              {restaurant.estimatedDeliveryFee !== undefined
+                ? `Phí giao ước tính từ ${formatVND(restaurant.estimatedDeliveryFee)} · bán kính giao ${restaurant.deliveryRadiusKm} km`
+                : `Bán kính giao hàng ${restaurant.deliveryRadiusKm} km (phí giao tính tại bước thanh toán)`}
+            </Text>
+          </View>
         </View>
 
         {!canOrder && (

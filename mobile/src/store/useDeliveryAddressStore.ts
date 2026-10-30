@@ -11,11 +11,11 @@ export interface DeliveryAddressResolution {
   coordinates: {
     latitude: number;
     longitude: number;
-  };
+  } | null;
   roundedCoords: {
     latitude: number;
     longitude: number;
-  };
+  } | null;
 }
 
 /**
@@ -38,7 +38,7 @@ export function roundCoordinate(coord: number, precision = 3): number {
 export function resolveActiveDeliveryAddress(
   addresses: Address[] | undefined,
   selectedAddressId: string | null,
-  gpsCoords?: { latitude: number; longitude: number },
+  gpsCoords?: { latitude: number; longitude: number } | null,
   gpsStreetName?: string,
 ): DeliveryAddressResolution {
   // 1. Kiểm tra selectedAddressId
@@ -105,17 +105,13 @@ export function resolveActiveDeliveryAddress(
     };
   }
 
-  // 5. Fallback cuối cùng
-  const defaultFallbackCoords = { latitude: 10.7769, longitude: 106.7009 };
+  // 5. Không có địa chỉ đã lưu và không có GPS -> không giả lập toạ độ mặc định
   return {
     address: null,
     displayText: 'Chọn địa chỉ giao hàng',
     source: 'none',
-    coordinates: defaultFallbackCoords,
-    roundedCoords: {
-      latitude: roundCoordinate(defaultFallbackCoords.latitude),
-      longitude: roundCoordinate(defaultFallbackCoords.longitude),
-    },
+    coordinates: null,
+    roundedCoords: null,
   };
 }
 
