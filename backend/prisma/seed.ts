@@ -600,7 +600,7 @@ async function main() {
     // TRƯỜNG HỢP BIÊN 1: Quán đang ĐÓNG CỬA (isOpen: false)
     {
       name: 'Bánh Cuốn Nóng Tây Hồ',
-      description: 'Bánh cuốn tráng tay nóng hổi chả quế lá chuối (Hiện quán đang đóng)',
+      description: 'Bánh cuốn tráng tay nóng hổi, chả quế lá chuối',
       imageUrl: '/public/images/food/banhcuon.jpg',
       address: '90 Nguyễn Đình Chiểu, Phường Đa Kao, TP. Hồ Chí Minh',
       latitude: 10.785,
@@ -726,7 +726,7 @@ async function main() {
     // TRƯỜNG HỢP BIÊN 3: Quán NGOÀI BÁN KÍNH PHỤC VỤ (>25km tại Cần Giờ)
     {
       name: 'Hải Sản Tươi Sống Cần Giờ',
-      description: 'Cua biển, tôm hùm tươi sống vùng duyên hải Cần Giờ (khoảng cách >25km)',
+      description: 'Cua biển, tôm hùm tươi sống vùng duyên hải Cần Giờ',
       imageUrl: '/public/images/food/default.jpg',
       address: 'Đường Duyên Hải, Xã Long Hòa, TP. Hồ Chí Minh',
       latitude: 10.412,
@@ -748,8 +748,8 @@ async function main() {
     },
     // TRƯỜNG HỢP BIÊN 4: Quán KHÔNG CÓ ẢNH (imageUrl: null) & TÊN RẤT DÀI
     {
-      name: 'Quán Ẩm Thực Cố Đô Chuyên Các Món Bún Bò Xứ Huế Truyền Thống Nổi Tiếng Đậm Đà Xứ Thần Kinh',
-      description: 'Quán gia truyền phục vụ bún bò lâu năm (Trường hợp biên: tên siêu dài và imageUrl để null)',
+      name: 'Quán Ẩm Thực Cố Đô - Bún Bò Xứ Huế Truyền Thống',
+      description: 'Quán gia truyền phục vụ bún bò lâu năm',
       imageUrl: null, // Không có ảnh đại diện
       address: '22 Võ Văn Tần, Phường Xuân Hoà, TP. Hồ Chí Minh',
       latitude: 10.782,

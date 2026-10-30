@@ -308,14 +308,14 @@ export const HomeScreen: React.FC = () => {
       {loading ? (
         <>
           <RailSkeleton />
-          <View className="gap-3 bg-canvas-subtle px-4 pt-6">
+          <View className="gap-3 bg-brand-50 px-4 pt-6">
             <Skeleton className="h-6 w-36" />
             <RestaurantRowSkeleton />
             <RestaurantRowSkeleton />
           </View>
         </>
       ) : isError ? null : isFiltering ? (
-        <View className="flex-row items-center justify-between gap-3 bg-canvas-subtle px-4 pb-3 pt-6">
+        <View className="flex-row items-center justify-between gap-3 bg-brand-50 px-4 pb-3 pt-6">
           <Text variant="title" className="flex-1" numberOfLines={1}>
             {filtered.length > 0 ? `${filtered.length} quán phù hợp` : 'Kết quả tìm kiếm'}
           </Text>
@@ -390,7 +390,7 @@ export const HomeScreen: React.FC = () => {
 
           {/* Danh sách quán gần (ảnh mẫu 6) */}
           {nearbyList.length > 0 && (
-            <View className="gap-0.5 bg-canvas-subtle px-4 pb-3 pt-6">
+            <Gradient preset="nearbyBand" className="gap-0.5 px-4 pb-4 pt-6">
               <View className="flex-row items-center gap-1.5">
                 <Icon name="location" size="md" tone="danger" />
                 <Text variant="title" accessibilityRole="header">
@@ -400,7 +400,7 @@ export const HomeScreen: React.FC = () => {
               <Text variant="body" tone="secondary">
                 Sắp xếp theo khoảng cách từ vị trí của bạn
               </Text>
-            </View>
+            </Gradient>
           )}
         </>
       )}
@@ -413,7 +413,7 @@ export const HomeScreen: React.FC = () => {
       <FlatList
         data={loading || isError ? [] : listData}
         keyExtractor={(item) => item.id}
-        className="flex-1 bg-canvas-subtle"
+        className="flex-1 bg-brand-50"
         contentContainerClassName={cn('flex-grow', TAB_BAR_CLEARANCE)}
         ItemSeparatorComponent={() => <View className="h-3" />}
         ListHeaderComponent={<View className="bg-canvas">{header}</View>}
@@ -436,7 +436,7 @@ export const HomeScreen: React.FC = () => {
               }
               actionLabel={isFiltering ? 'Xoá bộ lọc' : 'Đổi địa chỉ'}
               onAction={isFiltering ? clearFilters : openAddresses}
-              className="bg-canvas-subtle pt-4"
+              className="bg-brand-50 pt-4"
             />
           )
         }

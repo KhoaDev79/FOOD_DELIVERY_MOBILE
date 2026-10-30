@@ -108,7 +108,12 @@ export const RestaurantRow = memo<CardProps>(({ restaurant: r, onPress, classNam
       accessibilityRole="button"
       accessibilityLabel={m.a11y}
       onPress={() => onPress(r)}
-      className={cn('flex-row gap-3 rounded-lg bg-surface p-3 active:opacity-90', className)}
+      // Viền xanh nhạt; rê chuột (web) hoặc chạm (điện thoại) thì viền và nền chuyển xanh ngọc.
+      className={cn(
+        'flex-row gap-3 rounded-lg border border-brand-100 bg-surface p-3 shadow-card',
+        'hover:border-brand-400 hover:bg-brand-50 active:border-brand-500 active:bg-brand-100',
+        className,
+      )}
     >
       <AppImage uri={r.imageUrl} className="h-28 w-28 rounded-md">
         {!r.isOpen && <ClosedOverlay />}
@@ -129,7 +134,7 @@ export const RestaurantRow = memo<CardProps>(({ restaurant: r, onPress, classNam
             )}
             {m.distance && (
               <View className="flex-row items-center gap-1">
-                <Icon name="navigate-outline" size="xs" tone="muted" />
+                <Icon name="navigate-outline" size="xs" tone="brand" />
                 <Text variant="caption" weight="regular" tone="secondary">
                   {m.distance}
                 </Text>
@@ -137,7 +142,7 @@ export const RestaurantRow = memo<CardProps>(({ restaurant: r, onPress, classNam
             )}
             {m.time && (
               <View className="flex-row items-center gap-1">
-                <Icon name="time-outline" size="xs" tone="muted" />
+                <Icon name="time-outline" size="xs" tone="brand" />
                 <Text variant="caption" weight="regular" tone="secondary">
                   {m.time}
                 </Text>

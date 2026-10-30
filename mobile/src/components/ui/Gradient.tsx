@@ -12,6 +12,8 @@ const PRESETS = {
   sectionHeaderBand: `linear-gradient(180deg, ${palette.brand['400']} 0%, ${palette.brand['100']} 60%, ${palette.canvas.DEFAULT} 100%)`,
   /** Khung khối nổi bật nền kem/hồng nhạt (ảnh mẫu "Giật Deal Sốc"). */
   dealFrame: `linear-gradient(160deg, ${palette.accent['50']} 0%, ${palette.canvas.DEFAULT} 55%, ${palette.accent['100']} 100%)`,
+  /** Dải tiêu đề "Quán gần tôi": xanh ngọc nhạt dần vào nền danh sách brand-50. */
+  nearbyBand: `linear-gradient(180deg, ${palette.brand['200']} 0%, ${palette.brand['100']} 45%, ${palette.brand['50']} 100%)`,
   /** Nền khối chủ đề màu cam nhạt (ảnh mẫu 4, 5). */
   sectionAccent: `linear-gradient(180deg, ${palette.accent['50']} 0%, ${palette.canvas.DEFAULT} 70%)`,
   /** Thẻ minh hoạ trạng thái rỗng (ảnh mẫu 8). */
