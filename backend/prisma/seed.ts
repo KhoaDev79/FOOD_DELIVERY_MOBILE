@@ -347,7 +347,7 @@ async function main() {
             { name: 'Phở Tái Nạm Gầu Bò', price: 65000, discountPrice: 55000, description: 'Bò tái mềm, nạm giòn ngọt thơm ngậy', imageUrl: '/public/images/food/pho.jpg', options: noodleOptions, isAvailable: true },
             { name: 'Phở Tái Lăn Phố Cổ', price: 75000, description: 'Thịt bò xào lăn lửa lớn dậy mùi tỏi tiêu', imageUrl: '/public/images/food/pho.jpg', options: noodleOptions, isAvailable: true },
             { name: 'Phở Bắp Bò Hoa Thượng Hạng', price: 85000, description: 'Bắp hoa bò giòn sần sật nhúng vừa chín tới', imageUrl: '/public/images/food/pho.jpg', options: noodleOptions, isAvailable: true },
-            { name: 'Phở Gầu Giòn Hết Hàng', price: 70000, description: 'Món đã tạm ngưng phục vụ trong ngày', imageUrl: '/public/images/food/pho.jpg', isAvailable: false },
+            { name: 'Phở Gầu Giòn', price: 70000, description: 'Gầu bò giòn sần sật, nước dùng ninh xương đậm đà', imageUrl: '/public/images/food/pho.jpg', isAvailable: false },
           ],
         },
         {

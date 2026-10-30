@@ -78,8 +78,7 @@ export const CheckoutScreen: React.FC<Props> = ({ navigation }) => {
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Tự động xác định địa chỉ mặc định đầu tiên nếu người dùng chưa chủ động chọn địa chỉ khác
-  const activeAddressId =
-    selectedAddressId || addresses?.find((a) => a.isDefault)?.id || addresses?.[0]?.id || null;
+  const activeAddressId = selectedAddressId || addresses?.find((a) => a.isDefault)?.id || addresses?.[0]?.id || null;
 
   const activeAddr = addresses?.find((a) => a.id === activeAddressId) || addresses?.[0];
   const userLat = activeAddr?.latitude || coords.latitude;
@@ -129,9 +128,10 @@ export const CheckoutScreen: React.FC<Props> = ({ navigation }) => {
         items: items.map((i) => ({
           menuItemId: i.menuItem.id,
           quantity: i.quantity,
-          note: [i.size ? `Size: ${i.size}` : '', i.toppings?.length ? `Topping: ${i.toppings.join(', ')}` : '', i.note || '']
-            .filter(Boolean)
-            .join(' | ') || undefined,
+          note: i.note || undefined,
+          sizeId: i.sizeId,
+          toppingIds: i.toppingIds?.length ? i.toppingIds : undefined,
+          level: i.level,
         })),
         addressId: activeAddressId || undefined,
         deliveryAddress: selectedAddr?.addressLine || 'Địa chỉ giao hàng',
@@ -207,9 +207,7 @@ export const CheckoutScreen: React.FC<Props> = ({ navigation }) => {
             <View key={item.id || `${item.menuItem.id}-${idx}`} style={styles.orderItemRow}>
               <Image
                 source={{
-                  uri:
-                    item.menuItem.imageUrl ||
-                    'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=200',
+                  uri: item.menuItem.imageUrl || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=200',
                 }}
                 style={styles.itemThumb}
               />
@@ -248,7 +246,11 @@ export const CheckoutScreen: React.FC<Props> = ({ navigation }) => {
         {/* Mục 3: Gợi ý gọi thêm (Also ordered - Trang 8) */}
         <View style={styles.alsoOrderedWrap}>
           <Text style={styles.alsoOrderedHeading}>Gợi ý gọi thêm món ngon</Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 10, paddingVertical: 4 }}>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={{ gap: 10, paddingVertical: 4 }}
+          >
             {ALSO_ORDERED.map((ao) => (
               <View key={ao.id} style={styles.alsoOrderedCard}>
                 <Image source={{ uri: ao.imageUrl }} style={styles.aoImage} />
@@ -359,9 +361,7 @@ export const CheckoutScreen: React.FC<Props> = ({ navigation }) => {
             <View>
               <Text style={styles.billLabel}>Phí giao hàng</Text>
               <Text style={[styles.peakBadge, isPeak && styles.peakBadgeActive]}>
-                {isPeak
-                  ? '⚡ Giờ cao điểm (11-13h & 17h30-19h30): 10.000đ/km'
-                  : 'Giờ thường: 5.000đ/km'}
+                {isPeak ? '⚡ Giờ cao điểm (11-13h & 17h30-19h30): 10.000đ/km' : 'Giờ thường: 5.000đ/km'}
               </Text>
             </View>
             <Text style={styles.billValue}>{formatVND(deliveryFee)}</Text>

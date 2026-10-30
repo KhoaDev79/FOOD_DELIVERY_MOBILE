@@ -1,5 +1,5 @@
 /**
- * Bỏ nhãn kiểm thử "[Biên: ...]" và ghi chú kỹ thuật khỏi tên/mô tả quán mẫu.
+ * Bỏ nhãn kiểm thử "[Biên: ...]" và ghi chú kỹ thuật khỏi tên/mô tả quán và món mẫu.
  * Đặc điểm dùng để kiểm thử (đóng cửa, ngoài bán kính, tên dài, không ảnh) vẫn giữ nguyên trong dữ liệu.
  * Chạy lại nhiều lần không thay đổi thêm gì.
  *
@@ -30,6 +30,15 @@ export const RESTAURANT_RENAMES: { from: string; name: string; description: stri
   },
 ];
 
+/** Món mẫu: bỏ nhãn kiểm thử khỏi tên. Trạng thái "tạm hết" vẫn nằm ở cột isAvailable. */
+export const MENU_ITEM_RENAMES: { from: string[]; name: string; description: string }[] = [
+  {
+    from: ['Phở Gầu Giòn Hết Hàng [Biên: Hết món]', 'Phở Gầu Giòn Hết Hàng'],
+    name: 'Phở Gầu Giòn',
+    description: 'Gầu bò giòn sần sật, nước dùng ninh xương đậm đà',
+  },
+];
+
 async function main() {
   const prisma = new PrismaClient();
   try {
@@ -41,7 +50,19 @@ async function main() {
       });
       changed += res.count;
     }
-    console.log(changed ? `Đã đổi tên ${changed} quán.` : 'Không có quán nào cần đổi tên.');
+    let changedItems = 0;
+    for (const m of MENU_ITEM_RENAMES) {
+      const res = await prisma.menuItem.updateMany({
+        where: { name: { in: m.from } },
+        data: { name: m.name, description: m.description },
+      });
+      changedItems += res.count;
+    }
+    console.log(
+      changed || changedItems
+        ? `Đã đổi tên ${changed} quán, ${changedItems} món.`
+        : 'Không có quán hay món nào cần đổi tên.',
+    );
   } finally {
     await prisma.$disconnect();
   }

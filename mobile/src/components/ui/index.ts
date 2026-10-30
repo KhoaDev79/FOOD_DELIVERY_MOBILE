@@ -5,6 +5,7 @@ export * from './Badge';
 export * from './Button';
 export * from './Card';
 export * from './Chip';
+export * from './Choice';
 export * from './cn';
 export * from './FloatingTabBar';
 export * from './Gradient';

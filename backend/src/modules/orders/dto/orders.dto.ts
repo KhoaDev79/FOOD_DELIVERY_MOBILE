@@ -1,6 +1,7 @@
 import { Type } from 'class-transformer';
 import {
   ArrayMaxSize,
+  IsArray,
   ArrayMinSize,
   IsEnum,
   IsInt,
@@ -16,7 +17,7 @@ import {
 } from 'class-validator';
 import { OrderStatus, PaymentMethod } from '@prisma/client';
 
-/** Client chỉ gửi ID + số lượng. Giá luôn được tra cứu lại từ DB. */
+/** Client gửi ID, số lượng và mã tuỳ chọn. Giá luôn được tra cứu lại từ DB. */
 export class OrderItemInputDto {
   @IsUUID()
   menuItemId: string;
@@ -31,6 +32,26 @@ export class OrderItemInputDto {
   @IsString()
   @MaxLength(200)
   note?: string;
+
+  /** Mã size theo tuỳ chọn của món (bỏ trống = size mặc định). Giá do server tra cứu. */
+  @IsOptional()
+  @IsString()
+  @MaxLength(50)
+  sizeId?: string;
+
+  /** Mã topping theo tuỳ chọn của món. */
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(10)
+  @IsString({ each: true })
+  @MaxLength(50, { each: true })
+  toppingIds?: string[];
+
+  /** Mức cay/đường theo tuỳ chọn của món. */
+  @IsOptional()
+  @IsString()
+  @MaxLength(50)
+  level?: string;
 }
 
 export class CreateOrderDto {

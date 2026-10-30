@@ -60,6 +60,20 @@ export interface Restaurant {
   closeTime?: string;
 }
 
+/** Tuỳ chọn có giá của món (cột JSON `options` trong DB). */
+export interface PricedOption {
+  id: string;
+  name: string;
+  price: number;
+}
+
+export interface MenuItemOptions {
+  sizes?: PricedOption[];
+  toppings?: PricedOption[];
+  spiceLevels?: string[];
+  sugarLevels?: string[];
+}
+
 export interface MenuItem {
   id: string;
   restaurantId: string;
@@ -67,6 +81,9 @@ export interface MenuItem {
   name: string;
   description?: string | null;
   price: number;
+  /** Giá khuyến mãi; backend dùng khi 0 < discountPrice < price. */
+  discountPrice?: number | null;
+  options?: MenuItemOptions | null;
   imageUrl?: string | null;
   isAvailable: boolean;
   isArchived: boolean;

@@ -3,6 +3,7 @@ import { Pressable, View } from 'react-native';
 import { AppImage, Badge, cn, Icon, IconButton, Text } from '../../ui';
 import { NearbyDish } from '../../../types/api';
 import { formatDistance, formatVND } from '../../../utils/format';
+import { discountPercent, linePrice, originalLinePrice } from '../../../utils/menuPricing';
 
 /**
  * Ô món nhỏ cho lưới 2 hàng (ảnh mẫu "Gợi ý dành cho …"): ảnh vuông bo 16, nhãn giá đè góc dưới trái
@@ -15,12 +16,12 @@ export const DishTile = memo<{ dish: NearbyDish; onPress: (d: NearbyDish) => voi
     return (
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel={`${dish.name}, ${formatVND(dish.price)}, quán ${dish.restaurant.name}${distance ? `, cách ${distance}` : ''}`}
+        accessibilityLabel={`${dish.name}, ${formatVND(linePrice(dish))}, quán ${dish.restaurant.name}${distance ? `, cách ${distance}` : ''}`}
         onPress={() => onPress(dish)}
         className={cn('w-32 gap-1.5 active:opacity-80', className)}
       >
         <AppImage uri={dish.imageUrl} className="h-32 w-32 rounded-lg" fallbackIcon="fast-food-outline">
-          <Badge label={formatVND(dish.price)} tone="scrim" size="sm" className="absolute bottom-1.5 left-1.5" />
+          <Badge label={formatVND(linePrice(dish))} tone="scrim" size="sm" className="absolute bottom-1.5 left-1.5" />
           {!dish.restaurant.isOpen && (
             <View className="absolute inset-0 items-center justify-center bg-scrim">
               <Badge label="Quán đã đóng" tone="neutral" />
@@ -66,7 +67,7 @@ export const DishCard = memo<Props>(({ dish, onPress, onAdd, className }) => {
         accessibilityRole="button"
         accessibilityLabel={[
           dish.name,
-          formatVND(dish.price),
+          formatVND(linePrice(dish)),
           `quán ${r.name}`,
           rating && `quán ${rating} sao`,
           distance && `cách ${distance}`,
@@ -77,6 +78,15 @@ export const DishCard = memo<Props>(({ dish, onPress, onAdd, className }) => {
         className="gap-1 active:opacity-80"
       >
         <AppImage uri={dish.imageUrl} className="h-40 w-40 rounded-lg" fallbackIcon="fast-food-outline">
+          {/* Nhãn giảm giá như ảnh mẫu "Bữa Ăn 29K" – chỉ khi backend thật sự áp giá giảm */}
+          {discountPercent(dish) > 0 && (
+            <Badge
+              label={`Giảm ${discountPercent(dish)}%`}
+              tone="discount"
+              size="sm"
+              className="absolute left-0 top-0 rounded-none rounded-br-md"
+            />
+          )}
           {!open && (
             <View className="absolute inset-0 items-center justify-center bg-scrim">
               <Badge label="Quán đã đóng" tone="neutral" />
@@ -113,9 +123,16 @@ export const DishCard = memo<Props>(({ dish, onPress, onAdd, className }) => {
             )}
           </View>
         )}
-        <Text variant="body-lg" weight="semibold" tone="brand">
-          {formatVND(dish.price)}
-        </Text>
+        <View className="flex-row items-baseline gap-1.5">
+          <Text variant="body-lg" weight="semibold" tone="brand">
+            {formatVND(linePrice(dish))}
+          </Text>
+          {originalLinePrice(dish) > linePrice(dish) && (
+            <Text variant="caption" weight="regular" tone="muted" className="line-through">
+              {formatVND(originalLinePrice(dish))}
+            </Text>
+          )}
+        </View>
       </Pressable>
       {open && (
         <IconButton

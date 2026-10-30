@@ -2,6 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 import { MenuItem } from '../types/api';
+import { linePrice } from '../utils/menuPricing';
 
 export interface CartLineItem {
   id?: string;
@@ -12,6 +13,10 @@ export interface CartLineItem {
   toppings?: string[];
   spiciness?: string;
   unitPrice?: number;
+  /** Mã tuỳ chọn thật của món, gửi lên backend để tính giá. */
+  sizeId?: string;
+  toppingIds?: string[];
+  level?: string;
 }
 
 export interface CartRestaurant {
@@ -25,16 +30,25 @@ export interface CartRestaurant {
 interface CartState {
   restaurant: CartRestaurant | null;
   items: CartLineItem[];
-  addItem: (restaurant: CartRestaurant, menuItem: MenuItem, quantity?: number, note?: string) => 'ADDED' | 'DIFFERENT_RESTAURANT';
+  addItem: (
+    restaurant: CartRestaurant,
+    menuItem: MenuItem,
+    quantity?: number,
+    note?: string,
+  ) => 'ADDED' | 'DIFFERENT_RESTAURANT';
   addCustomItem: (
     restaurant: CartRestaurant,
     menuItem: MenuItem,
     quantity: number,
     options: {
+      /** Nhãn hiển thị (tên size, tên topping, mức cay/đường). */
       size?: string;
       toppings?: string[];
       spiciness?: string;
-      unitPrice?: number;
+      /** Mã tuỳ chọn; đơn giá được store tự tính từ đây. */
+      sizeId?: string;
+      toppingIds?: string[];
+      level?: string;
       note?: string;
     },
   ) => 'ADDED' | 'DIFFERENT_RESTAURANT';
@@ -58,7 +72,10 @@ export const useCartStore = create<CartState>()(
           return 'DIFFERENT_RESTAURANT';
         }
 
-        const existingIndex = state.items.findIndex((i) => i.menuItem.id === menuItem.id && !i.size);
+        // Dòng "thường" (không chọn tuỳ chọn) của cùng món thì cộng dồn.
+        const existingIndex = state.items.findIndex(
+          (i) => i.menuItem.id === menuItem.id && !i.id && !i.sizeId && !i.toppingIds?.length && !i.level,
+        );
         let updatedItems: CartLineItem[];
 
         if (existingIndex > -1) {
@@ -66,7 +83,7 @@ export const useCartStore = create<CartState>()(
           updatedItems[existingIndex].quantity += quantity;
           if (note) updatedItems[existingIndex].note = note;
         } else {
-          updatedItems = [...state.items, { menuItem, quantity, note, unitPrice: menuItem.price }];
+          updatedItems = [...state.items, { menuItem, quantity, note, unitPrice: linePrice(menuItem) }];
         }
 
         set({ restaurant, items: updatedItems });
@@ -87,7 +104,10 @@ export const useCartStore = create<CartState>()(
           size: options.size,
           toppings: options.toppings,
           spiciness: options.spiciness,
-          unitPrice: options.unitPrice || menuItem.price,
+          sizeId: options.sizeId,
+          toppingIds: options.toppingIds,
+          level: options.level,
+          unitPrice: linePrice(menuItem, { sizeId: options.sizeId, toppingIds: options.toppingIds }),
         };
 
         set({ restaurant, items: [...state.items, lineItem] });
@@ -124,15 +144,28 @@ export const useCartStore = create<CartState>()(
       getTotalItems: () => get().items.reduce((sum, item) => sum + item.quantity, 0),
 
       getSubtotal: () =>
-        get().items.reduce(
-          (sum, item) => sum + (item.unitPrice || item.menuItem.price) * item.quantity,
-          0,
-        ),
+        get().items.reduce((sum, item) => sum + (item.unitPrice ?? linePrice(item.menuItem, item)) * item.quantity, 0),
     }),
     {
       name: 'food-delivery-cart-storage',
       storage: createJSONStorage(() => AsyncStorage),
+      /**
+       * v2: giá tính theo tuỳ chọn thật + giá giảm. Giỏ cũ (v0/v1) chứa tuỳ chọn viết cứng không
+       * tồn tại ở backend, nên bỏ các nhãn đó và tính lại đơn giá theo giá thật của món.
+       */
+      version: 2,
+      migrate: (persisted, version) => {
+        const state = persisted as { restaurant: CartRestaurant | null; items: CartLineItem[] };
+        if (version < 2 && state?.items) {
+          state.items = state.items.map((i) => ({
+            menuItem: i.menuItem,
+            quantity: i.quantity,
+            note: i.note,
+            unitPrice: linePrice(i.menuItem),
+          }));
+        }
+        return state as never;
+      },
     },
   ),
 );
-

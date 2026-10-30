@@ -15,6 +15,7 @@ import { RestaurantsService } from '../restaurants/restaurants.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { CreateOrderDto, ListOrdersQueryDto } from './dto/orders.dto';
 import { canViewOrder } from './order-access';
+import { lineKey, OrderPricingError, priceOrderLine } from './order-pricing';
 import {
   actorMayTransition,
   DRIVER_ACCEPTABLE_STATUSES,
@@ -50,7 +51,7 @@ export class OrdersService {
   async create(customerId: string, dto: CreateOrderDto): Promise<OrderDetail> {
     const location = await this.resolveDeliveryLocation(customerId, dto);
     const requested = this.mergeItems(dto.items);
-    const menuItemIds = [...requested.keys()];
+    const menuItemIds = [...new Set([...requested.values()].map((l) => l.menuItemId))];
     const deliveryCfg = this.config.getOrThrow('delivery');
 
     const order = await this.prisma.$transaction(async (tx) => {
@@ -75,7 +76,7 @@ export class OrdersService {
           isAvailable: true,
           isArchived: false,
         },
-        select: { id: true, name: true, price: true },
+        select: { id: true, name: true, price: true, discountPrice: true, options: true },
       });
       if (menuItems.length !== menuItemIds.length) {
         const found = new Set(menuItems.map((m) => m.id));
@@ -85,9 +86,26 @@ export class OrdersService {
         });
       }
 
-      const lines = menuItems.map((m) => {
-        const { quantity, note } = requested.get(m.id)!;
-        return { menuItemId: m.id, name: m.name, unitPrice: m.price, quantity, lineTotal: m.price * quantity, note };
+      // Đơn giá tính lại hoàn toàn từ DB: giá giảm (nếu có) + size + topping của chính món đó.
+      const byId = new Map(menuItems.map((m) => [m.id, m]));
+      const lines = [...requested.values()].map((req) => {
+        const m = byId.get(req.menuItemId)!;
+        let priced: ReturnType<typeof priceOrderLine>;
+        try {
+          priced = priceOrderLine(m, req);
+        } catch (e) {
+          if (e instanceof OrderPricingError) throw new BadRequestException(e.message);
+          throw e;
+        }
+        return {
+          menuItemId: m.id,
+          name: m.name,
+          unitPrice: priced.unitPrice,
+          quantity: req.quantity,
+          lineTotal: priced.unitPrice * req.quantity,
+          note: req.note,
+          options: priced.selected ? (priced.selected as unknown as Prisma.InputJsonValue) : undefined,
+        };
       });
       const subtotal = lines.reduce((sum, l) => sum + l.lineTotal, 0);
       const deliveryFee = calcDeliveryFee(distanceKm, deliveryCfg);
@@ -232,20 +250,41 @@ export class OrdersService {
     return null;
   }
 
-  /** Gộp các dòng trùng menuItemId để client không thể né giới hạn số lượng. */
+  /**
+   * Gộp các dòng cùng món và cùng tuỳ chọn. Giới hạn 50 tính trên tổng số lượng của mỗi món
+   * (kể cả khi tách nhiều dòng với tuỳ chọn khác nhau) để client không né được giới hạn.
+   */
   private mergeItems(items: CreateOrderDto['items']) {
-    const map = new Map<string, { quantity: number; note?: string }>();
+    type Line = {
+      menuItemId: string;
+      quantity: number;
+      note?: string;
+      sizeId?: string;
+      toppingIds?: string[];
+      level?: string;
+    };
+    const map = new Map<string, Line>();
+    const perItem = new Map<string, number>();
     for (const it of items) {
-      const prev = map.get(it.menuItemId);
+      const key = lineKey(it.menuItemId, it);
+      const prev = map.get(key);
       if (prev) {
         prev.quantity += it.quantity;
         if (it.note) prev.note = [prev.note, it.note].filter(Boolean).join('; ');
       } else {
-        map.set(it.menuItemId, { quantity: it.quantity, note: it.note });
+        map.set(key, {
+          menuItemId: it.menuItemId,
+          quantity: it.quantity,
+          note: it.note,
+          sizeId: it.sizeId,
+          toppingIds: it.toppingIds,
+          level: it.level,
+        });
       }
+      perItem.set(it.menuItemId, (perItem.get(it.menuItemId) ?? 0) + it.quantity);
     }
-    for (const [, v] of map) {
-      if (v.quantity > 50) throw new BadRequestException('Số lượng mỗi món tối đa là 50');
+    for (const [, total] of perItem) {
+      if (total > 50) throw new BadRequestException('Số lượng mỗi món tối đa là 50');
     }
     return map;
   }

@@ -7,6 +7,10 @@ export interface CreateOrderPayload {
     menuItemId: string;
     quantity: number;
     note?: string;
+    /** Mã tuỳ chọn của món; backend tra giá theo các mã này. */
+    sizeId?: string;
+    toppingIds?: string[];
+    level?: string;
   }[];
   addressId?: string;
   deliveryAddress?: string;
@@ -17,20 +21,16 @@ export interface CreateOrderPayload {
 }
 
 export const ordersApi = {
-  create: (payload: CreateOrderPayload) =>
-    apiClient.post<any, OrderDetail>('/orders', payload),
+  create: (payload: CreateOrderPayload) => apiClient.post<any, OrderDetail>('/orders', payload),
 
   getMine: (params?: { status?: string; page?: number; limit?: number }) =>
     apiClient.get<any, PaginatedResult<OrderSummary>>('/orders/my', { params }),
 
-  getDetail: (id: string) =>
-    apiClient.get<any, OrderDetail>(`/orders/${id}`),
+  getDetail: (id: string) => apiClient.get<any, OrderDetail>(`/orders/${id}`),
 
-  cancel: (id: string) =>
-    apiClient.patch<any, OrderDetail>(`/orders/${id}/status`, { status: 'CANCELLED' }),
+  cancel: (id: string) => apiClient.patch<any, OrderDetail>(`/orders/${id}/status`, { status: 'CANCELLED' }),
 
-  updateStatus: (id: string, status: string) =>
-    apiClient.patch<any, OrderDetail>(`/orders/${id}/status`, { status }),
+  updateStatus: (id: string, status: string) => apiClient.patch<any, OrderDetail>(`/orders/${id}/status`, { status }),
 
   // ===================== DRIVER ENDPOINTS =====================
   getAvailable: (params?: { page?: number; limit?: number }) =>
@@ -39,6 +39,5 @@ export const ordersApi = {
   getDeliveries: (params?: { status?: string; page?: number; limit?: number }) =>
     apiClient.get<any, PaginatedResult<OrderDetail>>('/orders/deliveries', { params }),
 
-  acceptOrder: (id: string) =>
-    apiClient.post<any, OrderDetail>(`/orders/${id}/accept`),
+  acceptOrder: (id: string) => apiClient.post<any, OrderDetail>(`/orders/${id}/accept`),
 };

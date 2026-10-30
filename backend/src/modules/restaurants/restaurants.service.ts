@@ -148,6 +148,8 @@ export class RestaurantsService {
         name: true,
         description: true,
         price: true,
+        discountPrice: true,
+        options: true,
         imageUrl: true,
         isAvailable: true,
         isArchived: true,
