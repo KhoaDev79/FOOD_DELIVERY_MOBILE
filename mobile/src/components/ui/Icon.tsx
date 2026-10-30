@@ -5,15 +5,7 @@ import { palette } from '../../theme';
 export type IconName = keyof typeof Ionicons.glyphMap;
 export type IconSize = 'xs' | 'sm' | 'md' | 'lg' | 'xl';
 export type IconTone =
-  | 'default'
-  | 'secondary'
-  | 'muted'
-  | 'inverse'
-  | 'brand'
-  | 'accent'
-  | 'danger'
-  | 'success'
-  | 'rating';
+  'default' | 'secondary' | 'muted' | 'inverse' | 'brand' | 'accent' | 'danger' | 'success' | 'rating';
 
 const SIZE: Record<IconSize, number> = { xs: 14, sm: 16, md: 20, lg: 24, xl: 32 };
 

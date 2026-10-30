@@ -23,3 +23,10 @@ export function formatDateTime(dateString: string): string {
   }
 }
 
+
+/** Khoảng cách kiểu Việt Nam: "850 m", "1,7 km". */
+export function formatDistance(km?: number | null): string | null {
+  if (km === undefined || km === null || !Number.isFinite(km)) return null;
+  if (km < 1) return `${Math.max(10, Math.round((km * 1000) / 10) * 10)} m`;
+  return `${km.toLocaleString('vi-VN', { maximumFractionDigits: 1 })} km`;
+}

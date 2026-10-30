@@ -38,7 +38,12 @@ export const SectionHeader: React.FC<SectionHeaderProps> = ({
       )}
     </View>
     {onSeeAll && (
-      <IconButton icon="arrow-forward" accessibilityLabel={`Xem tất cả ${title}`} variant="surface" onPress={onSeeAll} />
+      <IconButton
+        icon="arrow-forward"
+        accessibilityLabel={`Xem tất cả ${title}`}
+        variant="surface"
+        onPress={onSeeAll}
+      />
     )}
   </View>
 );

@@ -2,26 +2,10 @@ import React from 'react';
 import { Text as RNText, TextProps as RNTextProps } from 'react-native';
 import { cn } from './cn';
 
-export type TextVariant =
-  | 'display'
-  | 'title'
-  | 'headline'
-  | 'body-lg'
-  | 'body'
-  | 'caption'
-  | 'micro'
-  | 'price';
+export type TextVariant = 'display' | 'title' | 'headline' | 'body-lg' | 'body' | 'caption' | 'micro' | 'price';
 export type TextWeight = 'regular' | 'medium' | 'semibold' | 'bold';
 export type TextTone =
-  | 'default'
-  | 'secondary'
-  | 'muted'
-  | 'inverse'
-  | 'brand'
-  | 'accent'
-  | 'danger'
-  | 'success'
-  | 'warning';
+  'default' | 'secondary' | 'muted' | 'inverse' | 'brand' | 'accent' | 'danger' | 'success' | 'warning';
 
 const SIZE: Record<TextVariant, string> = {
   display: 'text-display',

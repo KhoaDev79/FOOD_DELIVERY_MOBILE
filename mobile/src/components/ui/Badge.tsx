@@ -58,7 +58,10 @@ export const CountBadge: React.FC<{ count: number; className?: string }> = ({ co
   return (
     <View
       accessibilityLabel={`${count} mục`}
-      className={cn('h-5 min-w-5 items-center justify-center rounded-full border-2 border-surface bg-danger px-1', className)}
+      className={cn(
+        'h-5 min-w-5 items-center justify-center rounded-full border-2 border-surface bg-danger px-1',
+        className,
+      )}
     >
       <Text variant="micro" tone="inverse">
         {count > 99 ? '99+' : String(count)}

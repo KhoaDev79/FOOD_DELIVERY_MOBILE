@@ -33,7 +33,11 @@ export const Input = forwardRef<TextInputRef, InputProps>(
         <View
           className={cn(
             'h-button-lg flex-row items-center gap-2 rounded-md border px-3',
-            error ? 'border-danger bg-danger-soft' : focused ? 'border-brand-500 bg-surface' : 'border-transparent bg-canvas-subtle',
+            error
+              ? 'border-danger bg-danger-soft'
+              : focused
+                ? 'border-brand-500 bg-surface'
+                : 'border-transparent bg-canvas-subtle',
             !editable && 'opacity-60',
           )}
         >

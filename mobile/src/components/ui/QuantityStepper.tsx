@@ -41,7 +41,11 @@ export const QuantityStepper: React.FC<QuantityStepperProps> = ({
           canDec ? 'border-brand-500 bg-surface' : 'border-line bg-canvas-subtle',
         )}
       >
-        <Icon name={value - 1 <= 0 && min === 0 ? 'trash-outline' : 'remove'} size="sm" tone={canDec ? 'brand' : 'muted'} />
+        <Icon
+          name={value - 1 <= 0 && min === 0 ? 'trash-outline' : 'remove'}
+          size="sm"
+          tone={canDec ? 'brand' : 'muted'}
+        />
       </Pressable>
       <Text variant="body-lg" weight="semibold" className="min-w-6 text-center">
         {value}
@@ -53,7 +57,11 @@ export const QuantityStepper: React.FC<QuantityStepperProps> = ({
         disabled={!canInc}
         hitSlop={8}
         onPress={() => onChange(value + 1)}
-        className={cn('items-center justify-center rounded-full active:opacity-80', btn, canInc ? 'bg-brand-500' : 'bg-line')}
+        className={cn(
+          'items-center justify-center rounded-full active:opacity-80',
+          btn,
+          canInc ? 'bg-brand-500' : 'bg-line',
+        )}
       >
         <Icon name="add" size="sm" tone="inverse" />
       </Pressable>

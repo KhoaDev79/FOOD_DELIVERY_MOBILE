@@ -21,7 +21,12 @@ export interface BottomSheetProps {
 export const BottomSheet: React.FC<BottomSheetProps> = ({ visible, onClose, title, children, footer }) => (
   <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose} statusBarTranslucent>
     <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} className="flex-1 justify-end">
-      <Pressable accessibilityRole="button" accessibilityLabel="Đóng" onPress={onClose} className="absolute inset-0 bg-scrim" />
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Đóng"
+        onPress={onClose}
+        className="absolute inset-0 bg-scrim"
+      />
       <SafeAreaView edges={['bottom']} className="max-h-[90%] rounded-t-2xl bg-surface shadow-float">
         <View className="items-center pb-1 pt-2">
           <View className="h-1 w-10 rounded-full bg-line" />
@@ -75,7 +80,14 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
           </Text>
         )}
         <View className="mt-3 flex-row gap-3">
-          <Button label={cancelLabel} variant="outline" size="md" className="flex-1" onPress={onCancel} disabled={loading} />
+          <Button
+            label={cancelLabel}
+            variant="outline"
+            size="md"
+            className="flex-1"
+            onPress={onCancel}
+            disabled={loading}
+          />
           <Button
             label={confirmLabel}
             variant={destructive ? 'danger' : 'primary'}
@@ -120,20 +132,22 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     <ToastContext.Provider value={show}>
       {children}
       {toast && (
-        <SafeAreaView edges={['bottom']} pointerEvents="none" className="absolute bottom-24 left-0 right-0 items-center px-4">
-          <Animated.View
-            key={toast.id}
-            entering={FadeInDown.duration(200).reduceMotion(ReduceMotion.System)}
-            exiting={FadeOutDown.duration(150).reduceMotion(ReduceMotion.System)}
-            accessibilityLiveRegion="polite"
-            accessibilityRole="alert"
-            className="max-w-sm flex-row items-center gap-2 rounded-full bg-ink px-4 py-3 shadow-float"
-          >
-            <Icon name={TOAST_ICON[toast.tone].name} size="md" tone={TOAST_ICON[toast.tone].tone} />
-            <Text variant="body" weight="medium" tone="inverse" numberOfLines={2} className="flex-shrink">
-              {toast.message}
-            </Text>
-          </Animated.View>
+        <SafeAreaView edges={['bottom']} pointerEvents="none" className="absolute bottom-24 left-0 right-0">
+          <View pointerEvents="none" className="items-center px-4">
+            <Animated.View
+              key={toast.id}
+              entering={FadeInDown.duration(200).reduceMotion(ReduceMotion.System)}
+              exiting={FadeOutDown.duration(150).reduceMotion(ReduceMotion.System)}
+              accessibilityLiveRegion="polite"
+              accessibilityRole="alert"
+              className="max-w-sm flex-row items-center gap-2 rounded-full bg-ink px-4 py-3 shadow-float"
+            >
+              <Icon name={TOAST_ICON[toast.tone].name} size="md" tone={TOAST_ICON[toast.tone].tone} />
+              <Text variant="body" weight="medium" tone="inverse" numberOfLines={2} className="flex-shrink">
+                {toast.message}
+              </Text>
+            </Animated.View>
+          </View>
         </SafeAreaView>
       )}
     </ToastContext.Provider>

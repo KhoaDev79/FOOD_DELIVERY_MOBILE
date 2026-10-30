@@ -44,7 +44,15 @@ const Block: React.FC<{ title: string; children: React.ReactNode }> = ({ title, 
   </View>
 );
 
-const STATUSES: OrderStatus[] = ['PENDING', 'CONFIRMED', 'PREPARING', 'READY_FOR_PICKUP', 'PICKED_UP', 'DELIVERED', 'CANCELLED'];
+const STATUSES: OrderStatus[] = [
+  'PENDING',
+  'CONFIRMED',
+  'PREPARING',
+  'READY_FOR_PICKUP',
+  'PICKED_UP',
+  'DELIVERED',
+  'CANCELLED',
+];
 
 /**
  * Thư viện thành phần – CHỈ dùng khi phát triển.
@@ -153,7 +161,11 @@ export const DevGallery: React.FC<{ onClose?: () => void }> = ({ onClose }) => {
           <View className="flex-row gap-3">
             <AppImage uri="/public/images/food/pho.jpg" className="h-28 w-28 rounded-lg" accessibilityLabel="Phở" />
             <AppImage uri={null} className="h-28 w-28 rounded-lg" />
-            <AppImage uri="https://invalid.invalid/x.jpg" className="h-28 w-28 rounded-lg" fallbackIcon="fast-food-outline" />
+            <AppImage
+              uri="https://invalid.invalid/x.jpg"
+              className="h-28 w-28 rounded-lg"
+              fallbackIcon="fast-food-outline"
+            />
           </View>
           <View className="flex-row items-center gap-3">
             <Avatar name="Trần Minh Khoa" size="sm" />
@@ -179,7 +191,13 @@ export const DevGallery: React.FC<{ onClose?: () => void }> = ({ onClose }) => {
 
         <Block title="Dòng danh sách">
           <View>
-            <ListRow icon="heart" iconTone="danger" title="Địa chỉ đã lưu" subtitle="Lưu địa chỉ để đặt món nhanh hơn." onPress={() => {}} />
+            <ListRow
+              icon="heart"
+              iconTone="danger"
+              title="Địa chỉ đã lưu"
+              subtitle="Lưu địa chỉ để đặt món nhanh hơn."
+              onPress={() => {}}
+            />
             <ListRow icon="map-outline" title="Tìm trên bản đồ" onPress={() => {}} />
             <Divider />
             <ListRow icon="log-out-outline" title="Đăng xuất" destructive onPress={() => setDialog(true)} />
@@ -188,7 +206,13 @@ export const DevGallery: React.FC<{ onClose?: () => void }> = ({ onClose }) => {
 
         <Block title="Tiêu đề phần">
           <View className="-mx-4 gap-4">
-            <SectionHeader title="Quán gần tôi" subtitle="Sắp xếp theo khoảng cách" icon="location" iconTone="danger" onSeeAll={() => {}} />
+            <SectionHeader
+              title="Quán gần tôi"
+              subtitle="Sắp xếp theo khoảng cách"
+              icon="location"
+              iconTone="danger"
+              onSeeAll={() => {}}
+            />
             <SectionHeader title="Tiêu đề rất dài để kiểm tra dấu ba chấm khi tràn dòng" onSeeAll={() => {}} />
           </View>
         </Block>
@@ -214,7 +238,13 @@ export const DevGallery: React.FC<{ onClose?: () => void }> = ({ onClose }) => {
             title="Chưa có quán yêu thích"
             description="Bạn chưa có quán nào trong bộ sưu tập. Hãy thêm vài quán ruột vào nhé!"
           />
-          <EmptyState icon="basket-outline" title="Giỏ hàng đang trống!" description="Thêm món vào giỏ để bắt đầu đặt hàng." actionLabel="Khám phá món ngon" onAction={() => {}} />
+          <EmptyState
+            icon="basket-outline"
+            title="Giỏ hàng đang trống!"
+            description="Thêm món vào giỏ để bắt đầu đặt hàng."
+            actionLabel="Khám phá món ngon"
+            onAction={() => {}}
+          />
           <ErrorState onRetry={() => toast('Đang thử lại…')} />
         </Block>
 
@@ -240,7 +270,12 @@ export const DevGallery: React.FC<{ onClose?: () => void }> = ({ onClose }) => {
           <View className="flex-row flex-wrap gap-2">
             <Button label="Mở bảng trượt" variant="outline" size="md" onPress={() => setSheet(true)} />
             <Button label="Mở hộp xác nhận" variant="outline" size="md" onPress={() => setDialog(true)} />
-            <Button label="Hiện toast lỗi" variant="outline" size="md" onPress={() => toast('Không thể kết nối máy chủ', 'error')} />
+            <Button
+              label="Hiện toast lỗi"
+              variant="outline"
+              size="md"
+              onPress={() => toast('Không thể kết nối máy chủ', 'error')}
+            />
           </View>
         </Block>
       </ScrollView>

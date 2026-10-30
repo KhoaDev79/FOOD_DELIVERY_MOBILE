@@ -63,7 +63,12 @@ export const FilterChip: React.FC<{
     )}
   >
     {icon && <Icon name={icon} size="sm" tone={selected ? 'brand' : 'secondary'} />}
-    <Text variant="caption" weight={selected ? 'semibold' : 'medium'} tone={selected ? 'brand' : 'default'} numberOfLines={1}>
+    <Text
+      variant="caption"
+      weight={selected ? 'semibold' : 'medium'}
+      tone={selected ? 'brand' : 'default'}
+      numberOfLines={1}
+    >
       {label}
     </Text>
   </Pressable>
