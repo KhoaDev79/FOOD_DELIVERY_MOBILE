@@ -19,7 +19,7 @@ describe('Delivery Estimation & Freeship Rules (Item 3)', () => {
   });
 
   test('Nhãn Freeship TUYỆT ĐỐI KHÔNG hiện khi phí giao hàng khác 0', () => {
-    // Khoảng cách 2km: Phí giao hàng là 10.000đ (hoặc 20.000đ nếu giờ cao điểm)
+    // Khoảng cách 2km: phí cơ bản 15.000đ (18.000đ giờ cao điểm)
     const fee2km = calculateDeliveryFee(2);
     expect(fee2km.fee).toBeGreaterThan(0);
 
@@ -43,3 +43,24 @@ describe('Delivery Estimation & Freeship Rules (Item 3)', () => {
   });
 });
 
+describe('Phí giao hàng khớp công thức backend', () => {
+  // 09:00 và 12:00 giờ Việt Nam (UTC+7) => 02:00Z và 05:00Z
+  const offPeak = new Date('2026-10-30T02:00:00Z');
+  const peak = new Date('2026-10-30T05:00:00Z');
+
+  test('trong 2 km đầu chỉ tính phí cơ bản 15.000đ', () => {
+    expect(calculateDeliveryFee(0.17, offPeak).fee).toBe(15000);
+    expect(calculateDeliveryFee(2, offPeak).fee).toBe(15000);
+  });
+
+  test('sau 2 km cộng 5.000đ/km, làm tròn lên 1.000đ', () => {
+    expect(calculateDeliveryFee(5, offPeak).fee).toBe(30000);
+    expect(calculateDeliveryFee(2.3, offPeak).fee).toBe(17000); // 15.000 + 1.500 -> 17.000
+  });
+
+  test('giờ cao điểm nhân 1,2', () => {
+    const r = calculateDeliveryFee(5, peak);
+    expect(r.isPeak).toBe(true);
+    expect(r.fee).toBe(36000);
+  });
+});

@@ -46,7 +46,7 @@ export const RootStack: React.FC = () => {
       <Stack.Screen
         name="Checkout"
         component={CheckoutScreen}
-        options={{ title: 'Xác nhận đơn hàng' }}
+        options={{ title: 'Xác nhận đơn hàng', headerShown: false }}
       />
       <Stack.Screen
         name="OrderTracking"

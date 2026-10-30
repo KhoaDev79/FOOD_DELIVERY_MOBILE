@@ -19,42 +19,38 @@ export const isPeakHour = (date = new Date()): boolean => {
 /**
  * Tính khoảng cách đường chim bay giữa hai toạ độ theo công thức Haversine (km)
  */
-export const calculateDistance = (
-  lat1: number,
-  lon1: number,
-  lat2: number,
-  lon2: number,
-): number => {
+export const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
   if (!lat1 || !lon1 || !lat2 || !lon2) return 1.5;
   const R = 6371;
   const dLat = ((lat2 - lat1) * Math.PI) / 180;
   const dLon = ((lon2 - lon1) * Math.PI) / 180;
   const a =
     Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos((lat1 * Math.PI) / 180) *
-      Math.cos((lat2 * Math.PI) / 180) *
-      Math.sin(dLon / 2) *
-      Math.sin(dLon / 2);
+    Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   const d = R * c;
   return Math.round(d * 10) / 10;
 };
 
 /**
- * Tính biểu phí giao hàng động:
- * - Giờ cao điểm: 10.000 VNĐ / km
- * - Giờ thường: 5.000 VNĐ / km
- * - Tối thiểu 1km
+ * Phí giao hàng – PHẢI khớp backend (backend/src/common/utils/geo.util.ts › calcDeliveryFee),
+ * vì backend là nơi thu tiền thật:
+ *   phí = (phí cơ bản + max(0, km − km miễn phí) × phí/km) × (1,2 nếu giờ cao điểm), làm tròn lên 1.000đ.
+ * Giá trị mặc định trùng .env.example của backend (DELIVERY_BASE_FEE, DELIVERY_FEE_PER_KM, DELIVERY_FREE_KM).
+ * Nếu đổi cấu hình phí ở backend thì phải đổi DELIVERY_FEE_CONFIG ở đây.
  */
+export const DELIVERY_FEE_CONFIG = { baseFee: 15000, feePerKm: 5000, freeKm: 2, peakMultiplier: 1.2 };
+
 export const calculateDeliveryFee = (
   distanceKm: number,
   date = new Date(),
 ): { fee: number; isPeak: boolean; ratePerKm: number } => {
   const peak = isPeakHour(date);
-  const ratePerKm = peak ? 10000 : 5000;
-  const effectiveDistance = Math.max(1, distanceKm);
-  const fee = Math.ceil((effectiveDistance * ratePerKm) / 1000) * 1000;
-  return { fee, isPeak: peak, ratePerKm };
+  const { baseFee, feePerKm, freeKm, peakMultiplier } = DELIVERY_FEE_CONFIG;
+  const multiplier = peak ? peakMultiplier : 1;
+  const billableKm = Math.max(0, distanceKm - freeKm);
+  const fee = Math.ceil(((baseFee + billableKm * feePerKm) * multiplier) / 1000) * 1000;
+  return { fee, isPeak: peak, ratePerKm: feePerKm * multiplier };
 };
 
 /**
@@ -87,5 +83,3 @@ export const isFreeDelivery = (
   const { fee } = calculateDeliveryFee(distanceKm);
   return fee === 0;
 };
-
-

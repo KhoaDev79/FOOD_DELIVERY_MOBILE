@@ -60,9 +60,10 @@ export function isPeakHour(date = new Date()): boolean {
 
 /**
  * Tính phí giao hàng theo khoảng cách và khung giờ:
- * - Giờ cao điểm: 10.000 VNĐ / km
- * - Giờ bình thường: 5.000 VNĐ / km
+ * - phí = (phí cơ bản + max(0, km − km miễn phí) × phí/km) × 1,2 nếu giờ cao điểm
+ * - Mặc định: 15.000đ cơ bản, 2 km đầu miễn phí, 5.000đ/km (cấu hình qua DELIVERY_* trong .env)
  * - Làm tròn lên tới 1.000 VNĐ
+ * App mobile hiển thị theo cùng công thức (mobile/src/utils/fee.ts) – đổi ở đây thì đổi cả ở đó.
  */
 export function calcDeliveryFee(
   distanceKm: number,
