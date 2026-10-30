@@ -19,7 +19,11 @@ describe('DriversService', () => {
         findMany: jest.fn(),
         count: jest.fn(),
       },
+      auditLog: {
+        create: jest.fn(),
+      },
     };
+    mockPrisma.$transaction = jest.fn((cb: (tx: any) => unknown) => cb(mockPrisma));
     service = new DriversService(mockPrisma);
   });
 

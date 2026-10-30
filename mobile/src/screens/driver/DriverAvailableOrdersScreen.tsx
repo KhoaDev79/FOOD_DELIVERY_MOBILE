@@ -52,9 +52,10 @@ export const DriverAvailableOrdersScreen: React.FC = () => {
   // Đồng bộ trạng thái trực tuyến ban đầu từ server
   useEffect(() => {
     if (driverProfile !== undefined) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setIsOnline(driverProfile.isOnline);
     }
-  }, [driverProfile?.isOnline]);
+  }, [driverProfile]);
 
   const [confirmDialog, setConfirmDialog] = useState<{
     visible: boolean;

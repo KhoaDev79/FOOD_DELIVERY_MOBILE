@@ -109,6 +109,7 @@ export const RestaurantDetailScreen: React.FC<Props> = ({ route, navigation }) =
     const target = allItems.find((i) => i.id === openDishId);
     if (target) {
       autoOpenedRef.current = openDishId;
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setSelected(target);
     }
   }, [openDishId, allItems]);

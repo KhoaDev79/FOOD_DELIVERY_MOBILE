@@ -1,9 +1,5 @@
 import { Transform } from 'class-transformer';
-import { IsEmail, IsIn, IsOptional, IsString, Matches, MaxLength, MinLength, ValidateIf } from 'class-validator';
-import { Role } from '@prisma/client';
-
-/** Role được phép tự đăng ký. ADMIN chỉ được tạo qua seed/console. */
-export const SELF_REGISTER_ROLES = [Role.CUSTOMER, Role.RESTAURANT_OWNER, Role.DRIVER] as const;
+import { IsEmail, IsOptional, IsString, Matches, MaxLength, MinLength, ValidateIf } from 'class-validator';
 
 export class RegisterDto {
   @Transform(({ value }) => (typeof value === 'string' ? value.trim().toLowerCase() : value))
@@ -23,10 +19,6 @@ export class RegisterDto {
   @IsOptional()
   @Matches(/^(\+84|0)\d{9,10}$/, { message: 'Số điện thoại không hợp lệ' })
   phone?: string;
-
-  @IsOptional()
-  @IsIn(SELF_REGISTER_ROLES)
-  role?: (typeof SELF_REGISTER_ROLES)[number];
 }
 
 export class LoginDto {

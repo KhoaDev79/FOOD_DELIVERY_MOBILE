@@ -21,8 +21,9 @@ async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
   const config = app.get(ConfigService);
 
+  const corsOrigins = config.get<string[] | '*'>('corsOrigins') ?? '*';
   app.setGlobalPrefix(GLOBAL_PREFIX);
-  app.enableCors({ origin: true, credentials: true });
+  app.enableCors({ origin: corsOrigins === '*' ? true : corsOrigins, credentials: true });
   app.useBodyParser('json', { limit: '10mb' });
   app.useBodyParser('urlencoded', { limit: '10mb', extended: true });
   app.useGlobalPipes(globalValidationPipe());

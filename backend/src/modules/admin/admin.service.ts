@@ -1,17 +1,21 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException, Optional } from '@nestjs/common';
 import {
   DriverVerificationStatus,
   OrderStatus,
   Prisma,
+  RestaurantStatus,
   Role,
   RoleRequestStatus,
   VehicleType,
 } from '@prisma/client';
+import { randomBytes } from 'crypto';
 import { hashSecret } from '../../common/utils/password.util';
 import { generateUniqueUsername } from '../../common/utils/username.util';
 import { isValidVietnameseLicensePlate, normalizeLicensePlate } from '../../common/utils/vietnamese-plate.util';
+import { AuthStateService } from '../auth/auth-state.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { OrdersGateway } from '../realtime/orders.gateway';
 import {
   AdminCreateRestaurantDto,
   AdminUpdateRestaurantDto,
@@ -20,10 +24,15 @@ import {
   ListAdminRestaurantsQueryDto,
   ListRoleRequestsQueryDto,
   ListUsersQueryDto,
+  RejectRestaurantDto,
   RestaurantFilter,
   ReviewRoleRequestDto,
   ToggleUserActiveDto,
+  UpdateRestaurantStatusDto,
+  UpdateReviewVisibilityDto,
 } from './dto/admin.dto';
+
+export type AuditTargetType = 'USER' | 'RESTAURANT' | 'ORDER' | 'DRIVER' | 'REVIEW' | 'MENU_ITEM';
 
 const ROLE_LABEL: Record<Role, string> = {
   CUSTOMER: 'Khách hàng',
@@ -32,23 +41,49 @@ const ROLE_LABEL: Record<Role, string> = {
   ADMIN: 'Quản trị viên',
 };
 
-/**
- * Quán "chưa có chủ" = chủ hiện tại không phải tài khoản chủ quán đang hoạt động
- * (VD: quán do admin tạo/giữ tạm, hoặc chủ cũ đã bị khoá / đổi vai trò).
- */
 const UNASSIGNED_WHERE: Prisma.RestaurantWhereInput = {
   OR: [{ owner: { role: { not: Role.RESTAURANT_OWNER } } }, { owner: { isActive: false } }],
 };
 
 const OWNER_SELECT = { id: true, fullName: true, email: true, phone: true, role: true, isActive: true } as const;
 
-const needsOwner = (owner: { role: Role; isActive: boolean }) => owner.role !== Role.RESTAURANT_OWNER || !owner.isActive;
+const needsOwner = (owner: { role: Role; isActive: boolean }) =>
+  owner.role !== Role.RESTAURANT_OWNER || !owner.isActive;
+
+export function generateSecureTemporaryPassword(): string {
+  const upper = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
+  const lower = 'abcdefghijkmnopqrstuvwxyz';
+  const digits = '23456789';
+  const special = '!@#$%^&*';
+  const all = upper + lower + digits + special;
+  const bytes = randomBytes(16);
+
+  const chars = [
+    upper[bytes[0] % upper.length],
+    lower[bytes[1] % lower.length],
+    digits[bytes[2] % digits.length],
+    special[bytes[3] % special.length],
+  ];
+  for (let i = 4; i < 12; i++) {
+    chars.push(all[bytes[i] % all.length]);
+  }
+  // Trộn ngẫu nhiên bằng các byte còn lại
+  for (let i = chars.length - 1; i > 0; i--) {
+    const j = bytes[12 + (i % 4)] % (i + 1);
+    const tmp = chars[i];
+    chars[i] = chars[j];
+    chars[j] = tmp;
+  }
+  return chars.join('');
+}
 
 @Injectable()
 export class AdminService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly notifications: NotificationsService,
+    @Optional() private readonly authState?: AuthStateService,
+    @Optional() private readonly gateway?: OrdersGateway,
   ) {}
 
   /** Ghi nhật ký thao tác quản trị (trong cùng transaction với thao tác). */
@@ -56,7 +91,7 @@ export class AdminService {
     db: Prisma.TransactionClient,
     actorId: string,
     action: string,
-    targetType: 'USER' | 'RESTAURANT',
+    targetType: AuditTargetType,
     targetId: string,
     metadata?: Prisma.InputJsonValue,
   ) {
@@ -89,6 +124,7 @@ export class AdminService {
           role: true,
           avatarUrl: true,
           isActive: true,
+          failedDeliveryCount: true,
           createdAt: true,
           _count: { select: { restaurants: true } },
           driverProfile: {
@@ -102,6 +138,7 @@ export class AdminService {
               verificationStatus: true,
               rejectionReason: true,
               isOnline: true,
+              codBalance: true,
             },
           },
         },
@@ -121,7 +158,7 @@ export class AdminService {
     };
   }
 
-  /** Khóa hoặc Mở khóa tài khoản (kèm lý do, ghi nhật ký) */
+  /** Khóa hoặc Mở khóa tài khoản (kèm lý do, ghi nhật ký, thu hồi quyền tức thời) */
   async toggleUserActive(userId: string, actingAdminId: string, dto: ToggleUserActiveDto = {}) {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user) throw new NotFoundException('Không tìm thấy người dùng');
@@ -132,19 +169,31 @@ export class AdminService {
     const locking = user.isActive;
     const reason = dto.reason?.trim() || null;
 
-    return this.prisma.$transaction(async (tx) => {
-      const updated = await tx.user.update({
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const res = await tx.user.update({
         where: { id: userId },
         data: {
           isActive: !user.isActive,
-          // Khoá tài khoản thì thu hồi luôn refresh token để đăng xuất ngay
           ...(locking ? { refreshTokenHash: null } : {}),
         },
         select: { id: true, email: true, fullName: true, role: true, isActive: true },
       });
+      if (locking && user.role === Role.DRIVER) {
+        await tx.driverProfile.updateMany({
+          where: { userId },
+          data: { isOnline: false },
+        });
+      }
       await this.audit(tx, actingAdminId, locking ? 'USER_LOCK' : 'USER_UNLOCK', 'USER', userId, { reason });
-      return updated;
+      return res;
     });
+
+    this.authState?.invalidate(userId);
+    if (locking) {
+      this.gateway?.disconnectUser(userId);
+    }
+
+    return updated;
   }
 
   /** Đổi vai trò trực tiếp cho một tài khoản */
@@ -166,7 +215,6 @@ export class AdminService {
     await this.prisma.$transaction(async (tx) => {
       await tx.user.update({
         where: { id: userId },
-        // Vai trò nằm trong JWT: thu hồi refresh token để người dùng đăng nhập lại với quyền mới
         data: { role: dto.role, refreshTokenHash: null },
       });
       if (dto.role === Role.DRIVER) {
@@ -174,6 +222,9 @@ export class AdminService {
       }
       await this.audit(tx, actingAdminId, 'USER_CHANGE_ROLE', 'USER', userId, { from: user.role, to: dto.role });
     });
+
+    this.authState?.invalidate(userId);
+    this.gateway?.disconnectUser(userId);
 
     void this.notifications.sendToUsers([userId], {
       title: 'Vai trò tài khoản đã thay đổi',
@@ -221,7 +272,10 @@ export class AdminService {
       this.prisma.order.count({ where: { customerId: userId } }),
       this.prisma.order.count({ where: { driverId: userId, status: OrderStatus.DELIVERED } }),
       this.prisma.roleUpgradeRequest.findMany({ where: { userId }, orderBy: { createdAt: 'desc' }, take: 10 }),
-      this.prisma.restaurant.findMany({ where: { ownerId: userId }, select: { id: true, name: true, isOpen: true } }),
+      this.prisma.restaurant.findMany({
+        where: { ownerId: userId },
+        select: { id: true, name: true, isOpen: true, status: true },
+      }),
     ]);
 
     return {
@@ -234,12 +288,15 @@ export class AdminService {
     };
   }
 
-  /** Lấy danh sách toàn bộ nhà hàng trong hệ thống (tìm kiếm + lọc nhanh) */
+  /** Lấy danh sách toàn bộ nhà hàng trong hệ thống (tìm kiếm + lọc nhanh + lọc theo status) */
   async listRestaurants(q: ListAdminRestaurantsQueryDto) {
     const where: Prisma.RestaurantWhereInput = {
       ...(q.q?.trim() ? { name: { contains: q.q.trim(), mode: 'insensitive' } } : {}),
-      ...(q.filter === RestaurantFilter.OPEN ? { isOpen: true } : {}),
+      ...(q.status ? { status: q.status } : {}),
+      ...(q.filter === RestaurantFilter.OPEN ? { isOpen: true, status: RestaurantStatus.ACTIVE } : {}),
       ...(q.filter === RestaurantFilter.CLOSED ? { isOpen: false } : {}),
+      ...(q.filter === RestaurantFilter.PENDING ? { status: RestaurantStatus.PENDING_APPROVAL } : {}),
+      ...(q.filter === RestaurantFilter.SUSPENDED ? { status: RestaurantStatus.SUSPENDED } : {}),
       ...(q.filter === RestaurantFilter.UNASSIGNED ? UNASSIGNED_WHERE : {}),
     };
 
@@ -250,7 +307,7 @@ export class AdminService {
           owner: { select: OWNER_SELECT },
           _count: { select: { menuItems: true, orders: true } },
         },
-        orderBy: [{ name: 'asc' }],
+        orderBy: [{ createdAt: 'desc' }],
         skip: (q.page - 1) * q.limit,
         take: q.limit,
       }),
@@ -315,9 +372,13 @@ export class AdminService {
     ]);
     if (!restaurant) throw new NotFoundException('Không tìm thấy nhà hàng');
     if (!newOwner) throw new NotFoundException('Không tìm thấy người dùng được chọn');
-    if (!newOwner.isActive) throw new BadRequestException('Tài khoản này đang bị khoá, không thể gán làm chủ quán');
-    if (newOwner.role === Role.DRIVER) {
-      throw new BadRequestException('Tài khoản tài xế không thể làm chủ quán. Hãy đổi vai trò trước.');
+    if (!newOwner.isActive) {
+      throw new BadRequestException('Tài khoản này đang bị khoá, không thể gán làm chủ quán');
+    }
+    if (newOwner.role === Role.DRIVER || newOwner.role === Role.ADMIN) {
+      throw new ConflictException(
+        `Tài khoản đang có vai trò ${ROLE_LABEL[newOwner.role]}, không thể gán làm chủ quán. Hãy chọn tài khoản Khách hàng hoặc Chủ quán.`,
+      );
     }
     if (restaurant.ownerId === ownerId) throw new BadRequestException('Người dùng này đã là chủ của quán');
     const promoted = newOwner.role === Role.CUSTOMER;
@@ -326,7 +387,6 @@ export class AdminService {
       if (promoted) {
         await tx.user.update({
           where: { id: ownerId },
-          // Vai trò nằm trong JWT: buộc đăng nhập lại để nhận quyền chủ quán
           data: { role: Role.RESTAURANT_OWNER, refreshTokenHash: null },
         });
         await this.audit(tx, actingAdminId, 'USER_CHANGE_ROLE', 'USER', ownerId, {
@@ -353,8 +413,13 @@ export class AdminService {
       return rest;
     });
 
+    if (promoted) {
+      this.authState?.invalidate(ownerId);
+      this.gateway?.disconnectUser(ownerId);
+    }
+
     void this.notifications.sendToUsers([ownerId], {
-      title: 'Bạn đã được giao quản lý quán 🏪',
+      title: 'Bạn đã được giao quản lý quán',
       body: promoted
         ? `Quán "${restaurant.name}" đã được giao cho bạn. Vui lòng đăng nhập lại để vào trang chủ quán.`
         : `Quán "${restaurant.name}" đã được giao cho bạn quản lý.`,
@@ -364,42 +429,171 @@ export class AdminService {
     return { ...updated, needsOwner: false, promoted };
   }
 
-  /** Bật / Tắt trạng thái mở cửa của quán từ quyền Admin */
-  async toggleRestaurantOpen(restaurantId: string, actingAdminId: string) {
+  /** Duyệt quán chờ duyệt -> ACTIVE */
+  async approveRestaurant(restaurantId: string, actingAdminId: string) {
     const rest = await this.prisma.restaurant.findUnique({ where: { id: restaurantId } });
     if (!rest) throw new NotFoundException('Không tìm thấy nhà hàng');
 
-    return this.prisma.$transaction(async (tx) => {
-      const updated = await tx.restaurant.update({
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const res = await tx.restaurant.update({
         where: { id: restaurantId },
-        data: { isOpen: !rest.isOpen },
+        data: {
+          status: RestaurantStatus.ACTIVE,
+          approvedAt: new Date(),
+          approvedById: actingAdminId,
+          suspendReason: null,
+        },
+        include: { owner: { select: OWNER_SELECT }, _count: { select: { menuItems: true, orders: true } } },
+      });
+      await this.audit(tx, actingAdminId, 'RESTAURANT_APPROVE', 'RESTAURANT', restaurantId, {
+        restaurantName: rest.name,
+        previousStatus: rest.status,
+      });
+      return res;
+    });
+
+    void this.notifications.sendToUsers([rest.ownerId], {
+      title: 'Quán ăn đã được duyệt',
+      body: `Quán "${rest.name}" đã được phê duyệt và bắt đầu hiển thị với khách hàng.`,
+      data: { type: 'restaurant_approved', restaurantId },
+    });
+
+    return updated;
+  }
+
+  /** Từ chối duyệt quán -> giữ PENDING_APPROVAL kèm lý do */
+  async rejectRestaurant(restaurantId: string, actingAdminId: string, dto: RejectRestaurantDto) {
+    const reason = dto.reason?.trim();
+    if (!reason) throw new BadRequestException('Vui lòng nhập lý do từ chối');
+
+    const rest = await this.prisma.restaurant.findUnique({ where: { id: restaurantId } });
+    if (!rest) throw new NotFoundException('Không tìm thấy nhà hàng');
+
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const res = await tx.restaurant.update({
+        where: { id: restaurantId },
+        data: {
+          status: RestaurantStatus.PENDING_APPROVAL,
+          suspendReason: reason,
+        },
+        include: { owner: { select: OWNER_SELECT }, _count: { select: { menuItems: true, orders: true } } },
+      });
+      await this.audit(tx, actingAdminId, 'RESTAURANT_REJECT', 'RESTAURANT', restaurantId, {
+        restaurantName: rest.name,
+        reason,
+      });
+      return res;
+    });
+
+    void this.notifications.sendToUsers([rest.ownerId], {
+      title: 'Quán ăn chưa được phê duyệt',
+      body: `Quán "${rest.name}" chưa được duyệt: ${reason}`,
+      data: { type: 'restaurant_rejected', restaurantId, reason },
+    });
+
+    return updated;
+  }
+
+  /** Cập nhật trạng thái hoạt động của quán (ACTIVE / SUSPENDED) */
+  async updateRestaurantStatus(
+    restaurantId: string,
+    actingAdminId: string,
+    dto: UpdateRestaurantStatusDto,
+  ) {
+    const rest = await this.prisma.restaurant.findUnique({ where: { id: restaurantId } });
+    if (!rest) throw new NotFoundException('Không tìm thấy nhà hàng');
+
+    const reason = dto.reason?.trim() || null;
+    if (dto.status === RestaurantStatus.SUSPENDED && !reason) {
+      throw new BadRequestException('Bắt buộc nhập lý do khi tạm ngưng quán');
+    }
+
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const res = await tx.restaurant.update({
+        where: { id: restaurantId },
+        data: {
+          status: dto.status,
+          suspendReason: dto.status === RestaurantStatus.SUSPENDED ? reason : null,
+          ...(dto.status === RestaurantStatus.ACTIVE && !rest.approvedAt
+            ? { approvedAt: new Date(), approvedById: actingAdminId }
+            : {}),
+        },
+        include: { owner: { select: OWNER_SELECT }, _count: { select: { menuItems: true, orders: true } } },
       });
       await this.audit(
         tx,
         actingAdminId,
-        rest.isOpen ? 'RESTAURANT_SUSPEND' : 'RESTAURANT_RESUME',
+        dto.status === RestaurantStatus.SUSPENDED ? 'RESTAURANT_SUSPEND' : 'RESTAURANT_RESUME',
         'RESTAURANT',
         restaurantId,
-        { restaurantName: rest.name },
+        { restaurantName: rest.name, reason },
       );
-      return updated;
+      return res;
+    });
+
+    void this.notifications.sendToUsers([rest.ownerId], {
+      title:
+        dto.status === RestaurantStatus.SUSPENDED
+          ? 'Quán ăn đã bị tạm ngưng'
+          : 'Quán ăn đã được mở lại',
+      body:
+        dto.status === RestaurantStatus.SUSPENDED
+          ? `Quán "${rest.name}" đã bị tạm ngưng: ${reason}`
+          : `Quán "${rest.name}" đã hoạt động trở lại.`,
+      data: { type: 'restaurant_status', restaurantId, status: dto.status },
+    });
+
+    return updated;
+  }
+
+  /** @deprecated Chuyển sang dùng cột status thay vì lạm dụng isOpen */
+  async toggleRestaurantOpen(restaurantId: string, actingAdminId: string) {
+    const rest = await this.prisma.restaurant.findUnique({ where: { id: restaurantId } });
+    if (!rest) throw new NotFoundException('Không tìm thấy nhà hàng');
+
+    const nextStatus =
+      rest.status === RestaurantStatus.ACTIVE ? RestaurantStatus.SUSPENDED : RestaurantStatus.ACTIVE;
+
+    return this.updateRestaurantStatus(restaurantId, actingAdminId, {
+      status: nextStatus,
+      reason: nextStatus === RestaurantStatus.SUSPENDED ? 'Quản trị viên tạm ngưng hoạt động' : undefined,
     });
   }
 
   /** Lấy danh sách toàn bộ đơn hàng toàn sàn */
   async listOrders(q: ListAdminOrdersQueryDto) {
-    const where: Prisma.OrderWhereInput = q.status
-      ? { status: q.status as any }
-      : {};
+    const term = q.q?.trim();
+    const where: Prisma.OrderWhereInput = {
+      ...(q.status ? { status: q.status as OrderStatus } : {}),
+      ...(q.stalled ? { stalledAt: { not: null } } : {}),
+      ...(term
+        ? {
+            OR: [
+              ...(term.length === 36 ? [{ id: term }] : []),
+              { customer: { phone: { contains: term, mode: 'insensitive' } } },
+              { customer: { fullName: { contains: term, mode: 'insensitive' } } },
+              { restaurant: { name: { contains: term, mode: 'insensitive' } } },
+            ],
+          }
+        : {}),
+    };
 
     const [items, total] = await Promise.all([
       this.prisma.order.findMany({
         where,
         include: {
           customer: { select: { id: true, fullName: true, phone: true } },
-          restaurant: { select: { id: true, name: true } },
-          driver: { select: { id: true, fullName: true, phone: true } },
-          items: { select: { name: true, quantity: true } },
+          restaurant: { select: { id: true, name: true, phone: true, address: true } },
+          driver: {
+            select: {
+              id: true,
+              fullName: true,
+              phone: true,
+              driverProfile: { select: { lastLatitude: true, lastLongitude: true, lastLocationAt: true } },
+            },
+          },
+          items: { select: { name: true, quantity: true, unitPrice: true } },
+          _count: { select: { contactAttempts: true } },
         },
         orderBy: { createdAt: 'desc' },
         skip: (q.page - 1) * q.limit,
@@ -417,6 +611,110 @@ export class AdminService {
     };
   }
 
+  /** Chi tiết đơn hàng đầy đủ cho Admin */
+  async getOrderDetail(orderId: string) {
+    const order = await this.prisma.order.findUnique({
+      where: { id: orderId },
+      include: {
+        items: true,
+        customer: { select: { id: true, fullName: true, phone: true, email: true } },
+        restaurant: { select: { id: true, name: true, phone: true, address: true, latitude: true, longitude: true } },
+        driver: {
+          select: {
+            id: true,
+            fullName: true,
+            phone: true,
+            driverProfile: {
+              select: {
+                vehicleType: true,
+                licensePlate: true,
+                lastLatitude: true,
+                lastLongitude: true,
+                lastLocationAt: true,
+              },
+            },
+          },
+        },
+        statusHistory: { orderBy: { createdAt: 'asc' } },
+        contactAttempts: { orderBy: { createdAt: 'asc' } },
+        review: true,
+      },
+    });
+    if (!order) throw new NotFoundException('Không tìm thấy đơn hàng');
+    return order;
+  }
+
+  /** Admin gỡ tài xế khỏi đơn đang giao (khi CONFIRMED/PREPARING/READY_FOR_PICKUP) và phát lại đơn */
+  async unassignDriver(orderId: string, actingAdminId: string, reason?: string) {
+    const order = await this.prisma.order.findUnique({
+      where: { id: orderId },
+      include: { restaurant: { select: { ownerId: true, name: true } } },
+    });
+    if (!order) throw new NotFoundException('Không tìm thấy đơn hàng');
+    if (!order.driverId) throw new BadRequestException('Đơn hàng hiện chưa có tài xế nhận');
+    if (!['CONFIRMED', 'PREPARING', 'READY_FOR_PICKUP'].includes(order.status)) {
+      throw new ConflictException(`Không thể gỡ tài xế khi đơn đang ở trạng thái ${order.status}`);
+    }
+
+    const prevDriverId = order.driverId;
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const res = await tx.order.update({
+        where: { id: orderId },
+        data: { driverId: null },
+        include: {
+          restaurant: { select: { ownerId: true, name: true } },
+        },
+      });
+      await this.audit(tx, actingAdminId, 'ORDER_UNASSIGN_DRIVER', 'ORDER', orderId, {
+        previousDriverId: prevDriverId,
+        reason: reason?.trim() || null,
+      });
+      return res;
+    });
+
+    this.gateway?.emitOrderUpdated('order:status', updated);
+    this.gateway?.emitOrderAvailable(updated);
+
+    return updated;
+  }
+
+  /** Admin ẩn / hiện đánh giá và tính lại điểm trung bình + số lượt đánh giá của quán */
+  async updateReviewVisibility(reviewId: string, actingAdminId: string, dto: UpdateReviewVisibilityDto) {
+    const review = await this.prisma.review.findUnique({ where: { id: reviewId } });
+    if (!review) throw new NotFoundException('Không tìm thấy đánh giá');
+
+    return this.prisma.$transaction(async (tx) => {
+      const updated = await tx.review.update({
+        where: { id: reviewId },
+        data: { isHidden: dto.isHidden },
+      });
+
+      const agg = await tx.review.aggregate({
+        where: { restaurantId: review.restaurantId, isHidden: false },
+        _avg: { rating: true },
+        _count: { id: true },
+      });
+      await tx.restaurant.update({
+        where: { id: review.restaurantId },
+        data: {
+          rating: agg._count.id > 0 ? Math.round((agg._avg.rating ?? 0) * 10) / 10 : 0,
+          ratingCount: agg._count.id,
+        },
+      });
+
+      await this.audit(
+        tx,
+        actingAdminId,
+        dto.isHidden ? 'REVIEW_HIDE' : 'REVIEW_SHOW',
+        'REVIEW',
+        reviewId,
+        { restaurantId: review.restaurantId, reason: dto.reason.trim() },
+      );
+
+      return updated;
+    });
+  }
+
   /** Thống kê số liệu bảng điều khiển Admin */
   async getDashboardStats() {
     const [
@@ -425,26 +723,41 @@ export class AdminService {
       totalRestaurants,
       openRestaurants,
       unassignedRestaurants,
+      pendingRestaurants,
+      suspendedRestaurants,
       totalOrders,
       ordersByStatus,
+      stalledOrders,
       revenueResult,
       pendingRoleRequests,
+      codDebtResult,
     ] = await Promise.all([
       this.prisma.user.groupBy({ by: ['role'], _count: { id: true } }),
       this.prisma.user.count({ where: { isActive: false } }),
       this.prisma.restaurant.count(),
-      this.prisma.restaurant.count({ where: { isOpen: true } }),
+      this.prisma.restaurant.count({ where: { isOpen: true, status: RestaurantStatus.ACTIVE } }),
       this.prisma.restaurant.count({ where: UNASSIGNED_WHERE }),
+      this.prisma.restaurant.count?.({ where: { status: RestaurantStatus.PENDING_APPROVAL } }) ?? 0,
+      this.prisma.restaurant.count?.({ where: { status: RestaurantStatus.SUSPENDED } }) ?? 0,
       this.prisma.order.count(),
       this.prisma.order.groupBy({ by: ['status'], _count: { id: true } }),
+      this.prisma.order.count?.({
+        where: {
+          stalledAt: { not: null },
+          driverId: null,
+          status: { in: ['CONFIRMED', 'PREPARING', 'READY_FOR_PICKUP'] },
+        },
+      }) ?? 0,
       this.prisma.order.aggregate({
         _sum: { total: true },
         where: { status: OrderStatus.DELIVERED },
       }),
       this.prisma.roleUpgradeRequest.count({ where: { status: RoleRequestStatus.PENDING } }),
+      this.prisma.driverProfile?.aggregate
+        ? this.prisma.driverProfile.aggregate({ _sum: { codBalance: true } })
+        : Promise.resolve({ _sum: { codBalance: 0 } }),
     ]);
 
-    // Luôn trả đủ 4 vai trò (kể cả 0); tổng = tổng các vai trò để số liệu cộng dồn khớp 100%.
     const roles = Object.fromEntries(Object.values(Role).map((r) => [r, 0])) as Record<Role, number>;
     for (const r of usersByRole) roles[r.role] = r._count.id;
     const customersCount = roles.CUSTOMER;
@@ -467,11 +780,17 @@ export class AdminService {
         open: openRestaurants,
         closed: totalRestaurants - openRestaurants,
         unassigned: unassignedRestaurants,
+        pendingApproval: pendingRestaurants,
+        suspended: suspendedRestaurants,
       },
       orders: {
         total: totalOrders,
+        stalled: stalledOrders,
         statuses: Object.fromEntries(ordersByStatus.map((s) => [s.status, s._count.id])),
         totalRevenue: revenueResult._sum.total || 0,
+      },
+      drivers: {
+        totalCodDebt: codDebtResult?._sum?.codBalance ?? 0,
       },
       roleRequests: { pending: pendingRoleRequests },
     };
@@ -488,7 +807,6 @@ export class AdminService {
         },
         reviewedBy: { select: { id: true, fullName: true } },
       },
-      // Chờ duyệt: cũ nhất trước (xử lý theo thứ tự); đã xử lý: mới nhất trước
       orderBy: { createdAt: q.status === RoleRequestStatus.PENDING ? 'asc' : 'desc' },
       take: 100,
     });
@@ -514,7 +832,6 @@ export class AdminService {
       if (!request.user.isActive) throw new BadRequestException('Tài khoản đang bị khoá, không thể duyệt');
     }
 
-    // Thông tin xe khai trong yêu cầu làm tài xế
     const meta = (request.metadata ?? {}) as Record<string, unknown>;
     const str = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : null);
     let driverData: Omit<Prisma.DriverProfileUncheckedCreateInput, 'userId'> | null = null;
@@ -538,7 +855,6 @@ export class AdminService {
         vehicleModel: str(meta.vehicleModel),
         vehicleColor: str(meta.vehicleColor),
         licensePlate,
-        // Admin đã xem thông tin xe khi duyệt yêu cầu nên hồ sơ xe được duyệt luôn
         verificationStatus: DriverVerificationStatus.APPROVED,
         verifiedAt: new Date(),
         verifiedById: actingAdminId,
@@ -554,7 +870,6 @@ export class AdminService {
       if (approve) {
         await tx.user.update({
           where: { id: request.userId },
-          // Vai trò nằm trong JWT: buộc đăng nhập lại để nhận quyền mới
           data: { role: request.requestedRole, refreshTokenHash: null },
         });
         if (driverData) {
@@ -576,12 +891,17 @@ export class AdminService {
       return result;
     });
 
+    if (approve) {
+      this.authState?.invalidate(request.userId);
+      this.gateway?.disconnectUser(request.userId);
+    }
+
     const roleName = ROLE_LABEL[request.requestedRole];
     void this.notifications.sendToUsers(
       [request.userId],
       approve
         ? {
-            title: 'Yêu cầu đã được duyệt 🎉',
+            title: 'Yêu cầu đã được duyệt',
             body: `Bạn đã trở thành ${roleName}. Vui lòng đăng nhập lại để sử dụng tính năng mới.`,
             data: { type: 'role_request', status: dto.status, role: request.requestedRole },
           }
@@ -595,104 +915,169 @@ export class AdminService {
     return updated;
   }
 
-  /** Thêm nhà hàng mới cùng thông tin chủ quán */
-  async createRestaurant(dto: AdminCreateRestaurantDto) {
-    // Mật khẩu tạm của chủ quán mới: trả về MỘT lần cho admin để gửi chủ quán (trước đây bị bỏ mất,
-    // chủ quán mới không đăng nhập được).
+  /** Thêm nhà hàng mới cùng thông tin chủ quán (Admin tạo -> ACTIVE ngay, ghi AuditLog) */
+  async createRestaurant(dto: AdminCreateRestaurantDto, actingAdminId?: string) {
     let temporaryPassword: string | null = null;
-    let owner = await this.prisma.user.findFirst({
+    const ownerEmail = dto.ownerEmail.toLowerCase().trim();
+    const ownerPhone = dto.ownerPhone.trim();
+
+    const existingOwner = await this.prisma.user.findFirst({
       where: {
-        OR: [
-          { email: dto.ownerEmail.toLowerCase().trim() },
-          ...(dto.ownerPhone ? [{ phone: dto.ownerPhone.trim() }] : []),
-        ],
+        OR: [{ email: ownerEmail }, ...(ownerPhone ? [{ phone: ownerPhone }] : [])],
       },
     });
 
-    if (!owner) {
-      const defaultPassword = 'Owner@' + Math.floor(100000 + Math.random() * 900000);
-      temporaryPassword = defaultPassword;
-      const passwordHash = await hashSecret(defaultPassword);
-      owner = await this.prisma.user.create({
-        data: {
-          fullName: dto.ownerName.trim(),
-          email: dto.ownerEmail.toLowerCase().trim(),
-          username: await generateUniqueUsername(this.prisma, dto.ownerEmail.toLowerCase().trim()),
-          phone: dto.ownerPhone.trim(),
-          passwordHash,
-          role: Role.RESTAURANT_OWNER,
-        },
-      });
-    } else if (owner.role !== Role.RESTAURANT_OWNER && owner.role !== Role.ADMIN) {
-      owner = await this.prisma.user.update({
-        where: { id: owner.id },
-        data: { role: Role.RESTAURANT_OWNER },
-      });
+    let defaultPasswordHash: string | null = null;
+    let newUsername: string | null = null;
+    if (!existingOwner) {
+      temporaryPassword = generateSecureTemporaryPassword();
+      defaultPasswordHash = await hashSecret(temporaryPassword);
+      newUsername = await generateUniqueUsername(this.prisma, ownerEmail);
     }
 
-    const restaurant = await this.prisma.restaurant.create({
-      data: {
-        ownerId: owner.id,
-        name: dto.name.trim(),
-        address: dto.address.trim(),
-        latitude: dto.latitude,
-        longitude: dto.longitude,
-        imageUrl: dto.imageUrl?.trim() || null,
-        isOpen: true,
-      },
-      include: {
-        owner: { select: { id: true, fullName: true, email: true, phone: true } },
-      },
-    });
+    return this.prisma.$transaction(async (tx) => {
+      let owner = existingOwner;
+      let promotedOwner = false;
 
-    return { ...restaurant, temporaryPassword };
+      if (!owner) {
+        owner = await tx.user.create({
+          data: {
+            fullName: dto.ownerName.trim(),
+            email: ownerEmail,
+            username: newUsername,
+            phone: ownerPhone,
+            passwordHash: defaultPasswordHash!,
+            role: Role.RESTAURANT_OWNER,
+          },
+        });
+        if (actingAdminId) {
+          await this.audit(tx, actingAdminId, 'USER_CREATE', 'USER', owner.id, {
+            email: owner.email,
+            role: owner.role,
+            via: 'ADMIN_CREATE_RESTAURANT',
+          });
+        }
+      } else if (owner.role !== Role.RESTAURANT_OWNER && owner.role !== Role.ADMIN) {
+        const previousRole = owner.role;
+        owner = await tx.user.update({
+          where: { id: owner.id },
+          data: { role: Role.RESTAURANT_OWNER, refreshTokenHash: null },
+        });
+        promotedOwner = true;
+        if (actingAdminId) {
+          await this.audit(tx, actingAdminId, 'USER_CHANGE_ROLE', 'USER', owner.id, {
+            from: previousRole,
+            to: Role.RESTAURANT_OWNER,
+            via: 'ADMIN_CREATE_RESTAURANT',
+          });
+        }
+      }
+
+      const restaurant = await tx.restaurant.create({
+        data: {
+          ownerId: owner.id,
+          name: dto.name.trim(),
+          address: dto.address.trim(),
+          phone: dto.phone?.trim() || ownerPhone,
+          latitude: dto.latitude,
+          longitude: dto.longitude,
+          imageUrl: dto.imageUrl?.trim() || null,
+          isOpen: true,
+          status: RestaurantStatus.ACTIVE,
+          approvedAt: new Date(),
+          approvedById: actingAdminId ?? null,
+        },
+        include: {
+          owner: { select: { id: true, fullName: true, email: true, phone: true } },
+        },
+      });
+
+      if (actingAdminId) {
+        await this.audit(tx, actingAdminId, 'RESTAURANT_CREATE', 'RESTAURANT', restaurant.id, {
+          name: restaurant.name,
+          ownerId: owner.id,
+          status: RestaurantStatus.ACTIVE,
+        });
+      }
+
+      if (promotedOwner) {
+        this.authState?.invalidate(owner.id);
+        this.gateway?.disconnectUser(owner.id);
+      }
+
+      return { ...restaurant, temporaryPassword };
+    });
   }
 
-  /** Chỉnh sửa thông tin nhà hàng */
-  async updateRestaurant(id: string, dto: AdminUpdateRestaurantDto) {
+  /** Chỉnh sửa thông tin nhà hàng (Admin sửa -> ghi AuditLog) */
+  async updateRestaurant(id: string, dto: AdminUpdateRestaurantDto, actingAdminId?: string) {
     const rest = await this.prisma.restaurant.findUnique({ where: { id } });
     if (!rest) throw new NotFoundException('Không tìm thấy nhà hàng');
 
-    return this.prisma.restaurant.update({
-      where: { id },
-      data: {
-        ...(dto.name ? { name: dto.name.trim() } : {}),
-        ...(dto.address ? { address: dto.address.trim() } : {}),
-        ...(dto.latitude !== undefined ? { latitude: dto.latitude } : {}),
-        ...(dto.longitude !== undefined ? { longitude: dto.longitude } : {}),
-        ...(dto.imageUrl !== undefined ? { imageUrl: dto.imageUrl } : {}),
-        ...(dto.isOpen !== undefined ? { isOpen: dto.isOpen } : {}),
-      },
-      include: {
-        owner: { select: { id: true, fullName: true, email: true, phone: true } },
-      },
+    return this.prisma.$transaction(async (tx) => {
+      const updated = await tx.restaurant.update({
+        where: { id },
+        data: {
+          ...(dto.name ? { name: dto.name.trim() } : {}),
+          ...(dto.address ? { address: dto.address.trim() } : {}),
+          ...(dto.phone !== undefined ? { phone: dto.phone?.trim() || null } : {}),
+          ...(dto.latitude !== undefined ? { latitude: dto.latitude } : {}),
+          ...(dto.longitude !== undefined ? { longitude: dto.longitude } : {}),
+          ...(dto.imageUrl !== undefined ? { imageUrl: dto.imageUrl } : {}),
+          ...(dto.isOpen !== undefined ? { isOpen: dto.isOpen } : {}),
+        },
+        include: {
+          owner: { select: { id: true, fullName: true, email: true, phone: true } },
+        },
+      });
+      if (actingAdminId) {
+        await this.audit(tx, actingAdminId, 'RESTAURANT_UPDATE', 'RESTAURANT', id, {
+          restaurantName: updated.name,
+        });
+      }
+      return updated;
     });
   }
 
-  /** Xóa nhà hàng */
-  async deleteRestaurant(id: string) {
+  /** Xóa nhà hàng (kèm AuditLog) */
+  async deleteRestaurant(id: string, actingAdminId?: string) {
     const rest = await this.prisma.restaurant.findUnique({ where: { id } });
     if (!rest) throw new NotFoundException('Không tìm thấy nhà hàng');
-    // Đơn hàng cũ phải được giữ lại (lịch sử, đối soát), nên quán đã có đơn thì không xoá được.
     const orders = await this.prisma.order.count({ where: { restaurantId: id } });
     if (orders > 0) {
       throw new ConflictException(
-        `Quán đã có ${orders} đơn hàng nên không thể xoá. Hãy đóng cửa quán để ngừng nhận đơn.`,
+        `Quán đã có ${orders} đơn hàng nên không thể xoá. Hãy tạm đóng quán để ngừng nhận đơn.`,
       );
     }
 
-    return this.prisma.restaurant.delete({ where: { id } });
+    return this.prisma.$transaction(async (tx) => {
+      const deleted = await tx.restaurant.delete({ where: { id } });
+      if (actingAdminId) {
+        await this.audit(tx, actingAdminId, 'RESTAURANT_DELETE', 'RESTAURANT', id, {
+          restaurantName: rest.name,
+        });
+      }
+      return deleted;
+    });
   }
 
-  /** Xóa món ăn khỏi hệ thống */
-  async deleteMenuItem(id: string) {
+  /** Xóa mềm món ăn khỏi hệ thống (kèm AuditLog) */
+  async deleteMenuItem(id: string, actingAdminId?: string) {
     const item = await this.prisma.menuItem.findUnique({ where: { id } });
     if (!item) throw new NotFoundException('Không tìm thấy món ăn');
 
-    return this.prisma.menuItem.update({
-      where: { id },
-      data: { isArchived: true, isAvailable: false },
+    return this.prisma.$transaction(async (tx) => {
+      const updated = await tx.menuItem.update({
+        where: { id },
+        data: { isArchived: true, isAvailable: false },
+      });
+      if (actingAdminId) {
+        await this.audit(tx, actingAdminId, 'MENU_ITEM_DELETE', 'MENU_ITEM', id, {
+          name: item.name,
+          restaurantId: item.restaurantId,
+        });
+      }
+      return updated;
     });
   }
 }
-

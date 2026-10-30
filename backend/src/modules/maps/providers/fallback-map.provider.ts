@@ -40,7 +40,7 @@ export class FallbackMapProvider implements IMapProvider {
     };
   }
 
-  async searchPlaces(query: string, lat?: number, lng?: number): Promise<PlaceAutocompleteItem[]> {
+  async searchPlaces(query: string, _lat?: number, _lng?: number): Promise<PlaceAutocompleteItem[]> {
     try {
       const encoded = encodeURIComponent(query.trim());
       const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encoded}&countrycodes=vn&limit=8&addressdetails=1`;

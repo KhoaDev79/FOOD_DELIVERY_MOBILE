@@ -10,6 +10,7 @@ export const ORDER_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
   READY_FOR_PICKUP: ['PICKED_UP'],
   PICKED_UP: ['DELIVERED'],
   DELIVERED: [],
+  DELIVERY_FAILED: [],
   CANCELLED: [],
 };
 

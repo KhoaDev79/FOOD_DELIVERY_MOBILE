@@ -6,7 +6,6 @@ import {
   IsLongitude,
   IsOptional,
   IsString,
-  IsUrl,
   Matches,
   MaxLength,
   MinLength,

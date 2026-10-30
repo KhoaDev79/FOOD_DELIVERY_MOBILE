@@ -22,10 +22,12 @@ describe('opening-hours', () => {
     expect(isWithinOpeningHours('00:00', '00:00', vn('03:00'))).toBe(true);
   });
 
-  it('chỉ nhận đơn khi chủ quán bật mở cửa và đang trong giờ', () => {
-    const r = { isOpen: true, openTime: '07:00', closeTime: '22:00' };
+  it('chỉ nhận đơn khi status ACTIVE, chủ quán bật mở cửa và đang trong giờ', () => {
+    const r = { status: 'ACTIVE' as const, isOpen: true, openTime: '07:00', closeTime: '22:00' };
     expect(isAcceptingOrders(r, vn('10:00'))).toBe(true);
     expect(isAcceptingOrders(r, vn('23:00'))).toBe(false);
     expect(isAcceptingOrders({ ...r, isOpen: false }, vn('10:00'))).toBe(false);
+    expect(isAcceptingOrders({ ...r, status: 'PENDING_APPROVAL' }, vn('10:00'))).toBe(false);
+    expect(isAcceptingOrders({ ...r, status: 'SUSPENDED' }, vn('10:00'))).toBe(false);
   });
 });

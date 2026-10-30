@@ -1,9 +1,13 @@
-import { UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, UnauthorizedException, ValidationPipe } from '@nestjs/common';
+import { Role } from '@prisma/client';
 import { hashSecret } from '../../common/utils/password.util';
 import { generateUniqueUsername, normalizeUsername } from '../../common/utils/username.util';
+import { AuthStateService } from './auth-state.service';
 import { AuthService } from './auth.service';
+import { RegisterDto } from './dto/auth.dto';
+import { JwtStrategy } from './strategies/jwt.strategy';
 
-describe('AuthService.login', () => {
+describe('AuthService.login & register', () => {
   let prisma: any;
   let service: AuthService;
   let user: any;
@@ -25,6 +29,8 @@ describe('AuthService.login', () => {
         findUnique: jest.fn(({ where }) =>
           Promise.resolve(where.username === user.username || where.email === user.email ? user : null),
         ),
+        findFirst: jest.fn().mockResolvedValue(null),
+        create: jest.fn(({ data }) => Promise.resolve({ id: 'new-u', isActive: true, createdAt: new Date(), ...data })),
         update: jest.fn(),
       },
     };
@@ -33,6 +39,39 @@ describe('AuthService.login', () => {
       getOrThrow: jest.fn().mockReturnValue({ accessSecret: 'a', refreshSecret: 'r', accessExpiresIn: '15m', refreshExpiresIn: '7d' }),
     };
     service = new AuthService(prisma, jwt as any, config as any);
+  });
+
+  it('đăng ký mới luôn gán role CUSTOMER', async () => {
+    const res = await service.register({
+      email: 'newuser@fooddelivery.com',
+      password: 'Password123!',
+      fullName: 'Khách Mới',
+    });
+    expect(res.user.role).toBe(Role.CUSTOMER);
+    expect(prisma.user.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ role: Role.CUSTOMER }),
+      }),
+    );
+  });
+
+  it('ValidationPipe từ chối payload đăng ký có trường role (forbidNonWhitelisted)', async () => {
+    const pipe = new ValidationPipe({
+      whitelist: true,
+      forbidNonWhitelisted: true,
+      transform: true,
+    });
+    await expect(
+      pipe.transform(
+        {
+          email: 'newuser@fooddelivery.com',
+          password: 'Password123!',
+          fullName: 'Khách Mới',
+          role: 'RESTAURANT_OWNER',
+        },
+        { type: 'body', metatype: RegisterDto },
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
   });
 
   it('đăng nhập bằng tên đăng nhập (không phân biệt hoa thường)', async () => {
@@ -54,6 +93,41 @@ describe('AuthService.login', () => {
     await expect(service.login({ username: 'khongton', password: 'Password123!' })).rejects.toBeInstanceOf(
       UnauthorizedException,
     );
+  });
+});
+
+describe('JwtStrategy & AuthStateService', () => {
+  it('chặn ngay khi tài khoản bị khoá hoặc đổi vai trò sau khi invalidate cache', async () => {
+    let dbState: { isActive: boolean; role: Role } = { isActive: true, role: Role.CUSTOMER };
+    const prisma = {
+      user: {
+        findUnique: jest.fn(() => Promise.resolve(dbState)),
+      },
+    };
+    const config = {
+      get: jest.fn().mockReturnValue(30),
+      getOrThrow: jest.fn().mockReturnValue('secret-1234567890'),
+    };
+    const authState = new AuthStateService(prisma as any, config as any);
+    const strategy = new JwtStrategy(config as any, authState);
+
+    await expect(
+      strategy.validate({ sub: 'u1', email: 'a@b.com', role: Role.CUSTOMER }),
+    ).resolves.toEqual({ id: 'u1', email: 'a@b.com', role: Role.CUSTOMER });
+
+    // Khoá tài khoản + invalidate
+    dbState = { isActive: false, role: Role.CUSTOMER };
+    authState.invalidate('u1');
+    await expect(
+      strategy.validate({ sub: 'u1', email: 'a@b.com', role: Role.CUSTOMER }),
+    ).rejects.toThrow('Tài khoản đã bị khoá');
+
+    // Mở lại nhưng đổi role + invalidate
+    dbState = { isActive: true, role: Role.DRIVER };
+    authState.invalidate('u1');
+    await expect(
+      strategy.validate({ sub: 'u1', email: 'a@b.com', role: Role.CUSTOMER }),
+    ).rejects.toThrow('Vai trò đã thay đổi, vui lòng đăng nhập lại');
   });
 });
 

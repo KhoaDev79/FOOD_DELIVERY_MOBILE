@@ -277,21 +277,37 @@ export class DriversService {
       throw new BadRequestException('Bắt buộc phải nhập lý do khi từ chối hoặc tạm khoá tài xế');
     }
 
-    const updated = await this.prisma.driverProfile.update({
-      where: { userId },
-      data: {
-        verificationStatus: dto.status,
-        rejectionReason: dto.reason?.trim() || null,
-        verifiedAt: new Date(),
-        verifiedById: adminId,
-        // Nếu không được duyệt thì tự động tắt trạng thái trực tuyến
-        ...(dto.status !== DriverVerificationStatus.APPROVED ? { isOnline: false } : {}),
-      },
-      include: {
-        user: {
-          select: { id: true, email: true, fullName: true, phone: true },
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const res = await tx.driverProfile.update({
+        where: { userId },
+        data: {
+          verificationStatus: dto.status,
+          rejectionReason: dto.reason?.trim() || null,
+          verifiedAt: new Date(),
+          verifiedById: adminId,
+          // Nếu không được duyệt thì tự động tắt trạng thái trực tuyến
+          ...(dto.status !== DriverVerificationStatus.APPROVED ? { isOnline: false } : {}),
         },
-      },
+        include: {
+          user: {
+            select: { id: true, email: true, fullName: true, phone: true },
+          },
+        },
+      });
+      await tx.auditLog.create({
+        data: {
+          actorId: adminId,
+          action: `DRIVER_VERIFY_${dto.status}`,
+          targetType: 'DRIVER',
+          targetId: profile.id,
+          metadata: {
+            userId,
+            previousStatus: profile.verificationStatus,
+            reason: dto.reason?.trim() || null,
+          },
+        },
+      });
+      return res;
     });
 
     return sanitizeProfile(updated);

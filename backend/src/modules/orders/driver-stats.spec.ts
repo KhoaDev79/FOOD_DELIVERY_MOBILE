@@ -1,4 +1,3 @@
-import { OrderStatus } from '@prisma/client';
 import { buildDriverStats, DriverStatsOrderInput } from './driver-stats';
 
 describe('buildDriverStats', () => {

@@ -16,6 +16,12 @@ enum Role {
   ADMIN
 }
 
+enum RestaurantStatus {
+  PENDING_APPROVAL
+  ACTIVE
+  SUSPENDED
+}
+
 enum OrderStatus {
   PENDING // Khách vừa đặt, chờ quán xác nhận
   CONFIRMED // Quán đã nhận đơn
@@ -23,7 +29,35 @@ enum OrderStatus {
   READY_FOR_PICKUP // Món đã sẵn sàng, chờ tài xế lấy
   PICKED_UP // Tài xế đã lấy món, đang giao
   DELIVERED // Giao thành công
+  DELIVERY_FAILED // Giao thất bại
   CANCELLED
+}
+
+enum CancelReason {
+  CUSTOMER_CHANGED_MIND
+  RESTAURANT_TIMEOUT // quán không nhận trong ORDER_PENDING_TIMEOUT_MINUTES
+  RESTAURANT_OUT_OF_STOCK
+  RESTAURANT_CLOSED
+  RESTAURANT_OTHER
+  ADMIN_INTERVENTION
+}
+
+enum FailedDeliveryReason {
+  CUSTOMER_UNREACHABLE
+  CUSTOMER_REFUSED
+  WRONG_ADDRESS
+  UNSAFE_LOCATION
+}
+
+enum DistanceSource {
+  ROAD
+  ESTIMATED
+}
+
+enum LedgerEntryType {
+  COD_COLLECTED
+  SETTLEMENT
+  ADJUSTMENT
 }
 
 enum PaymentMethod {
@@ -72,31 +106,38 @@ enum RoleRequestStatus {
 // ============================ MODELS ============================
 
 model User {
-  id               String   @id @default(uuid()) @db.Uuid
-  email            String   @unique
+  id                  String   @id @default(uuid()) @db.Uuid
+  email               String   @unique
   /// Tên đăng nhập (chữ thường), mặc định lấy phần trước @ của email
-  username         String?  @unique
-  phone            String?  @unique
-  passwordHash     String
-  fullName         String
-  role             Role     @default(CUSTOMER)
-  avatarUrl        String?
+  username            String?  @unique
+  phone               String?  @unique
+  passwordHash        String
+  fullName            String
+  role                Role     @default(CUSTOMER)
+  avatarUrl           String?
   /// Argon2 hash của refresh token hiện hành (rotation + revoke khi logout)
-  refreshTokenHash String?
-  expoPushToken    String?
-  isActive         Boolean  @default(true)
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  refreshTokenHash    String?
+  expoPushToken       String?
+  isActive            Boolean  @default(true)
+  failedDeliveryCount Int      @default(0)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
 
   addresses            Address[]
-  restaurants          Restaurant[]         @relation("RestaurantOwner")
-  orders               Order[]              @relation("CustomerOrders")
-  deliveries           Order[]              @relation("DriverOrders")
-  reviews              Review[]
+  restaurants          Restaurant[]             @relation("RestaurantOwner")
+  approvedRestaurants  Restaurant[]             @relation("RestaurantApprover")
+  orders               Order[]                  @relation("CustomerOrders")
+  deliveries           Order[]                  @relation("DriverOrders")
+  cancelledOrders      Order[]                  @relation("OrderCanceller")
+  reviews              Review[]                 @relation("CustomerReviews")
+  driverReviews        Review[]                 @relation("DriverReviews")
   driverProfile        DriverProfile?
-  roleRequests         RoleUpgradeRequest[] @relation("RoleRequestUser")
-  reviewedRoleRequests RoleUpgradeRequest[] @relation("RoleRequestReviewer")
-  auditLogs            AuditLog[]           @relation("AuditActor")
+  driverLedgers        DriverLedger[]           @relation("DriverLedgerUser")
+  createdLedgers       DriverLedger[]           @relation("DriverLedgerActor")
+  contactAttempts      DeliveryContactAttempt[]
+  roleRequests         RoleUpgradeRequest[]     @relation("RoleRequestUser")
+  reviewedRoleRequests RoleUpgradeRequest[]     @relation("RoleRequestReviewer")
+  auditLogs            AuditLog[]               @relation("AuditActor")
   favorites            Favorite[]
 
   @@map("users")
@@ -123,27 +164,34 @@ model Address {
 }
 
 model Restaurant {
-  id               String   @id @default(uuid()) @db.Uuid
-  ownerId          String   @db.Uuid
+  id               String           @id @default(uuid()) @db.Uuid
+  ownerId          String           @db.Uuid
   name             String
   description      String?
   imageUrl         String?
+  phone            String?
   address          String
   latitude         Float
   longitude        Float
   /// Bán kính giao hàng tối đa của quán (km)
-  deliveryRadiusKm Float    @default(5)
-  isOpen           Boolean  @default(true)
-  rating           Float    @default(0)
-  openTime         String   @default("07:00")
-  closeTime        String   @default("22:00")
-  priceRange       String   @default("25.000đ - 85.000đ")
+  deliveryRadiusKm Float            @default(5)
+  status           RestaurantStatus @default(PENDING_APPROVAL)
+  approvedAt       DateTime?
+  approvedById     String?          @db.Uuid
+  suspendReason    String?
+  isOpen           Boolean          @default(true)
+  rating           Float            @default(0)
+  ratingCount      Int              @default(0)
+  openTime         String           @default("07:00")
+  closeTime        String           @default("22:00")
+  priceRange       String           @default("25.000đ - 85.000đ")
   /// Cờ đánh dấu nhà hàng thuộc bộ dữ liệu mẫu (không hiển thị thô trong tên quán)
-  isSample         Boolean  @default(false)
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  isSample         Boolean          @default(false)
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
 
   owner       User       @relation("RestaurantOwner", fields: [ownerId], references: [id])
+  approvedBy  User?      @relation("RestaurantApprover", fields: [approvedById], references: [id], onDelete: SetNull)
   categories  Category[]
   menuItems   MenuItem[]
   orders      Order[]
@@ -152,6 +200,7 @@ model Restaurant {
 
   @@index([latitude, longitude])
   @@index([ownerId])
+  @@index([status])
   @@map("restaurants")
 }
 
@@ -194,37 +243,55 @@ model MenuItem {
 }
 
 model Order {
-  id              String        @id @default(uuid()) @db.Uuid
-  customerId      String        @db.Uuid
-  restaurantId    String        @db.Uuid
-  driverId        String?       @db.Uuid
-  status          OrderStatus   @default(PENDING)
-  paymentMethod   PaymentMethod @default(COD)
-  paymentStatus   PaymentStatus @default(UNPAID)
-  subtotal        Int
-  deliveryFee     Int
-  discountAmount  Int           @default(0)
-  total           Int
-  voucherId       String?       @db.Uuid
-  distanceKm      Float
-  deliveryAddress String
-  deliveryLat     Float
-  deliveryLng     Float
-  note            String?
-  createdAt       DateTime      @default(now())
-  updatedAt       DateTime      @updatedAt
+  id                  String                @id @default(uuid()) @db.Uuid
+  customerId          String                @db.Uuid
+  restaurantId        String                @db.Uuid
+  driverId            String?               @db.Uuid
+  status              OrderStatus           @default(PENDING)
+  paymentMethod       PaymentMethod         @default(COD)
+  paymentStatus       PaymentStatus         @default(UNPAID)
+  subtotal            Int
+  deliveryFee         Int
+  peakSurcharge       Int                   @default(0)
+  platformCommission  Int                   @default(0)
+  driverEarning       Int                   @default(0)
+  discountAmount      Int                   @default(0)
+  total               Int
+  voucherId           String?               @db.Uuid
+  distanceKm          Float
+  distanceSource      DistanceSource        @default(ESTIMATED)
+  deliveryAddress     String
+  deliveryLat         Float
+  deliveryLng         Float
+  note                String?
+  cancelReason        CancelReason?
+  cancelNote          String?
+  cancelledById       String?               @db.Uuid
+  failedReason        FailedDeliveryReason?
+  arrivedAt           DateTime?
+  stalledAt           DateTime?
+  estimatedDeliveryAt DateTime?
+  idempotencyKey      String?
+  createdAt           DateTime              @default(now())
+  updatedAt           DateTime              @updatedAt
 
-  customer      User                 @relation("CustomerOrders", fields: [customerId], references: [id])
-  driver        User?                @relation("DriverOrders", fields: [driverId], references: [id])
-  restaurant    Restaurant           @relation(fields: [restaurantId], references: [id])
-  voucher       Voucher?             @relation(fields: [voucherId], references: [id])
-  items         OrderItem[]
-  statusHistory OrderStatusHistory[]
-  transactions  PaymentTransaction[]
+  customer        User                     @relation("CustomerOrders", fields: [customerId], references: [id])
+  driver          User?                    @relation("DriverOrders", fields: [driverId], references: [id])
+  cancelledBy     User?                    @relation("OrderCanceller", fields: [cancelledById], references: [id], onDelete: SetNull)
+  restaurant      Restaurant               @relation(fields: [restaurantId], references: [id])
+  voucher         Voucher?                 @relation(fields: [voucherId], references: [id])
+  items           OrderItem[]
+  statusHistory   OrderStatusHistory[]
+  transactions    PaymentTransaction[]
+  review          Review?
+  contactAttempts DeliveryContactAttempt[]
+  ledgerEntry     DriverLedger?
 
+  @@unique([customerId, idempotencyKey])
   @@index([customerId, createdAt])
   @@index([restaurantId, status])
   @@index([driverId, status])
+  @@index([status, createdAt])
   @@map("orders")
 }
 
@@ -283,17 +350,27 @@ model Banner {
 }
 
 model Review {
-  id           String   @id @default(uuid()) @db.Uuid
-  restaurantId String   @db.Uuid
-  customerId   String   @db.Uuid
-  rating       Int      @default(5)
-  comment      String?
-  createdAt    DateTime @default(now())
+  id             String    @id @default(uuid()) @db.Uuid
+  restaurantId   String    @db.Uuid
+  customerId     String?   @db.Uuid
+  orderId        String?   @unique @db.Uuid
+  driverId       String?   @db.Uuid
+  rating         Int       @default(5)
+  comment        String?
+  driverRating   Int?
+  driverComment  String?
+  ownerReply     String?
+  ownerRepliedAt DateTime?
+  isHidden       Boolean   @default(false)
+  createdAt      DateTime  @default(now())
 
   restaurant Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
-  customer   User       @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  customer   User?      @relation("CustomerReviews", fields: [customerId], references: [id], onDelete: SetNull)
+  order      Order?     @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  driver     User?      @relation("DriverReviews", fields: [driverId], references: [id], onDelete: SetNull)
 
   @@index([restaurantId])
+  @@index([driverId])
   @@map("reviews")
 }
 
@@ -350,6 +427,7 @@ model DriverProfile {
   lastLatitude          Float?
   lastLongitude         Float?
   lastLocationAt        DateTime?
+  codBalance            Int                      @default(0)
   emergencyContactName  String?
   emergencyContactPhone String?
   bankName              String?
@@ -359,6 +437,39 @@ model DriverProfile {
   updatedAt             DateTime                 @updatedAt
 
   @@map("driver_profiles")
+}
+
+model DeliveryContactAttempt {
+  id        String   @id @default(uuid()) @db.Uuid
+  orderId   String   @db.Uuid
+  driverId  String   @db.Uuid
+  createdAt DateTime @default(now())
+
+  order  Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  driver User  @relation(fields: [driverId], references: [id], onDelete: Cascade)
+
+  @@index([orderId, createdAt])
+  @@map("delivery_contact_attempts")
+}
+
+model DriverLedger {
+  id           String          @id @default(uuid()) @db.Uuid
+  driverId     String          @db.Uuid
+  orderId      String?         @unique @db.Uuid
+  type         LedgerEntryType
+  /// Dương = tài xế nợ thêm, âm = đã nộp/giảm nợ
+  amount       Int
+  balanceAfter Int
+  note         String?
+  createdById  String?         @db.Uuid
+  createdAt    DateTime        @default(now())
+
+  driver    User   @relation("DriverLedgerUser", fields: [driverId], references: [id], onDelete: Cascade)
+  order     Order? @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  createdBy User?  @relation("DriverLedgerActor", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([driverId, createdAt])
+  @@map("driver_ledgers")
 }
 
 /// Yêu cầu nâng cấp vai trò: khách hàng xin mở quán hoặc làm tài xế, admin duyệt.
@@ -392,7 +503,7 @@ model AuditLog {
   /// VD: RESTAURANT_ASSIGN_OWNER, USER_LOCK, USER_UNLOCK, USER_CHANGE_ROLE, ROLE_REQUEST_APPROVED
   action     String
   targetType String
-  targetId   String   @db.Uuid
+  targetId   String
   metadata   Json?
   createdAt  DateTime @default(now())
 

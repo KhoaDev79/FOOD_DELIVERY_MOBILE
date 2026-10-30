@@ -58,18 +58,25 @@ export interface Address {
   createdAt: string;
 }
 
+export type RestaurantStatus = 'PENDING_APPROVAL' | 'ACTIVE' | 'SUSPENDED';
+
 export interface Restaurant {
   id: string;
   name: string;
   description?: string | null;
   imageUrl?: string | null;
   address: string;
+  phone?: string | null;
   latitude: number;
   longitude: number;
   deliveryRadiusKm: number;
+  status?: RestaurantStatus;
+  suspendReason?: string | null;
   isOpen: boolean;
   rating: number;
+  ratingCount?: number;
   distanceKm?: number;
+  estimatedDeliveryFee?: number;
   /** Giờ mở/đóng cửa "HH:mm" (trả về từ /restaurants/nearby). */
   openTime?: string;
   closeTime?: string;

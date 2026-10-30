@@ -1,5 +1,5 @@
 import { apiClient } from './client';
-import { OrderStatus, PaginatedResult, Role, RoleUpgradeRequest, User } from '../types/api';
+import { OrderStatus, PaginatedResult, RestaurantStatus, Role, RoleUpgradeRequest, User } from '../types/api';
 
 export interface AdminStats {
   users: {
@@ -17,6 +17,7 @@ export interface AdminStats {
     open: number;
     closed: number;
     unassigned: number;
+    pending: number;
   };
   orders: {
     total: number;
@@ -41,8 +42,12 @@ export interface AdminRestaurantItem {
   description?: string | null;
   imageUrl?: string | null;
   address: string;
+  phone?: string | null;
+  status: RestaurantStatus;
+  suspendReason?: string | null;
   isOpen: boolean;
   rating: number;
+  ratingCount?: number;
   openTime: string;
   closeTime: string;
   createdAt: string;
@@ -60,6 +65,7 @@ export interface AuditLogEntry {
   action: string;
   targetType: string;
   targetId: string;
+  reason?: string | null;
   metadata?: Record<string, any> | null;
   createdAt: string;
   actor?: { id: string; fullName: string } | null;
@@ -95,7 +101,7 @@ export interface AdminUserActivity {
   roleRequests: RoleUpgradeRequest[];
 }
 
-export type RestaurantFilter = 'all' | 'open' | 'closed' | 'unassigned';
+export type RestaurantFilter = 'all' | 'open' | 'closed' | 'unassigned' | 'pending';
 
 export interface AdminRoleRequest extends RoleUpgradeRequest {
   user: Pick<User, 'id' | 'fullName' | 'email' | 'phone' | 'role' | 'avatarUrl' | 'isActive'>;
@@ -143,6 +149,30 @@ export const adminApi = {
     ),
 
   toggleRestaurantOpen: (id: string) => apiClient.patch<any, AdminRestaurantItem>(`/admin/restaurants/${id}/toggle-open`),
+
+  approveRestaurant: (id: string) =>
+    apiClient.patch<any, AdminRestaurantItem>(`/admin/restaurants/${id}/approve`),
+
+  rejectRestaurant: (id: string, reason: string) =>
+    apiClient.patch<any, AdminRestaurantItem>(`/admin/restaurants/${id}/reject`, { reason }),
+
+  updateRestaurantStatus: (id: string, status: RestaurantStatus, reason?: string) =>
+    apiClient.patch<any, AdminRestaurantItem>(`/admin/restaurants/${id}/status`, {
+      status,
+      ...(reason ? { reason } : {}),
+    }),
+
+  unassignDriver: (orderId: string, reason?: string) =>
+    apiClient.post<any, { id: string; status: OrderStatus }>(
+      `/admin/orders/${orderId}/unassign-driver`,
+      reason ? { reason } : {},
+    ),
+
+  updateReviewVisibility: (reviewId: string, isVisible: boolean, reason?: string) =>
+    apiClient.patch<any, { id: string; isVisible: boolean }>(`/admin/reviews/${reviewId}/visibility`, {
+      isVisible,
+      ...(reason ? { reason } : {}),
+    }),
 
   /* ----------------------- Yêu cầu nâng cấp vai trò ----------------------- */
   listRoleRequests: (status?: RoleUpgradeRequest['status']) =>

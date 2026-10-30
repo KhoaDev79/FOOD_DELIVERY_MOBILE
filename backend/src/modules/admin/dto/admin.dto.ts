@@ -1,6 +1,19 @@
-import { Type } from 'class-transformer';
-import { IsEnum, IsIn, IsInt, IsOptional, IsString, IsUUID, Max, MaxLength, Min } from 'class-validator';
-import { Role, RoleRequestStatus } from '@prisma/client';
+import { RestaurantStatus, Role, RoleRequestStatus } from '@prisma/client';
+import { Transform, Type } from 'class-transformer';
+import {
+  IsBoolean,
+  IsEnum,
+  IsIn,
+  IsInt,
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  IsUUID,
+  Max,
+  MaxLength,
+  Min,
+  MinLength,
+} from 'class-validator';
 
 export class ListUsersQueryDto {
   @IsOptional()
@@ -31,6 +44,16 @@ export class ListAdminOrdersQueryDto {
   status?: string;
 
   @IsOptional()
+  @Transform(({ value }) => value === true || value === 'true')
+  @IsBoolean()
+  stalled?: boolean;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  q?: string;
+
+  @IsOptional()
   @Type(() => Number)
   @IsInt()
   @Min(1)
@@ -51,8 +74,9 @@ export class AdminCreateRestaurantDto {
   @IsString()
   address: string;
 
+  @IsOptional()
   @IsString()
-  phone: string;
+  phone?: string;
 
   @Type(() => Number)
   latitude: number;
@@ -103,11 +127,31 @@ export class AdminUpdateRestaurantDto {
   isOpen?: boolean;
 }
 
+export class RejectRestaurantDto {
+  @IsString()
+  @IsNotEmpty({ message: 'Vui lòng nhập lý do từ chối' })
+  @MinLength(2, { message: 'Vui lòng nhập lý do từ chối' })
+  @MaxLength(500)
+  reason: string;
+}
+
+export class UpdateRestaurantStatusDto {
+  @IsIn([RestaurantStatus.ACTIVE, RestaurantStatus.SUSPENDED])
+  status: 'ACTIVE' | 'SUSPENDED';
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  reason?: string;
+}
+
 export enum RestaurantFilter {
   ALL = 'all',
   OPEN = 'open',
   CLOSED = 'closed',
   UNASSIGNED = 'unassigned',
+  PENDING = 'pending',
+  SUSPENDED = 'suspended',
 }
 
 export class ListAdminRestaurantsQueryDto {
@@ -118,6 +162,10 @@ export class ListAdminRestaurantsQueryDto {
   @IsOptional()
   @IsEnum(RestaurantFilter)
   filter?: RestaurantFilter;
+
+  @IsOptional()
+  @IsEnum(RestaurantStatus)
+  status?: RestaurantStatus;
 
   @IsOptional()
   @Type(() => Number)
@@ -164,4 +212,21 @@ export class ReviewRoleRequestDto {
   @IsString()
   @MaxLength(300)
   reviewNote?: string;
+}
+
+export class UpdateReviewVisibilityDto {
+  @IsBoolean()
+  isHidden: boolean;
+
+  @IsString()
+  @IsNotEmpty({ message: 'Vui lòng nhập lý do ẩn/hiện đánh giá' })
+  @MaxLength(500)
+  reason: string;
+}
+
+export class UnassignDriverDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(300)
+  reason?: string;
 }

@@ -22,8 +22,12 @@ import {
   ListAdminRestaurantsQueryDto,
   ListRoleRequestsQueryDto,
   ListUsersQueryDto,
+  RejectRestaurantDto,
   ReviewRoleRequestDto,
   ToggleUserActiveDto,
+  UnassignDriverDto,
+  UpdateRestaurantStatusDto,
+  UpdateReviewVisibilityDto,
 } from './dto/admin.dto';
 
 @Roles(Role.ADMIN)
@@ -79,13 +83,17 @@ export class AdminController {
   }
 
   @Post('restaurants')
-  createRestaurant(@Body() dto: AdminCreateRestaurantDto) {
-    return this.adminService.createRestaurant(dto);
+  createRestaurant(@Body() dto: AdminCreateRestaurantDto, @CurrentUser('id') adminId: string) {
+    return this.adminService.createRestaurant(dto, adminId);
   }
 
   @Patch('restaurants/:id')
-  updateRestaurant(@Param('id', ParseUUIDPipe) id: string, @Body() dto: AdminUpdateRestaurantDto) {
-    return this.adminService.updateRestaurant(id, dto);
+  updateRestaurant(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: AdminUpdateRestaurantDto,
+    @CurrentUser('id') adminId: string,
+  ) {
+    return this.adminService.updateRestaurant(id, dto, adminId);
   }
 
   @Patch('restaurants/:id/assign-owner')
@@ -97,19 +105,43 @@ export class AdminController {
     return this.adminService.assignRestaurantOwner(id, dto.ownerId, adminId);
   }
 
+  @Patch('restaurants/:id/approve')
+  approveRestaurant(@Param('id', ParseUUIDPipe) id: string, @CurrentUser('id') adminId: string) {
+    return this.adminService.approveRestaurant(id, adminId);
+  }
+
+  @Patch('restaurants/:id/reject')
+  rejectRestaurant(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser('id') adminId: string,
+    @Body() dto: RejectRestaurantDto,
+  ) {
+    return this.adminService.rejectRestaurant(id, adminId, dto);
+  }
+
+  @Patch('restaurants/:id/status')
+  updateRestaurantStatus(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser('id') adminId: string,
+    @Body() dto: UpdateRestaurantStatusDto,
+  ) {
+    return this.adminService.updateRestaurantStatus(id, adminId, dto);
+  }
+
+  /** @deprecated Dùng PATCH /admin/restaurants/:id/status thay thế */
   @Patch('restaurants/:id/toggle-open')
   toggleRestaurantOpen(@Param('id', ParseUUIDPipe) id: string, @CurrentUser('id') adminId: string) {
     return this.adminService.toggleRestaurantOpen(id, adminId);
   }
 
   @Delete('restaurants/:id')
-  deleteRestaurant(@Param('id', ParseUUIDPipe) id: string) {
-    return this.adminService.deleteRestaurant(id);
+  deleteRestaurant(@Param('id', ParseUUIDPipe) id: string, @CurrentUser('id') adminId: string) {
+    return this.adminService.deleteRestaurant(id, adminId);
   }
 
   @Delete('menu-items/:id')
-  deleteMenuItem(@Param('id', ParseUUIDPipe) id: string) {
-    return this.adminService.deleteMenuItem(id);
+  deleteMenuItem(@Param('id', ParseUUIDPipe) id: string, @CurrentUser('id') adminId: string) {
+    return this.adminService.deleteMenuItem(id, adminId);
   }
 
   /* ----------------------- Yêu cầu nâng cấp vai trò ----------------------- */
@@ -133,5 +165,30 @@ export class AdminController {
   @Get('orders')
   listOrders(@Query() q: ListAdminOrdersQueryDto) {
     return this.adminService.listOrders(q);
+  }
+
+  @Get('orders/:id')
+  getOrderDetail(@Param('id', ParseUUIDPipe) id: string) {
+    return this.adminService.getOrderDetail(id);
+  }
+
+  @Post('orders/:id/unassign-driver')
+  unassignDriver(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser('id') adminId: string,
+    @Body() dto: UnassignDriverDto,
+  ) {
+    return this.adminService.unassignDriver(id, adminId, dto?.reason);
+  }
+
+  /* -------------------------------- Đánh giá -------------------------------- */
+
+  @Patch('reviews/:id/visibility')
+  updateReviewVisibility(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser('id') adminId: string,
+    @Body() dto: UpdateReviewVisibilityDto,
+  ) {
+    return this.adminService.updateReviewVisibility(id, adminId, dto);
   }
 }

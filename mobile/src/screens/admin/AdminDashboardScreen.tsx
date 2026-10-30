@@ -159,6 +159,30 @@ export const AdminDashboardScreen: React.FC = () => {
               </Pressable>
             )}
 
+            {/* Quán chờ duyệt */}
+            {!!stats?.restaurants.pending && (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={`${stats.restaurants.pending} quán đang chờ duyệt`}
+                onPress={() => navigation.navigate('AdminRestaurantsTab', { filter: 'pending' })}
+                className="flex-row items-center gap-3 rounded-2xl border border-warning/40 bg-warning-soft p-4 active:opacity-85"
+              >
+                <View className="h-10 w-10 items-center justify-center rounded-full bg-surface">
+                  <Icon name="storefront-outline" size="md" tone="accent" />
+                </View>
+                <View className="flex-1">
+                  <Text variant="body" weight="semibold">
+                    Quán ăn chờ duyệt
+                  </Text>
+                  <Text variant="caption" tone="secondary">
+                    Có {stats.restaurants.pending} quán đang chờ phê duyệt hồ sơ
+                  </Text>
+                </View>
+                <CountBadge count={stats.restaurants.pending} />
+                <Icon name="chevron-forward" size="md" tone="muted" />
+              </Pressable>
+            )}
+
             {/* Lưới chỉ số */}
             <View className="flex-row flex-wrap gap-3">
               <MetricCard

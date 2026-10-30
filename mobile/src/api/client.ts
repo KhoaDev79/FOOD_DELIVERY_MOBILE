@@ -59,6 +59,19 @@ apiClient.interceptors.response.use(
   async (error: AxiosError) => {
     const originalRequest = error.config as InternalAxiosRequestConfig & { _retry?: boolean };
 
+    if (error.response?.status === 401) {
+      const rawMsg = (error.response?.data as any)?.message;
+      const msgStr = Array.isArray(rawMsg) ? rawMsg.join(' ') : typeof rawMsg === 'string' ? rawMsg : '';
+      if (
+        msgStr.includes('khoá') ||
+        msgStr.includes('khóa') ||
+        msgStr.includes('Vai trò đã thay đổi')
+      ) {
+        useAuthStore.getState().logout();
+        return Promise.reject(error);
+      }
+    }
+
     if (
       error.response?.status === 401 &&
       !originalRequest._retry &&

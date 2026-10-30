@@ -11,17 +11,13 @@ describe('RBAC & Resource Ownership (Supertest E2E)', () => {
   let customer1Token: string;
   let customer1Id: string;
   let customer2Token: string;
-  let customer2Id: string;
 
   let owner1Token: string;
   let owner1Id: string;
   let owner2Token: string;
-  let owner2Id: string;
 
   let driver1Token: string;
-  let driver1Id: string;
   let driver2Token: string;
-  let driver2Id: string;
 
   let restaurant1Id: string;
   let menuItem1Id: string;
@@ -54,7 +50,6 @@ describe('RBAC & Resource Ownership (Supertest E2E)', () => {
     // Driver 1
     const d1 = await login('driver@fooddelivery.com');
     driver1Token = d1.token;
-    driver1Id = d1.id;
 
     // Customer 1
     const c1 = await login('customer@fooddelivery.com');
@@ -67,7 +62,14 @@ describe('RBAC & Resource Ownership (Supertest E2E)', () => {
       if (!existing) {
         const res = await request(app.getHttpServer())
           .post('/api/v1/auth/register')
-          .send({ email, fullName, password: 'Password123!', role, phone });
+          .send({ email, fullName, password: 'Password123!', phone });
+        if (role !== 'CUSTOMER') {
+          await prisma.user.update({
+            where: { id: res.body.data.user.id },
+            data: { role: role as any },
+          });
+          return login(email);
+        }
         return { token: res.body.data.accessToken, id: res.body.data.user.id };
       }
       return login(email);
@@ -80,7 +82,6 @@ describe('RBAC & Resource Ownership (Supertest E2E)', () => {
       '0988000002',
     );
     owner2Token = o2.token;
-    owner2Id = o2.id;
 
     const c2 = await registerOrLogin(
       'customer2@fooddelivery.com',
@@ -89,7 +90,6 @@ describe('RBAC & Resource Ownership (Supertest E2E)', () => {
       '0988000004',
     );
     customer2Token = c2.token;
-    customer2Id = c2.id;
 
     const d2 = await registerOrLogin(
       'driver2@fooddelivery.com',
@@ -98,7 +98,6 @@ describe('RBAC & Resource Ownership (Supertest E2E)', () => {
       '0988000003',
     );
     driver2Token = d2.token;
-    driver2Id = d2.id;
 
     // Lấy một nhà hàng của Owner 1
     const r1 = await prisma.restaurant.findFirst({

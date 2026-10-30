@@ -1,9 +1,16 @@
+import { parsePeakWindows, PeakWindow } from '../../config/configuration';
+
 const EARTH_RADIUS_KM = 6371;
 const toRad = (deg: number) => (deg * Math.PI) / 180;
 
 export interface LatLng {
   lat: number;
   lng: number;
+}
+
+export function ceil1000(amount: number): number {
+  if (amount <= 0) return 0;
+  return Math.ceil(amount / 1000) * 1000;
 }
 
 /** Khoảng cách đường chim bay giữa 2 tọa độ (km) theo công thức Haversine. */
@@ -41,47 +48,80 @@ export function boundingBox(center: LatLng, radiusKm: number): BoundingBox {
 }
 
 /**
- * Kiểm tra xem thời điểm hiện tại có thuộc khung giờ cao điểm hay không.
- * Khung giờ cao điểm tại Việt Nam (UTC+7):
- * - Buổi trưa: 11:00 đến 13:00
- * - Buổi chiều tối: 17:30 đến 19:30
+ * Kiểm tra xem thời điểm hiện tại có thuộc khung giờ cao điểm hay không (theo cấu hình DELIVERY_PEAK_WINDOWS, giờ VN UTC+7).
  */
-export function isPeakHour(date = new Date()): boolean {
-  // Chuyển sang múi giờ Việt Nam (UTC+7)
+export function isPeakHour(date = new Date(), windows?: PeakWindow[]): boolean {
   const utc = date.getTime() + date.getTimezoneOffset() * 60000;
   const vnDate = new Date(utc + 3600000 * 7);
   const minutesOfDay = vnDate.getHours() * 60 + vnDate.getMinutes();
 
-  const isLunchPeak = minutesOfDay >= 11 * 60 && minutesOfDay <= 13 * 60;
-  const isDinnerPeak = minutesOfDay >= 17 * 60 + 30 && minutesOfDay <= 19 * 60 + 30;
+  const resolvedWindows =
+    windows ?? parsePeakWindows(process.env.DELIVERY_PEAK_WINDOWS ?? '11:00-13:00,17:30-19:30');
 
-  return isLunchPeak || isDinnerPeak;
+  return resolvedWindows.some((w) =>
+    w.startMinutes <= w.endMinutes
+      ? minutesOfDay >= w.startMinutes && minutesOfDay <= w.endMinutes
+      : minutesOfDay >= w.startMinutes || minutesOfDay <= w.endMinutes,
+  );
+}
+
+export interface DeliveryFeeOptions {
+  baseFee?: number;
+  feePerKm?: number;
+  freeKm?: number;
+  peakMultiplier?: number;
+  peakWindows?: PeakWindow[];
+}
+
+export interface DeliveryFeeBreakdown {
+  baseDeliveryFee: number;
+  peakSurcharge: number;
+  deliveryFee: number;
+  isPeak: boolean;
 }
 
 /**
- * Tính phí giao hàng theo khoảng cách và khung giờ:
- * - phí = (phí cơ bản + max(0, km − km miễn phí) × phí/km) × 1,2 nếu giờ cao điểm
- * - Mặc định: 15.000đ cơ bản, 2 km đầu miễn phí, 5.000đ/km (cấu hình qua DELIVERY_* trong .env)
- * - Làm tròn lên tới 1.000 VNĐ
- * App mobile hiển thị theo cùng công thức (mobile/src/utils/fee.ts) – đổi ở đây thì đổi cả ở đó.
+ * Tính chi tiết phí giao hàng theo khoảng cách và khung giờ:
+ * - baseDeliveryFee = ceil1000(base + max(0, km − freeKm) × perKm)
+ * - peakSurcharge = ceil1000((multiplier − 1) × baseDeliveryFee) nếu giờ cao điểm, ngược lại 0
+ * - deliveryFee = baseDeliveryFee + peakSurcharge
  */
-export function calcDeliveryFee(
+export function calcDeliveryFeeBreakdown(
   distanceKm: number,
-  opts?: { baseFee?: number; feePerKm?: number; freeKm?: number },
+  opts?: DeliveryFeeOptions,
   date = new Date(),
-): number {
-  const baseFee = opts?.baseFee ?? 15000;
-  const feePerKm = opts?.feePerKm ?? 5000;
-  const freeKm = opts?.freeKm ?? 2;
+): DeliveryFeeBreakdown {
+  const baseFee = opts?.baseFee ?? parseInt(process.env.DELIVERY_BASE_FEE ?? '15000', 10);
+  const feePerKm = opts?.feePerKm ?? parseInt(process.env.DELIVERY_FEE_PER_KM ?? '5000', 10);
+  const freeKm = opts?.freeKm ?? parseFloat(process.env.DELIVERY_FREE_KM ?? '2');
+  const peakMultiplier = opts?.peakMultiplier ?? parseFloat(process.env.DELIVERY_PEAK_MULTIPLIER ?? '1.2');
 
   const billableKm = Math.max(0, distanceKm - freeKm);
-  const peakMultiplier = isPeakHour(date) ? 1.2 : 1.0;
-  const fee = (baseFee + billableKm * feePerKm) * peakMultiplier;
-  return Math.ceil(fee / 1000) * 1000;
+  const baseDeliveryFee = ceil1000(baseFee + billableKm * feePerKm);
+  const isPeak = isPeakHour(date, opts?.peakWindows);
+  const peakSurcharge = isPeak && peakMultiplier > 1 ? ceil1000((peakMultiplier - 1) * baseDeliveryFee) : 0;
+  const deliveryFee = baseDeliveryFee + peakSurcharge;
+
+  return {
+    baseDeliveryFee,
+    peakSurcharge,
+    deliveryFee,
+    isPeak,
+  };
+}
+
+export function calcDeliveryFee(
+  distanceKm: number,
+  opts?: DeliveryFeeOptions,
+  date = new Date(),
+): number {
+  return calcDeliveryFeeBreakdown(distanceKm, opts, date).deliveryFee;
 }
 
 export interface DeliveryEstimation {
   distanceKm: number;
+  baseDeliveryFee: number;
+  peakSurcharge: number;
   deliveryFee: number;
   estimatedMinutesMin: number;
   estimatedMinutesMax: number;
@@ -91,30 +131,38 @@ export interface DeliveryEstimation {
 }
 
 /**
- * Hàm duy nhất tính phí giao và thời gian dự kiến trên server, dùng chung cho
- * Trang chủ (Nearby), Chi tiết quán (Detail), và Thanh toán (Checkout).
+ * Hàm tính phí giao và thời gian dự kiến trên server, dùng chung cho
+ * Trang chủ (Nearby), Chi tiết quán (Detail), và Báo giá (Quote).
  */
-export function estimateDelivery(distanceKm: number, date = new Date()): DeliveryEstimation {
-  const peak = isPeakHour(date);
-  const fee = calcDeliveryFee(distanceKm, undefined, date);
+export function estimateDelivery(
+  distanceKm: number,
+  date = new Date(),
+  opts?: DeliveryFeeOptions,
+  roadDurationMinutes?: number,
+): DeliveryEstimation {
+  const breakdown = calcDeliveryFeeBreakdown(distanceKm, opts, date);
 
-  // Thời gian = Thời gian quán chuẩn bị món (~12 phút) + Thời gian di chuyển xe máy (~2.5 phút/km)
-  const transitTime = Math.max(4, Math.round(distanceKm * 2.5));
+  // Thời gian = Thời gian quán chuẩn bị món (~12 phút) + Thời gian di chuyển xe máy
+  const transitTime =
+    roadDurationMinutes && roadDurationMinutes > 0
+      ? Math.max(4, Math.round(roadDurationMinutes))
+      : Math.max(4, Math.round(distanceKm * 2.5));
   const prepTime = 12;
   const baseMinutes = prepTime + transitTime;
-  const buffer = peak ? 10 : 5;
+  const buffer = breakdown.isPeak ? 10 : 5;
 
   const minMinutes = Math.max(15, baseMinutes);
   const maxMinutes = minMinutes + buffer;
 
   return {
-    distanceKm: Math.round(distanceKm * 10) / 10,
-    deliveryFee: fee,
+    distanceKm: Math.round(distanceKm * 100) / 100,
+    baseDeliveryFee: breakdown.baseDeliveryFee,
+    peakSurcharge: breakdown.peakSurcharge,
+    deliveryFee: breakdown.deliveryFee,
     estimatedMinutesMin: minMinutes,
     estimatedMinutesMax: maxMinutes,
     estimatedDurationText: `${minMinutes}-${maxMinutes} phút`,
-    isPeakHour: peak,
+    isPeakHour: breakdown.isPeak,
     disclaimer: 'Ước lượng dự kiến dựa trên khoảng cách và tình trạng giao thông.',
   };
 }
-

@@ -36,7 +36,7 @@ export class AuthService {
         username: await generateUniqueUsername(this.prisma, dto.email),
         phone: dto.phone,
         fullName: dto.fullName,
-        role: dto.role ?? 'CUSTOMER',
+        role: 'CUSTOMER',
         passwordHash: await hashSecret(dto.password),
       },
     });

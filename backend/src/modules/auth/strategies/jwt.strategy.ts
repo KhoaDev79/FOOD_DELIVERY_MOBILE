@@ -1,9 +1,10 @@
 import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PassportStrategy } from '@nestjs/passport';
-import { ExtractJwt, Strategy } from 'passport-jwt';
 import { Role } from '@prisma/client';
+import { ExtractJwt, Strategy } from 'passport-jwt';
 import { AuthUser } from '../../../common/decorators/current-user.decorator';
+import { AuthStateService } from '../auth-state.service';
 
 export interface JwtPayload {
   sub: string;
@@ -12,12 +13,14 @@ export interface JwtPayload {
 }
 
 /**
- * Xác thực Access Token (stateless): không truy vấn DB mỗi request.
- * Thu hồi quyền tức thời dựa vào thời hạn ngắn của access token + revoke refresh token.
+ * Xác thực Access Token kết hợp kiểm tra trạng thái hoạt động & vai trò qua AuthStateService (có cache ngắn).
  */
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
-  constructor(config: ConfigService) {
+  constructor(
+    config: ConfigService,
+    private readonly authState: AuthStateService,
+  ) {
     super({
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
       ignoreExpiration: false,
@@ -25,8 +28,15 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
     });
   }
 
-  validate(payload: JwtPayload): AuthUser {
+  async validate(payload: JwtPayload): Promise<AuthUser> {
     if (!payload?.sub) throw new UnauthorizedException();
-    return { id: payload.sub, email: payload.email, role: payload.role };
+    const state = await this.authState.getUserState(payload.sub);
+    if (!state || !state.isActive) {
+      throw new UnauthorizedException('Tài khoản đã bị khoá');
+    }
+    if (state.role !== payload.role) {
+      throw new UnauthorizedException('Vai trò đã thay đổi, vui lòng đăng nhập lại');
+    }
+    return { id: payload.sub, email: payload.email, role: state.role };
   }
 }

@@ -9,6 +9,7 @@ import { restaurantsApi } from '../../api/restaurants';
 import {
   AppImage,
   Avatar,
+  Badge,
   BottomSheet,
   Button,
   ConfirmDialog,
@@ -51,6 +52,7 @@ export const OwnerRestaurantScreen: React.FC = () => {
   const [editVisible, setEditVisible] = useState(false);
   const [restName, setRestName] = useState('');
   const [restAddress, setRestAddress] = useState('');
+  const [restPhone, setRestPhone] = useState('');
   const [restDescription, setRestDescription] = useState('');
   const [restImageUrl, setRestImageUrl] = useState('');
   const [restCoords, setRestCoords] = useState<{ latitude: number; longitude: number } | null>(null);
@@ -115,6 +117,7 @@ export const OwnerRestaurantScreen: React.FC = () => {
     if (!restaurant) return;
     setRestName(restaurant.name);
     setRestAddress(restaurant.address);
+    setRestPhone(restaurant.phone || '');
     setRestDescription(restaurant.description || '');
     setRestImageUrl(restaurant.imageUrl || '');
     setRestCoords({ latitude: restaurant.latitude, longitude: restaurant.longitude });
@@ -186,6 +189,7 @@ export const OwnerRestaurantScreen: React.FC = () => {
     updateRestaurantMutation.mutate({
       name: restName.trim(),
       address: restAddress.trim(),
+      ...(restPhone.trim() ? { phone: restPhone.trim() } : {}),
       // Chuỗi rỗng để xoá được mô tả (undefined = giữ nguyên ở backend)
       description: restDescription.trim(),
       openTime,
@@ -250,13 +254,62 @@ export const OwnerRestaurantScreen: React.FC = () => {
         <View className="gap-5 px-4 pt-5">
           {restaurant ? (
             <>
+              {/* Cảnh báo trạng thái duyệt quán */}
+              {restaurant.status === 'PENDING_APPROVAL' && (
+                <View className="flex-row items-start gap-3 rounded-xl border border-warning/40 bg-warning-soft p-4">
+                  <Icon name="time-outline" size="md" tone="accent" />
+                  <View className="flex-1 gap-0.5">
+                    <Text variant="body" weight="bold">
+                      Quán chưa hiển thị với khách
+                    </Text>
+                    <Text variant="caption" tone="secondary">
+                      Hồ sơ quán ăn hoặc thay đổi tên/địa chỉ/toạ độ của bạn đang chờ Quản trị viên phê duyệt.
+                    </Text>
+                  </View>
+                </View>
+              )}
+
+              {restaurant.status === 'SUSPENDED' && (
+                <View className="flex-row items-start gap-3 rounded-xl border border-danger/40 bg-danger-soft p-4">
+                  <Icon name="alert-circle-outline" size="md" tone="danger" />
+                  <View className="flex-1 gap-0.5">
+                    <Text variant="body" weight="bold" tone="danger">
+                      Quán đang bị tạm khoá / từ chối duyệt
+                    </Text>
+                    <Text variant="caption" tone="secondary">
+                      {restaurant.suspendReason
+                        ? `Lý do: ${restaurant.suspendReason}`
+                        : 'Vui lòng kiểm tra lại thông tin quán hoặc liên hệ Quản trị viên.'}
+                    </Text>
+                  </View>
+                </View>
+              )}
+
               {/* Thẻ quán */}
               <View className="overflow-hidden rounded-xl bg-surface shadow-card">
                 <AppImage uri={restaurant.imageUrl} className="h-40 w-full" fallbackIcon="storefront-outline" />
                 <View className="gap-2 p-4">
-                  <Text variant="title" weight="bold" numberOfLines={2}>
-                    {restaurant.name}
-                  </Text>
+                  <View className="flex-row items-start justify-between gap-2">
+                    <Text variant="title" weight="bold" numberOfLines={2} className="flex-1">
+                      {restaurant.name}
+                    </Text>
+                    <Badge
+                      label={
+                        restaurant.status === 'PENDING_APPROVAL'
+                          ? 'Chờ duyệt'
+                          : restaurant.status === 'SUSPENDED'
+                            ? 'Tạm khoá'
+                            : 'Đã duyệt'
+                      }
+                      tone={
+                        restaurant.status === 'PENDING_APPROVAL'
+                          ? 'warning'
+                          : restaurant.status === 'SUSPENDED'
+                            ? 'danger'
+                            : 'success'
+                      }
+                    />
+                  </View>
                   <View className="flex-row flex-wrap items-center gap-x-3 gap-y-1">
                     <View className="flex-row items-center gap-1">
                       <Icon name="star" size="sm" tone="rating" />
@@ -310,7 +363,7 @@ export const OwnerRestaurantScreen: React.FC = () => {
                 <Switch
                   accessibilityLabel={restaurant.isOpen ? 'Đóng cửa quán' : 'Mở cửa quán'}
                   value={restaurant.isOpen}
-                  disabled={toggleOpenMutation.isPending}
+                  disabled={toggleOpenMutation.isPending || restaurant.status !== 'ACTIVE'}
                   onValueChange={(val) => toggleOpenMutation.mutate(val)}
                   trackColor={{ false: palette.line.DEFAULT, true: palette.success.DEFAULT }}
                   thumbColor={palette.surface}
@@ -496,6 +549,13 @@ export const OwnerRestaurantScreen: React.FC = () => {
               <Icon name="chevron-forward" size="sm" tone="brand" />
             </Pressable>
           </View>
+          <Input
+            label="Số điện thoại quán"
+            value={restPhone}
+            onChangeText={setRestPhone}
+            placeholder="VD: 0901234567"
+            keyboardType="phone-pad"
+          />
           <Input
             label="Mô tả"
             value={restDescription}

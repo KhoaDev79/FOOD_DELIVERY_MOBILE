@@ -1,3 +1,5 @@
+import { RestaurantStatus } from '@prisma/client';
+
 /** Giờ Việt Nam (UTC+7). Giờ mở cửa của quán luôn hiểu theo giờ địa phương. */
 const VN_OFFSET_MINUTES = 7 * 60;
 
@@ -27,12 +29,14 @@ export function isWithinOpeningHours(
 }
 
 /**
- * Quán có đang nhận đơn không: chủ quán bật "mở cửa" VÀ đang trong giờ mở cửa.
+ * Quán có đang nhận đơn không: đã được duyệt (status === ACTIVE),
+ * chủ quán bật "mở cửa" VÀ đang trong giờ mở cửa.
  * Dùng cho mọi chỗ khách hàng nhìn thấy và khi đặt đơn.
  */
 export function isAcceptingOrders(
-  r: { isOpen: boolean; openTime: string; closeTime: string },
+  r: { status?: RestaurantStatus | string; isOpen: boolean; openTime: string; closeTime: string },
   now: Date = new Date(),
 ): boolean {
-  return r.isOpen && isWithinOpeningHours(r.openTime, r.closeTime, now);
+  const status = r.status ?? 'ACTIVE';
+  return status === 'ACTIVE' && r.isOpen && isWithinOpeningHours(r.openTime, r.closeTime, now);
 }

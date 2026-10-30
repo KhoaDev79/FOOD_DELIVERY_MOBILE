@@ -73,6 +73,11 @@ export class CreateRestaurantDto {
   @IsString()
   imageUrl?: string;
 
+  @IsOptional()
+  @IsString()
+  @MaxLength(20)
+  phone?: string;
+
   @IsString()
   @MaxLength(255)
   address: string;
@@ -114,6 +119,11 @@ export class UpdateRestaurantDto {
   @IsOptional()
   @IsString()
   imageUrl?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(20)
+  phone?: string;
 
   @IsOptional()
   @IsString()

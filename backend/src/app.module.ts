@@ -7,6 +7,7 @@ import { RolesGuard } from './common/guards/roles.guard';
 import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
 import { TransformResponseInterceptor } from './common/interceptors/transform-response.interceptor';
 import configuration, { validateEnv } from './config/configuration';
+import { PublicConfigController } from './config/public-config.controller';
 import { HealthController } from './health.controller';
 import { AdminModule } from './modules/admin/admin.module';
 import { AuthModule } from './modules/auth/auth.module';
@@ -39,7 +40,7 @@ import { UsersModule } from './modules/users/users.module';
     NotificationsModule,
     PaymentsModule,
   ],
-  controllers: [HealthController],
+  controllers: [HealthController, PublicConfigController],
   providers: [
     // Thứ tự quan trọng: xác thực (JWT) trước, phân quyền (Roles) sau
     { provide: APP_GUARD, useClass: JwtAuthGuard },

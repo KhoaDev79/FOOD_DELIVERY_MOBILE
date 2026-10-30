@@ -11,6 +11,7 @@ import {
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
+import { AuthStateService } from '../auth/auth-state.service';
 import { JwtPayload } from '../auth/strategies/jwt.strategy';
 import { canViewOrder, OrderParticipants } from '../orders/order-access';
 import { PrismaService } from '../prisma/prisma.service';
@@ -19,6 +20,7 @@ export const rooms = {
   user: (id: string) => `user_${id}`,
   order: (id: string) => `order_${id}`,
   drivers: 'drivers',
+  admins: 'admins',
 };
 
 type Ack = { ok: true } | { ok: false; error: string };
@@ -31,13 +33,16 @@ export interface OrderEventPayload {
   updatedAt: Date;
 }
 
+const rawCorsOrigins = process.env.CORS_ORIGINS ?? '*';
+const gatewayCorsOrigin = rawCorsOrigins === '*' ? '*' : rawCorsOrigins.split(',').map((o) => o.trim());
+
 /**
  * Socket.IO gateway.
  * Client kết nối kèm access token: io(URL, { auth: { token } }).
- * - Tự động join `user_<id>` (và `drivers` nếu là tài xế).
+ * - Tự động join `user_<id>` (và `drivers` nếu là tài xế, `admins` nếu là admin).
  * - Emit `order:join` { orderId } để theo dõi 1 đơn -> join `order_<id>` sau khi kiểm tra quyền.
  */
-@WebSocketGateway({ cors: { origin: '*' } })
+@WebSocketGateway({ cors: { origin: gatewayCorsOrigin } })
 export class OrdersGateway implements OnGatewayConnection {
   @WebSocketServer() server: Server;
   private readonly logger = new Logger(OrdersGateway.name);
@@ -46,6 +51,7 @@ export class OrdersGateway implements OnGatewayConnection {
     private readonly jwt: JwtService,
     private readonly config: ConfigService,
     private readonly prisma: PrismaService,
+    private readonly authState: AuthStateService,
   ) {}
 
   async handleConnection(client: Socket) {
@@ -58,15 +64,32 @@ export class OrdersGateway implements OnGatewayConnection {
       const payload = await this.jwt.verifyAsync<JwtPayload>(raw, {
         secret: this.config.getOrThrow<string>('jwt.accessSecret'),
       });
-      const user: AuthUser = { id: payload.sub, email: payload.email, role: payload.role };
+      const state = await this.authState.getUserState(payload.sub);
+      if (!state || !state.isActive) {
+        client.emit('error', { message: 'Tài khoản đã bị khoá' });
+        client.disconnect(true);
+        return;
+      }
+      if (state.role !== payload.role) {
+        client.emit('error', { message: 'Vai trò đã thay đổi, vui lòng đăng nhập lại' });
+        client.disconnect(true);
+        return;
+      }
+
+      const user: AuthUser = { id: payload.sub, email: payload.email, role: state.role };
       client.data.user = user;
 
       await client.join(rooms.user(user.id));
       if (user.role === 'DRIVER') await client.join(rooms.drivers);
+      if (user.role === 'ADMIN') await client.join(rooms.admins);
     } catch {
       client.emit('error', { message: 'Unauthorized' });
       client.disconnect(true);
     }
+  }
+
+  disconnectUser(userId: string) {
+    this.server?.in(rooms.user(userId)).disconnectSockets(true);
   }
 
   @SubscribeMessage('order:join')

@@ -2,7 +2,13 @@ import React from 'react';
 import { View } from 'react-native';
 import { AuditLogEntry } from '../../../api/admin';
 import { Badge, BadgeTone, cn, Icon, IconName, IconTone, Text } from '../../ui';
-import { Role, RoleRequestStatus } from '../../../types/api';
+import { RestaurantStatus, Role, RoleRequestStatus } from '../../../types/api';
+
+export const RESTAURANT_STATUS_META: Record<RestaurantStatus, { label: string; tone: BadgeTone }> = {
+  PENDING_APPROVAL: { label: 'Chờ duyệt', tone: 'warning' },
+  ACTIVE: { label: 'Đã duyệt', tone: 'success' },
+  SUSPENDED: { label: 'Tạm khoá', tone: 'danger' },
+};
 
 export const ROLE_META: Record<Role, { label: string; tone: BadgeTone; icon: IconName }> = {
   CUSTOMER: { label: 'Khách hàng', tone: 'neutral', icon: 'person-outline' },
@@ -59,10 +65,24 @@ export function describeAudit(log: AuditLogEntry): { icon: IconName; tone: IconT
         tone: 'brand',
         text: `Bàn giao "${m.restaurantName ?? 'quán'}": ${m.fromOwnerName ?? '?'} → ${m.toOwnerName ?? '?'}`,
       };
+    case 'RESTAURANT_APPROVE':
+      return { icon: 'checkmark-circle', tone: 'success', text: `Duyệt quán ${m.restaurantName ?? ''}` };
+    case 'RESTAURANT_REJECT':
+      return {
+        icon: 'close-circle',
+        tone: 'danger',
+        text: `Từ chối quán ${m.restaurantName ?? ''}${log.reason || m.reason ? ` – ${log.reason || m.reason}` : ''}`,
+      };
     case 'RESTAURANT_SUSPEND':
-      return { icon: 'pause-circle', tone: 'accent', text: `Tạm ngưng quán ${m.restaurantName ?? ''}` };
+      return {
+        icon: 'pause-circle',
+        tone: 'accent',
+        text: `Tạm khoá quán ${m.restaurantName ?? ''}${log.reason || m.reason ? ` – ${log.reason || m.reason}` : ''}`,
+      };
     case 'RESTAURANT_RESUME':
       return { icon: 'play-circle', tone: 'success', text: `Mở lại quán ${m.restaurantName ?? ''}` };
+    case 'RESTAURANT_CRITICAL_EDIT_REAPPROVAL':
+      return { icon: 'create-outline', tone: 'accent', text: 'Chủ quán sửa tên/địa chỉ/toạ độ → chờ duyệt lại' };
     default:
       return { icon: 'ellipse-outline', tone: 'muted', text: log.action };
   }

@@ -10,6 +10,9 @@ async function main() {
   await prisma.auditLog.deleteMany();
   await prisma.favorite.deleteMany();
   await prisma.roleUpgradeRequest.deleteMany();
+  await prisma.deliveryContactAttempt.deleteMany();
+  await prisma.driverLedger.deleteMany();
+  await prisma.driverProfile.deleteMany();
   await prisma.review.deleteMany();
   await prisma.banner.deleteMany();
   await prisma.orderStatusHistory.deleteMany();
@@ -254,7 +257,7 @@ async function main() {
   const nextMonth = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
   const pastDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
 
-  const voucherFreeship = await prisma.voucher.create({
+  await prisma.voucher.create({
     data: {
       code: 'FREESHIP',
       title: 'Miễn Phí Vận Chuyển',
@@ -286,7 +289,7 @@ async function main() {
     },
   });
 
-  const voucherGiam30k = await prisma.voucher.create({
+  await prisma.voucher.create({
     data: {
       code: 'GIAM30K',
       title: 'Giảm Lớn 30.000đ',
@@ -302,7 +305,7 @@ async function main() {
     },
   });
 
-  const voucherPercent = await prisma.voucher.create({
+  await prisma.voucher.create({
     data: {
       code: 'GIAM20PHANTRAM',
       title: 'Giảm 20% Tối Đa 40K',
@@ -857,10 +860,14 @@ async function main() {
         name: rData.name,
         description: rData.description,
         imageUrl: rData.imageUrl,
+        phone: idx % 2 === 0 ? '02838221111' : '02838222222',
         address: rData.address,
         latitude: rData.latitude,
         longitude: rData.longitude,
         deliveryRadiusKm: rData.deliveryRadiusKm,
+        status: 'ACTIVE',
+        approvedAt: new Date(),
+        approvedById: admin.id,
         isOpen: rData.isOpen,
         rating: rData.rating,
         openTime: rData.openTime,
@@ -951,13 +958,19 @@ async function main() {
         paymentStatus: st === OrderStatus.DELIVERED ? PaymentStatus.PAID : (i % 3 === 0 ? PaymentStatus.PAID : PaymentStatus.UNPAID),
         subtotal,
         deliveryFee,
+        platformCommission: Math.round(deliveryFee * 0.2),
+        driverEarning: deliveryFee - Math.round(deliveryFee * 0.2),
         discountAmount: discount,
         voucherId: discount > 0 ? voucherGiam20k.id : null,
         total,
         distanceKm: 2.5,
+        distanceSource: 'ESTIMATED',
         deliveryAddress: '123 Đường Nguyễn Huệ, Phường Bến Nghé, TP. Hồ Chí Minh',
         deliveryLat: 10.7745,
         deliveryLng: 106.7025,
+        ...(st === OrderStatus.CANCELLED
+          ? { cancelReason: 'CUSTOMER_CHANGED_MIND' as const, cancelledById: customer.id }
+          : {}),
         items: {
           create: [
             {
@@ -1005,6 +1018,14 @@ async function main() {
         rating: 4 + (i % 2), // 4 hoặc 5 sao
         comment: sampleComments[i % sampleComments.length],
       },
+    });
+  }
+
+  for (const rest of createdRestaurants) {
+    const count = await prisma.review.count({ where: { restaurantId: rest.id } });
+    await prisma.restaurant.update({
+      where: { id: rest.id },
+      data: { ratingCount: count },
     });
   }
 

@@ -66,15 +66,21 @@ export class RestaurantsController {
 
   @Public()
   @Get(':id')
-  findOne(@Param('id', ParseUUIDPipe) id: string) {
-    return this.restaurants.findOneWithMenu(id);
+  findOne(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user?: AuthUser,
+    @Query('lat') latRaw?: string,
+    @Query('lng') lngRaw?: string,
+  ) {
+    const lat = latRaw !== undefined ? Number(latRaw) : undefined;
+    const lng = lngRaw !== undefined ? Number(lngRaw) : undefined;
+    return this.restaurants.findOneWithMenu(id, user, lat, lng);
   }
 
   @Roles(Role.RESTAURANT_OWNER, Role.ADMIN)
   @Post()
   create(@CurrentUser() user: AuthUser, @Body() dto: CreateRestaurantDto) {
-    const ownerId = user.role === Role.ADMIN && dto.ownerId ? dto.ownerId : user.id;
-    return this.restaurants.create(ownerId, dto);
+    return this.restaurants.create(user, dto);
   }
 
   @Roles(Role.RESTAURANT_OWNER, Role.ADMIN)

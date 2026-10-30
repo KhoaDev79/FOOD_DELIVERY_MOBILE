@@ -6,7 +6,7 @@ import { Badge, BottomSheet, Button, Icon, OrderStatusBadge, Text } from '../../
 import { palette } from '../../../theme';
 import { OrderStatus } from '../../../types/api';
 import { formatDate, formatDateTime, formatVND } from '../../../utils/format';
-import { describeAudit, InfoRow, RoleBadge } from './adminShared';
+import { describeAudit, InfoRow, RESTAURANT_STATUS_META, RoleBadge } from './adminShared';
 
 /** Xem thông tin quán: địa chỉ, giờ mở cửa, chủ quán, doanh thu, đơn hàng, lịch sử quản trị. */
 export const RestaurantDetailSheet: React.FC<{
@@ -38,10 +38,23 @@ export const RestaurantDetailSheet: React.FC<{
       ) : (
         <ScrollView showsVerticalScrollIndicator={false} contentContainerClassName="gap-4 pb-6">
           <View className="flex-row flex-wrap gap-2">
-            <Badge label={data.isOpen ? 'Đang hoạt động' : 'Tạm ngưng'} tone={data.isOpen ? 'success' : 'danger'} />
+            {data.status && (
+              <Badge
+                label={RESTAURANT_STATUS_META[data.status]?.label ?? data.status}
+                tone={RESTAURANT_STATUS_META[data.status]?.tone ?? 'neutral'}
+              />
+            )}
+            <Badge label={data.isOpen ? 'Đang mở cửa' : 'Tạm ngưng'} tone={data.isOpen ? 'success' : 'danger'} />
             {data.needsOwner && <Badge label="Chưa có chủ quán" tone="warning" icon="alert-circle" />}
             <Badge label={`★ ${data.rating.toFixed(1)}`} tone="neutral" />
           </View>
+          {!!data.suspendReason && data.status === 'SUSPENDED' && (
+            <View className="rounded-xl bg-danger-soft p-3">
+              <Text variant="caption" tone="danger">
+                Lý do tạm khoá / từ chối: {data.suspendReason}
+              </Text>
+            </View>
+          )}
 
           {/* Doanh thu */}
           <View className="flex-row gap-3">
