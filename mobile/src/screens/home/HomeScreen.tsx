@@ -16,6 +16,7 @@ import Animated, { FadeIn, FadeOut, ReduceMotion } from 'react-native-reanimated
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { BannerCarousel, BannerSkeleton } from '../../components/modules/home/BannerCarousel';
 import { DishCard, DishTile } from '../../components/modules/home/DishCard';
+import { FeaturedCarousel } from '../../components/modules/home/FeaturedCarousel';
 import { RestaurantRow } from '../../components/modules/restaurant/RestaurantCards';
 import {
   AppImage,
@@ -43,7 +44,7 @@ import { palette } from '../../theme';
 import { useCartStore } from '../../store/useCartStore';
 import { Banner, MenuItem, NearbyDish, Restaurant } from '../../types/api';
 import { RootStackParamList } from '../../types/navigation';
-import { filterRestaurants, sortByDistance } from '../../utils/homeSections';
+import { filterRestaurants, pickFeatured, sortByDistance } from '../../utils/homeSections';
 
 const COORD_LIKE = /^(t[oọ][aạ]\s*đ[oộ]|[-+]?\d+\.\d+)/i;
 /** Cuộn quá mức này thì hiện thanh tìm kiếm gọn dính trên cùng (ảnh mẫu 3–6). */
@@ -182,7 +183,11 @@ export const HomeScreen: React.FC = () => {
     () => filterRestaurants(allRestaurants, searchFilter, category?.keywords ?? []),
     [allRestaurants, searchFilter, category],
   );
-  const nearbyList = useMemo(() => sortByDistance(allRestaurants), [allRestaurants]);
+  // Quán điểm cao lên khối "Quán được yêu thích"; danh sách bên dưới không lặp lại các quán đó.
+  const { featured, rest: nearbyList } = useMemo(
+    () => pickFeatured(sortByDistance(allRestaurants), 5),
+    [allRestaurants],
+  );
   const listData = isFiltering ? filtered : nearbyList;
 
   const banners = bannersQuery.data ?? [];
@@ -357,6 +362,12 @@ export const HomeScreen: React.FC = () => {
                       </View>
                     ))}
                   </ScrollView>
+                </View>
+              )}
+              {/* Khối nổi bật kiểu "Giật Deal Sốc" (ảnh mẫu), dữ liệu: quán điểm cao nhất */}
+              {featured.length > 0 && (
+                <View className="pb-6">
+                  <FeaturedCarousel title="Quán được yêu thích" restaurants={featured} onPress={openRestaurant} />
                 </View>
               )}
               {dishesMore.length > 0 && (

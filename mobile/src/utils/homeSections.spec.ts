@@ -1,5 +1,5 @@
 import { Restaurant } from '../types/api';
-import { filterRestaurants, sortByDistance } from './homeSections';
+import { filterRestaurants, pickFeatured, sortByDistance } from './homeSections';
 
 const make = (id: string, rating: number, distanceKm?: number, name = `Quán ${id}`): Restaurant => ({
   id,
@@ -34,5 +34,17 @@ describe('filterRestaurants', () => {
   });
   it('không lọc khi trống', () => {
     expect(filterRestaurants(list, '  ')).toHaveLength(3);
+  });
+});
+
+describe('pickFeatured', () => {
+  const list = [make('a', 4.2, 1), make('b', 4.9, 3), make('c', 0, 0.5), make('d', 4.9, 2), make('e', 4.5, 4)];
+  it('lấy quán điểm cao nhất, hoà điểm thì quán gần hơn trước, bỏ quán chưa có điểm', () => {
+    expect(pickFeatured(list, 3).featured.map((r) => r.id)).toEqual(['d', 'b', 'e']);
+  });
+  it('phần còn lại không chứa quán đã chọn và giữ thứ tự ban đầu', () => {
+    const { featured, rest } = pickFeatured(list, 3);
+    expect(rest.map((r) => r.id)).toEqual(['a', 'c']);
+    expect(rest.some((r) => featured.includes(r))).toBe(false);
   });
 });

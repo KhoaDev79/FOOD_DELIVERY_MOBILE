@@ -10,6 +10,8 @@ const PRESETS = {
   sectionBrand: `linear-gradient(180deg, ${palette.brand['50']} 0%, ${palette.canvas.DEFAULT} 70%)`,
   /** Dải tiêu đề khối gợi ý: xanh ngọc đậm nhạt dần sang trắng (ảnh mẫu "Gợi ý dành cho …"). */
   sectionHeaderBand: `linear-gradient(180deg, ${palette.brand['400']} 0%, ${palette.brand['100']} 60%, ${palette.canvas.DEFAULT} 100%)`,
+  /** Khung khối nổi bật nền kem/hồng nhạt (ảnh mẫu "Giật Deal Sốc"). */
+  dealFrame: `linear-gradient(160deg, ${palette.accent['50']} 0%, ${palette.canvas.DEFAULT} 55%, ${palette.accent['100']} 100%)`,
   /** Nền khối chủ đề màu cam nhạt (ảnh mẫu 4, 5). */
   sectionAccent: `linear-gradient(180deg, ${palette.accent['50']} 0%, ${palette.canvas.DEFAULT} 70%)`,
   /** Thẻ minh hoạ trạng thái rỗng (ảnh mẫu 8). */

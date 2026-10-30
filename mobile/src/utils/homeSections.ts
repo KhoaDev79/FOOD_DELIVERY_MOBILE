@@ -17,3 +17,16 @@ export function filterRestaurants(restaurants: Restaurant[], query: string, keyw
     return query.trim() ? hay.includes(norm(query)) : terms.some((t) => hay.includes(t));
   });
 }
+
+/**
+ * Tách các quán điểm cao nhất (rating > 0) cho khối "Quán được yêu thích";
+ * phần còn lại giữ thứ tự ban đầu để quán không xuất hiện hai lần trong cùng một cuộn.
+ */
+export function pickFeatured(restaurants: Restaurant[], count = 5): { featured: Restaurant[]; rest: Restaurant[] } {
+  const featured = [...restaurants]
+    .filter((r) => r.rating > 0)
+    .sort((a, b) => b.rating - a.rating || (a.distanceKm ?? Infinity) - (b.distanceKm ?? Infinity))
+    .slice(0, count);
+  const ids = new Set(featured.map((r) => r.id));
+  return { featured, rest: restaurants.filter((r) => !ids.has(r.id)) };
+}
