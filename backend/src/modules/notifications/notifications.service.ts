@@ -132,6 +132,55 @@ export class NotificationsService {
     });
   }
 
+  notifyDriversOrderAvailable(
+    driverIds: string[],
+    order: { id: string; deliveryFee: number; driverEarning?: number; restaurant: { name: string } },
+  ) {
+    if (!driverIds.length) return Promise.resolve();
+    const earning = order.driverEarning ?? order.deliveryFee;
+    return this.sendToUsers(driverIds, {
+      title: 'Chuyến giao mới gần bạn',
+      body: `Đơn từ ${order.restaurant.name} - Thu nhập ${earning.toLocaleString('vi-VN')}đ`,
+      data: { type: 'order_available', orderId: order.id },
+    });
+  }
+
+  notifyDriverAutoOffline(driverIds: string[]) {
+    if (!driverIds.length) return Promise.resolve();
+    return this.sendToUsers(driverIds, {
+      title: 'Chuyển sang ngoại tuyến',
+      body: 'Bạn đã được chuyển ngoại tuyến do mất tín hiệu định vị',
+      data: { type: 'driver_offline' },
+    });
+  }
+
+  notifyOrderTimeoutCancelled(order: {
+    id: string;
+    customerId: string;
+    restaurant: { ownerId: string; name: string };
+  }) {
+    return Promise.all([
+      this.sendToUsers([order.customerId], {
+        title: order.restaurant.name,
+        body: 'Quán chưa xác nhận kịp, đơn đã được huỷ',
+        data: { type: 'order', orderId: order.id, status: 'CANCELLED' },
+      }),
+      this.sendToUsers([order.restaurant.ownerId], {
+        title: 'Đơn hàng quá hạn xác nhận',
+        body: `Đơn #${order.id.slice(0, 8).toUpperCase()} đã tự động bị huỷ do quá thời gian xác nhận`,
+        data: { type: 'order', orderId: order.id, status: 'CANCELLED' },
+      }),
+    ]).then(() => undefined);
+  }
+
+  notifyReviewReplied(review: { id: string; orderId: string; customerId: string; restaurantName: string }) {
+    return this.sendToUsers([review.customerId], {
+      title: `${review.restaurantName} đã phản hồi đánh giá`,
+      body: 'Nhà hàng vừa gửi phản hồi cho đánh giá đơn hàng của bạn',
+      data: { type: 'review_reply', reviewId: review.id, orderId: review.orderId },
+    });
+  }
+
   notifyPaymentSucceeded(order: { id: string; customerId: string; total: number; restaurant: { ownerId: string } }) {
     return Promise.all([
       this.sendToUsers([order.customerId], {

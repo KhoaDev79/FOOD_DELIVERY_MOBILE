@@ -13,7 +13,7 @@ import {
   TabHeader,
   Text,
 } from '../../components/ui';
-import { useSocket } from '../../hooks/useSocket';
+import { useSocket, useSocketConnected } from '../../hooks/useSocket';
 import { OrderDetail, OrderStatus } from '../../types/api';
 import { formatDateTime, formatVND } from '../../utils/format';
 
@@ -41,6 +41,7 @@ function getStepIndex(status: OrderStatus): number {
 export const DriverDeliveriesScreen: React.FC = () => {
   const navigation = useNavigation<any>();
   const { socket } = useSocket();
+  const socketConnected = useSocketConnected();
   const [activeTab, setActiveTab] = useState<DeliveryTab>('ACTIVE');
   const [refreshing, setRefreshing] = useState(false);
 
@@ -56,7 +57,7 @@ export const DriverDeliveriesScreen: React.FC = () => {
         status: activeTab === 'COMPLETED' ? 'DELIVERED' : undefined,
         limit: 50,
       }),
-    refetchInterval: 10000,
+    refetchInterval: socketConnected ? false : 10000,
   });
 
   // Socket lắng nghe thay đổi trạng thái

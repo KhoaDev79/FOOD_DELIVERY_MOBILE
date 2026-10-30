@@ -15,12 +15,13 @@ describe('OrdersService (V4 C4 Ledger & C5 Failed Delivery)', () => {
     order: {
       findUnique: jest.Mock;
       findUniqueOrThrow: jest.Mock;
+      findMany: jest.Mock;
       updateMany: jest.Mock;
       update: jest.Mock;
       count: jest.Mock;
     };
     user: { findUnique: jest.Mock; update: jest.Mock };
-    driverProfile: { update: jest.Mock };
+    driverProfile: { update: jest.Mock; findMany: jest.Mock };
     driverLedger: { create: jest.Mock };
     orderStatusHistory: { create: jest.Mock };
     deliveryContactAttempt: { count: jest.Mock; findFirst: jest.Mock; create: jest.Mock };
@@ -29,12 +30,18 @@ describe('OrdersService (V4 C4 Ledger & C5 Failed Delivery)', () => {
     $transaction: jest.Mock;
   };
   let config: { get: jest.Mock };
-  let gateway: { emitOrderUpdated: jest.Mock; emitOrderAvailable: jest.Mock };
+  let gateway: {
+    emitOrderUpdated: jest.Mock;
+    emitOrderAvailable: jest.Mock;
+    emitOrderAvailableToDriver: jest.Mock;
+    emitOrderTaken: jest.Mock;
+  };
   let notifications: {
     notifyStatusChanged: jest.Mock;
     notifyDriverAssigned: jest.Mock;
     notifyDriverArrived: jest.Mock;
     notifyDriverReleased: jest.Mock;
+    notifyDriversOrderAvailable: jest.Mock;
   };
 
   const baseOrder = {
@@ -75,6 +82,7 @@ describe('OrdersService (V4 C4 Ledger & C5 Failed Delivery)', () => {
       order: {
         findUnique: jest.fn().mockResolvedValue(baseOrder),
         findUniqueOrThrow: jest.fn().mockResolvedValue({ ...baseOrder, status: OrderStatus.DELIVERED }),
+        findMany: jest.fn().mockResolvedValue([]),
         updateMany: jest.fn().mockResolvedValue({ count: 1 }),
         update: jest.fn().mockResolvedValue(baseOrder),
         count: jest.fn().mockResolvedValue(0),
@@ -85,6 +93,7 @@ describe('OrdersService (V4 C4 Ledger & C5 Failed Delivery)', () => {
       },
       driverProfile: {
         update: jest.fn().mockResolvedValue({ codBalance: 305000 }),
+        findMany: jest.fn().mockResolvedValue([]),
       },
       driverLedger: {
         create: jest.fn().mockResolvedValue({}),
@@ -121,6 +130,8 @@ describe('OrdersService (V4 C4 Ledger & C5 Failed Delivery)', () => {
     gateway = {
       emitOrderUpdated: jest.fn(),
       emitOrderAvailable: jest.fn(),
+      emitOrderAvailableToDriver: jest.fn(),
+      emitOrderTaken: jest.fn(),
     };
 
     notifications = {
@@ -128,6 +139,7 @@ describe('OrdersService (V4 C4 Ledger & C5 Failed Delivery)', () => {
       notifyDriverAssigned: jest.fn(),
       notifyDriverArrived: jest.fn(),
       notifyDriverReleased: jest.fn(),
+      notifyDriversOrderAvailable: jest.fn().mockResolvedValue(undefined),
     };
 
     service = new OrdersService(
@@ -255,6 +267,102 @@ describe('OrdersService (V4 C4 Ledger & C5 Failed Delivery)', () => {
         where: { id: 'cust-1' },
         data: { failedDeliveryCount: { increment: 1 } },
       });
+    });
+  });
+
+  describe('D3: Lọc đơn khả dụng theo bán kính & vị trí tài xế', () => {
+    it('trả 409 khi vị trí tài xế đã cũ hơn DRIVER_LOCATION_STALE_MINUTES', async () => {
+      prisma.user.findUnique.mockResolvedValue({
+        id: 'driver-1',
+        isActive: true,
+        driverProfile: {
+          userId: 'driver-1',
+          verificationStatus: DriverVerificationStatus.APPROVED,
+          isOnline: true,
+          codBalance: 0,
+          lastLatitude: 10.77,
+          lastLongitude: 106.7,
+          lastLocationAt: new Date(Date.now() - 10 * 60 * 1000), // 10 phút trước (> 5 phút)
+        },
+      });
+
+      await expect(
+        service.findAvailableForDrivers('driver-1', { page: 1, limit: 20 }),
+      ).rejects.toThrow(ConflictException);
+    });
+
+    it('chỉ trả đơn trong bán kính, sắp theo khoảng cách tới quán và đính kèm thông tin thu nhập/công nợ', async () => {
+      prisma.user.findUnique.mockResolvedValue({
+        id: 'driver-1',
+        isActive: true,
+        driverProfile: {
+          userId: 'driver-1',
+          verificationStatus: DriverVerificationStatus.APPROVED,
+          isOnline: true,
+          codBalance: 100000,
+          lastLatitude: 10.77,
+          lastLongitude: 106.7,
+          lastLocationAt: new Date(),
+        },
+      });
+
+      prisma.order.findMany.mockResolvedValue([
+        {
+          ...baseOrder,
+          id: 'ord-far',
+          driverId: null,
+          status: OrderStatus.CONFIRMED,
+          createdAt: new Date(Date.now() - 10 * 60 * 1000),
+          restaurant: {
+            id: 'rest-far',
+            name: 'Quán Xa 3km',
+            latitude: 10.795,
+            longitude: 106.7,
+            address: 'Q3',
+            phone: null,
+            imageUrl: null,
+          },
+        },
+        {
+          ...baseOrder,
+          id: 'ord-near',
+          driverId: null,
+          status: OrderStatus.READY_FOR_PICKUP,
+          createdAt: new Date(Date.now() - 2 * 60 * 1000),
+          restaurant: {
+            id: 'rest-near',
+            name: 'Quán Gần 500m',
+            latitude: 10.774,
+            longitude: 106.7,
+            address: 'Q1',
+            phone: null,
+            imageUrl: null,
+          },
+        },
+        {
+          ...baseOrder,
+          id: 'ord-out',
+          driverId: null,
+          status: OrderStatus.CONFIRMED,
+          createdAt: new Date(Date.now() - 20 * 60 * 1000),
+          restaurant: {
+            id: 'rest-out',
+            name: 'Quán Ngoài Bán Kính 8km',
+            latitude: 10.85,
+            longitude: 106.7,
+            address: 'Thủ Đức',
+            phone: null,
+            imageUrl: null,
+          },
+        },
+      ]);
+
+      const res = await service.findAvailableForDrivers('driver-1', { page: 1, limit: 20 });
+      expect(res.items).toHaveLength(2);
+      expect(res.items[0].id).toBe('ord-near');
+      expect(res.items[1].id).toBe('ord-far');
+      expect(res.items[0].codToCollect).toBe(125000);
+      expect(res.items[0].debtAfterAccept).toBe(205000); // 100k + (100k + 5k)
     });
   });
 });

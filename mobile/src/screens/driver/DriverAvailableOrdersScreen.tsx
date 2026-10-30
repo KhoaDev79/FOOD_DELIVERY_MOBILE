@@ -24,18 +24,18 @@ import {
 } from '../../components/ui';
 import { FilterChip } from '../../components/ui/Chip';
 import { useLocation } from '../../hooks/useLocation';
-import { useSocket } from '../../hooks/useSocket';
+import { useSocket, useSocketConnected } from '../../hooks/useSocket';
 import { useAuthStore } from '../../store/useAuthStore';
 import { OrderDetail } from '../../types/api';
 import { formatDateTime, formatVND } from '../../utils/format';
-import { haversineKm } from '../../utils/geo';
 
 export const DriverAvailableOrdersScreen: React.FC = () => {
   const navigation = useNavigation<any>();
   const queryClient = useQueryClient();
   const { user } = useAuthStore();
   const { socket } = useSocket();
-  const { coords: driverCoords } = useLocation();
+  const socketConnected = useSocketConnected();
+  const { refreshLocation } = useLocation();
   const toast = useToast();
 
   const [isOnline, setIsOnline] = useState(true);
@@ -80,28 +80,32 @@ export const DriverAvailableOrdersScreen: React.FC = () => {
   const { data: todayStats } = useQuery({
     queryKey: ['driver', 'stats', 1],
     queryFn: () => ordersApi.getDriverStats({ days: 1 }),
-    refetchInterval: 30000,
+    refetchInterval: socketConnected ? 60000 : 10000,
   });
 
   // Lấy các chuyến đang giao để kiểm tra giới hạn MAX_ACTIVE_DELIVERIES = 2
   const { data: activeDeliveriesData, refetch: refetchDeliveries } = useQuery({
     queryKey: ['driver', 'deliveries', 'active_count'],
     queryFn: () => ordersApi.getDeliveries({ limit: 10 }),
-    refetchInterval: 10000,
+    refetchInterval: socketConnected ? false : 10000,
   });
 
   const activeDeliveriesCount = useMemo(() => {
     return (
       activeDeliveriesData?.items?.filter(
-        (o) => o.status !== 'DELIVERED' && o.status !== 'CANCELLED',
+        (o) =>
+          o.status !== 'DELIVERED' &&
+          o.status !== 'CANCELLED' &&
+          o.status !== 'DELIVERY_FAILED',
       ).length || 0
     );
   }, [activeDeliveriesData]);
 
-  // Xử lý bật/tắt trực tuyến qua API server
+  // Xử lý bật/tắt trực tuyến qua API server (D1: Bắt buộc vị trí thật khi bật trực tuyến)
   const handleToggleOnline = async (nextValue: boolean) => {
     if (isTogglingStatus) return;
 
+    let liveCoords: { latitude: number; longitude: number } | null = null;
     if (nextValue) {
       // Kiểm tra hồ sơ đã được duyệt chưa
       if (driverProfile?.verificationStatus === 'PENDING') {
@@ -116,6 +120,15 @@ export const DriverAvailableOrdersScreen: React.FC = () => {
         toast(`Tài khoản bị tạm khoá: ${driverProfile.rejectionReason || ''}`, 'error');
         return;
       }
+
+      liveCoords = await refreshLocation();
+      if (!liveCoords) {
+        toast(
+          'Vui lòng cấp quyền truy cập vị trí và bật GPS để nhận đơn hàng trong bán kính gần bạn.',
+          'error',
+        );
+        return;
+      }
     } else {
       if (activeDeliveriesCount > 0) {
         toast(`Lưu ý: Bạn vẫn còn ${activeDeliveriesCount} đơn đang giao.`, 'default');
@@ -126,8 +139,9 @@ export const DriverAvailableOrdersScreen: React.FC = () => {
       setIsTogglingStatus(true);
       await driversApi.updateStatus({
         isOnline: nextValue,
-        latitude: driverCoords?.latitude,
-        longitude: driverCoords?.longitude,
+        ...(liveCoords
+          ? { latitude: liveCoords.latitude, longitude: liveCoords.longitude }
+          : {}),
       });
       setIsOnline(nextValue);
       queryClient.invalidateQueries({ queryKey: ['driver', 'me'] });
@@ -149,7 +163,7 @@ export const DriverAvailableOrdersScreen: React.FC = () => {
     queryKey: ['driver', 'available'],
     queryFn: () => ordersApi.getAvailable({ limit: 50 }),
     enabled: isOnline,
-    refetchInterval: isOnline ? 8000 : false,
+    refetchInterval: isOnline ? (socketConnected ? false : 10000) : false,
   });
 
   // Socket lắng nghe thời gian thực
@@ -162,21 +176,21 @@ export const DriverAvailableOrdersScreen: React.FC = () => {
         if (old.items.some((o: OrderDetail) => o.id === order.id)) return old;
         return { ...old, items: [order, ...old.items] };
       });
+      const earning = order.driverEarning ?? order.deliveryFee;
       toast(
-        `Đơn hàng mới từ ${order.restaurant?.name || 'Nhà hàng'} (Phí ship ${formatVND(
-          order.deliveryFee,
+        `Đơn hàng mới từ ${order.restaurant?.name || 'Nhà hàng'} (Thu nhập ${formatVND(
+          earning,
         )})`,
         'default',
       );
     };
 
-    const handleAssigned = (order: OrderDetail) => {
-      // Nếu tài xế khác nhận đơn, xoá khỏi danh sách chờ
+    const handleRemoveTaken = (payload: { id: string }) => {
       queryClient.setQueryData<any>(['driver', 'available'], (old: any) => {
         if (!old?.items) return old;
         return {
           ...old,
-          items: old.items.filter((o: OrderDetail) => o.id !== order.id),
+          items: old.items.filter((o: OrderDetail) => o.id !== payload.id),
         };
       });
     };
@@ -186,12 +200,14 @@ export const DriverAvailableOrdersScreen: React.FC = () => {
     };
 
     socket?.on('order:available', handleAvailable);
-    socket?.on('order:driver_assigned', handleAssigned);
+    socket?.on('order:driver_assigned', handleRemoveTaken);
+    socket?.on('order:taken', handleRemoveTaken);
     socket?.on('order:status', handleStatus);
 
     return () => {
       socket?.off('order:available', handleAvailable);
-      socket?.off('order:driver_assigned', handleAssigned);
+      socket?.off('order:driver_assigned', handleRemoveTaken);
+      socket?.off('order:taken', handleRemoveTaken);
       socket?.off('order:status', handleStatus);
     };
   }, [socket, isOnline, queryClient, refetch, toast]);
@@ -244,19 +260,10 @@ export const DriverAvailableOrdersScreen: React.FC = () => {
       items = items.filter((o) => o.status === 'READY_FOR_PICKUP');
     }
 
-    // Gắn khoảng cách từ tài xế đến quán
+    // Gắn khoảng cách từ tài xế đến quán (ưu tiên distanceToRestaurantKm từ server D3)
     const withDistance = items.map((order) => {
-      let driverToRestKm: number | null = null;
-      if (
-        driverCoords &&
-        order.restaurant?.latitude &&
-        order.restaurant?.longitude
-      ) {
-        driverToRestKm = haversineKm(driverCoords, {
-          latitude: order.restaurant.latitude,
-          longitude: order.restaurant.longitude,
-        });
-      }
+      const driverToRestKm =
+        typeof order.distanceToRestaurantKm === 'number' ? order.distanceToRestaurantKm : null;
       return { order, driverToRestKm };
     });
 
@@ -269,7 +276,7 @@ export const DriverAvailableOrdersScreen: React.FC = () => {
     });
 
     return withDistance;
-  }, [ordersData, filterReadyOnly, driverCoords]);
+  }, [ordersData, filterReadyOnly]);
 
   const isMaxDeliveries = activeDeliveriesCount >= 2;
 

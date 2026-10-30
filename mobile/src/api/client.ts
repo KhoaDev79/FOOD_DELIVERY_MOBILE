@@ -25,6 +25,41 @@ const processQueue = (error: Error | null) => {
   failedQueue = [];
 };
 
+export async function refreshAuthTokens(): Promise<string | null> {
+  if (isRefreshing) {
+    return new Promise((resolve, reject) => {
+      failedQueue.push({
+        resolve: () => resolve(useAuthStore.getState().accessToken),
+        reject,
+      });
+    });
+  }
+
+  isRefreshing = true;
+  const refreshToken = useAuthStore.getState().refreshToken;
+  if (!refreshToken) {
+    useAuthStore.getState().logout();
+    isRefreshing = false;
+    return null;
+  }
+
+  try {
+    const refreshRes = await axios.post(`${API_BASE_URL}/auth/refresh`, {
+      refreshToken,
+    });
+    const { accessToken: newAccess, refreshToken: newRefresh } = refreshRes.data.data;
+    await useAuthStore.getState().updateTokens(newAccess, newRefresh);
+    processQueue(null);
+    return newAccess;
+  } catch (refreshErr) {
+    processQueue(refreshErr as Error);
+    useAuthStore.getState().logout();
+    return null;
+  } finally {
+    isRefreshing = false;
+  }
+}
+
 // Request Interceptor: Gắn Access Token
 apiClient.interceptors.request.use(
   (config: InternalAxiosRequestConfig) => {

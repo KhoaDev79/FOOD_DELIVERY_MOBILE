@@ -18,7 +18,7 @@ import {
   Text,
   useToast,
 } from '../../components/ui';
-import { useSocket } from '../../hooks/useSocket';
+import { useSocket, useSocketConnected } from '../../hooks/useSocket';
 import { palette } from '../../theme';
 import { CancelReason, OrderDetail, OrderStatus } from '../../types/api';
 import { formatDateTime, formatVND } from '../../utils/format';
@@ -111,6 +111,7 @@ export const OwnerOrdersScreen: React.FC = () => {
   const isFocused = useIsFocused();
   const toast = useToast();
   const { socket } = useSocket();
+  const socketConnected = useSocketConnected();
   const [selectedStatus, setSelectedStatus] = useState<OrderStatus | undefined>(undefined);
   const [refreshing, setRefreshing] = useState(false);
   const [pending, setPending] = useState<{ order: OrderDetail; action: OrderAction } | null>(null);
@@ -129,7 +130,7 @@ export const OwnerOrdersScreen: React.FC = () => {
     queryFn: () =>
       restaurant ? restaurantsApi.getRestaurantOrders(restaurant.id, { limit: 50 }) : Promise.resolve(EMPTY_PAGE),
     enabled: Boolean(restaurant?.id),
-    refetchInterval: 10000,
+    refetchInterval: socketConnected ? false : 10000,
   });
 
   // 3. Đơn theo bộ lọc đang chọn
@@ -140,7 +141,7 @@ export const OwnerOrdersScreen: React.FC = () => {
         ? restaurantsApi.getRestaurantOrders(restaurant.id, { status: selectedStatus, limit: 50 })
         : Promise.resolve(EMPTY_PAGE),
     enabled: Boolean(restaurant?.id),
-    refetchInterval: 10000,
+    refetchInterval: socketConnected ? false : 10000,
   });
 
   // Socket: có đơn mới / đổi trạng thái thì tải lại mọi danh sách đơn của quán

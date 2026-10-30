@@ -287,6 +287,15 @@ export interface OrderDetail {
   updatedAt: string;
   items: OrderItem[];
   contactAttempts?: DeliveryContactAttempt[];
+  distanceToRestaurantKm?: number;
+  deliveryDistanceKm?: number;
+  codToCollect?: number;
+  debtAfterAccept?: number;
+  driverLocation?: {
+    lat: number;
+    lng: number;
+    at: string | null;
+  } | null;
   restaurant: {
     id: string;
     name: string;

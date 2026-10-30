@@ -180,6 +180,11 @@ export class DriversService {
     }
 
     if (dto.isOnline) {
+      if (typeof dto.latitude !== 'number' || typeof dto.longitude !== 'number') {
+        throw new BadRequestException(
+          'Vui lòng bật định vị và gửi toạ độ hiện tại khi chuyển sang trực tuyến.',
+        );
+      }
       if (profile.verificationStatus === DriverVerificationStatus.PENDING) {
         throw new BadRequestException('Hồ sơ phương tiện của bạn đang chờ phê duyệt.');
       }

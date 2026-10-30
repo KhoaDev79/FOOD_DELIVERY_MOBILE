@@ -2,6 +2,7 @@ import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import React from 'react';
 import { FloatingTabBar, TabMeta } from '../components/ui/FloatingTabBar';
+import { useDriverLocationReporter } from '../hooks/useDriverLocationReporter';
 import { ChatScreen } from '../screens/chat/ChatScreen';
 import { DriverAvailableOrdersScreen } from '../screens/driver/DriverAvailableOrdersScreen';
 import { DriverDeliveriesScreen } from '../screens/driver/DriverDeliveriesScreen';
@@ -55,28 +56,32 @@ const DriverTabs: React.FC = () => (
  * - EditProfile: Màn hình cập nhật thông tin cá nhân & mật khẩu
  * - Chat: Màn hình nhắn tin trực tiếp với khách hàng của đơn
  */
-export const DriverTabNavigator: React.FC = () => (
-  <Stack.Navigator screenOptions={{ headerShown: false }}>
-    <Stack.Screen name="DriverTabs" component={DriverTabs} />
-    <Stack.Screen
-      name="DriverDeliveryDetail"
-      component={DriverDeliveryDetailScreen as React.ComponentType<any>}
-    />
-    <Stack.Screen
-      name="EditProfile"
-      component={EditProfileScreen as React.ComponentType<any>}
-    />
-    <Stack.Screen
-      name="Chat"
-      component={ChatScreen as React.ComponentType<any>}
-    />
-    <Stack.Screen
-      name="DriverVehicle"
-      component={DriverVehicleScreen as React.ComponentType<any>}
-    />
-    <Stack.Screen
-      name="DriverWallet"
-      component={DriverWalletScreen as React.ComponentType<any>}
-    />
-  </Stack.Navigator>
-);
+export const DriverTabNavigator: React.FC = () => {
+  useDriverLocationReporter();
+
+  return (
+    <Stack.Navigator screenOptions={{ headerShown: false }}>
+      <Stack.Screen name="DriverTabs" component={DriverTabs} />
+      <Stack.Screen
+        name="DriverDeliveryDetail"
+        component={DriverDeliveryDetailScreen as React.ComponentType<any>}
+      />
+      <Stack.Screen
+        name="EditProfile"
+        component={EditProfileScreen as React.ComponentType<any>}
+      />
+      <Stack.Screen
+        name="Chat"
+        component={ChatScreen as React.ComponentType<any>}
+      />
+      <Stack.Screen
+        name="DriverVehicle"
+        component={DriverVehicleScreen as React.ComponentType<any>}
+      />
+      <Stack.Screen
+        name="DriverWallet"
+        component={DriverWalletScreen as React.ComponentType<any>}
+      />
+    </Stack.Navigator>
+  );
+};

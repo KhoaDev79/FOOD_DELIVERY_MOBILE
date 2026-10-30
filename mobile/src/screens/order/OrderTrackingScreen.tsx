@@ -63,7 +63,7 @@ export const OrderTrackingScreen: React.FC<Props> = ({ route, navigation }) => {
       leaveOrder(orderId);
       socket?.off('driver:location', handleDriverLoc);
     };
-  }, [orderId, socket]);
+  }, [orderId, socket, joinOrder, leaveOrder]);
 
   const handleCancel = () => {
     Alert.alert('Xác nhận hủy đơn', 'Bạn có chắc chắn muốn hủy đơn hàng này không?', [
@@ -119,6 +119,14 @@ export const OrderTrackingScreen: React.FC<Props> = ({ route, navigation }) => {
       })()
     : estimateDeliveryTime(order.distanceKm);
 
+  const effectiveDriverLocation =
+    driverLocation ??
+    (order.driverLocation &&
+    typeof order.driverLocation.lat === 'number' &&
+    typeof order.driverLocation.lng === 'number'
+      ? { lat: order.driverLocation.lat, lng: order.driverLocation.lng }
+      : null);
+
   const markers: MapMarkerItem[] = [
     {
       id: 'restaurant',
@@ -136,13 +144,13 @@ export const OrderTrackingScreen: React.FC<Props> = ({ route, navigation }) => {
       title: 'Điểm giao hàng',
       description: order.deliveryAddress,
     },
-    ...(driverLocation
+    ...(effectiveDriverLocation
       ? [
           {
             id: 'driver',
             type: 'driver' as const,
-            latitude: driverLocation.lat,
-            longitude: driverLocation.lng,
+            latitude: effectiveDriverLocation.lat,
+            longitude: effectiveDriverLocation.lng,
             title: order.driver?.fullName || 'Tài xế',
             description: 'Đang di chuyển',
           },

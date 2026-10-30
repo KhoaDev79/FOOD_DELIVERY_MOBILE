@@ -14,7 +14,7 @@ import {
   Prisma,
 } from '@prisma/client';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
-import { haversineKm } from '../../common/utils/geo.util';
+import { boundingBox, haversineKm } from '../../common/utils/geo.util';
 import { NotificationsService } from '../notifications/notifications.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { OrdersGateway } from '../realtime/orders.gateway';
@@ -369,7 +369,9 @@ export class OrdersService {
     });
 
     this.gateway.emitOrderUpdated('order:status', updated);
-    if (to === 'CONFIRMED' && !updated.driverId) this.gateway.emitOrderAvailable(updated);
+    if (to === 'CONFIRMED' && !updated.driverId) {
+      void this.dispatchOrderAvailable(updated);
+    }
     this.notifications.notifyStatusChanged(updated);
     return updated;
   }
@@ -409,6 +411,7 @@ export class OrdersService {
 
     const order = await this.getOrderOrThrow(orderId);
     this.gateway.emitOrderUpdated('order:driver_assigned', order);
+    this.gateway.emitOrderTaken(order.id);
     this.notifications.notifyDriverAssigned(order);
     return order;
   }
@@ -470,7 +473,7 @@ export class OrdersService {
     });
 
     this.gateway.emitOrderUpdated('order:status', updated);
-    this.gateway.emitOrderAvailable(updated);
+    void this.dispatchOrderAvailable(updated);
     this.notifications.notifyDriverReleased(updated);
     return updated;
   }
@@ -599,11 +602,27 @@ export class OrdersService {
   // =========================================================================
   //  TRUY VẤN
   // =========================================================================
-  async findOne(orderId: string, user: AuthUser): Promise<OrderDetail> {
+  async findOne(orderId: string, user: AuthUser) {
     const order = await this.getOrderOrThrow(orderId);
     // Trả 404 thay vì 403 để không lộ sự tồn tại của đơn
     if (!canViewOrder(order, user)) throw new NotFoundException('Không tìm thấy đơn hàng');
-    return order;
+
+    const driverLocProfile = order.driver?.driverProfile;
+    const driverLocation =
+      driverLocProfile &&
+      typeof driverLocProfile.lastLatitude === 'number' &&
+      typeof driverLocProfile.lastLongitude === 'number'
+        ? {
+            lat: driverLocProfile.lastLatitude,
+            lng: driverLocProfile.lastLongitude,
+            at: driverLocProfile.lastLocationAt ? driverLocProfile.lastLocationAt.toISOString() : null,
+          }
+        : null;
+
+    return {
+      ...order,
+      driverLocation,
+    };
   }
 
   findForCustomer(customerId: string, q: ListOrdersQueryDto) {
@@ -619,9 +638,192 @@ export class OrdersService {
     return this.paginate({ driverId, ...(q.status ? { status: q.status } : {}) }, q);
   }
 
+  /**
+   * D3: Lấy danh sách đơn khả dụng cho tài xế trong bán kính DRIVER_SEARCH_RADIUS_KM.
+   * - Yêu cầu vị trí tài xế còn mới (lastLocationAt trong DRIVER_LOCATION_STALE_MINUTES).
+   * - Lọc theo bounding box + Haversine <= DRIVER_SEARCH_RADIUS_KM.
+   * - Sắp xếp theo khoảng cách tài xế -> quán tăng dần, rồi theo thời gian chờ (createdAt tăng dần).
+   * - Bổ sung distanceToRestaurantKm, deliveryDistanceKm, driverEarning, codToCollect, debtAfterAccept.
+   */
   async findAvailableForDrivers(driverId: string, q: ListOrdersQueryDto) {
-    await this.assertDriverCanAccept(driverId);
-    return this.paginate({ driverId: null, status: { in: DRIVER_ACCEPTABLE_STATUSES } }, q, 'asc');
+    const profile = await this.assertDriverCanAccept(driverId);
+
+    const staleMinutes = Number(
+      this.config.get<number>('business.driverLocationStaleMinutes') ?? 5,
+    );
+    if (
+      profile.lastLatitude === null ||
+      profile.lastLongitude === null ||
+      !profile.lastLocationAt ||
+      Date.now() - profile.lastLocationAt.getTime() > staleMinutes * 60 * 1000
+    ) {
+      throw new ConflictException('Không xác định được vị trí của bạn, hãy bật định vị');
+    }
+
+    const radiusKm = Number(this.config.get<number>('business.driverSearchRadiusKm') ?? 5);
+    const driverPos = { lat: profile.lastLatitude, lng: profile.lastLongitude };
+    const box = boundingBox(driverPos, radiusKm);
+
+    const rows = await this.prisma.order.findMany({
+      where: {
+        driverId: null,
+        status: { in: DRIVER_ACCEPTABLE_STATUSES },
+        restaurant: {
+          latitude: { gte: box.minLat, lte: box.maxLat },
+          longitude: { gte: box.minLng, lte: box.maxLng },
+        },
+      },
+      include: {
+        items: { select: { name: true, quantity: true, unitPrice: true } },
+        restaurant: {
+          select: {
+            id: true,
+            name: true,
+            imageUrl: true,
+            address: true,
+            phone: true,
+            latitude: true,
+            longitude: true,
+          },
+        },
+        customer: { select: { id: true, fullName: true, phone: true } },
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+
+    const matched = rows
+      .map((row) => {
+        const distKm = haversineKm(driverPos, {
+          lat: row.restaurant.latitude,
+          lng: row.restaurant.longitude,
+        });
+        return {
+          ...row,
+          distanceToRestaurantKm: Math.round(distKm * 100) / 100,
+          deliveryDistanceKm: row.distanceKm,
+          driverEarning: row.driverEarning,
+          codToCollect: row.total,
+          debtAfterAccept: profile.codBalance + row.subtotal + row.platformCommission,
+          _rawDistKm: distKm,
+        };
+      })
+      .filter((item) => item._rawDistKm <= radiusKm)
+      .sort((a, b) => {
+        if (a.distanceToRestaurantKm !== b.distanceToRestaurantKm) {
+          return a.distanceToRestaurantKm - b.distanceToRestaurantKm;
+        }
+        return a.createdAt.getTime() - b.createdAt.getTime();
+      })
+      .map(({ _rawDistKm: _unused, ...rest }) => rest);
+
+    const page = Number(q.page) || 1;
+    const limit = Number(q.limit) || 20;
+    const offset = (page - 1) * limit;
+
+    return {
+      items: matched.slice(offset, offset + limit),
+      page,
+      limit,
+      hasMore: matched.length > offset + limit,
+    };
+  }
+
+  /**
+   * D3: Điều phối phát đơn khả dụng cho các tài xế hợp lệ trong bán kính:
+   * - Đang trực tuyến (isOnline = true), hồ sơ APPROVED, tài khoản active
+   * - Vị trí còn mới trong DRIVER_LOCATION_STALE_MINUTES
+   * - Nằm trong bán kính DRIVER_SEARCH_RADIUS_KM * radiusMultiplier
+   * - Công nợ sau khi nhận <= DRIVER_DEBT_LIMIT
+   * - Số đơn đang giao < DRIVER_MAX_ACTIVE_ORDERS
+   */
+  async dispatchOrderAvailable(order: OrderDetail, radiusMultiplier = 1): Promise<string[]> {
+    try {
+      const baseRadiusKm = Number(this.config.get<number>('business.driverSearchRadiusKm') ?? 5);
+      const radiusKm = baseRadiusKm * radiusMultiplier;
+      const staleMinutes = Number(
+        this.config.get<number>('business.driverLocationStaleMinutes') ?? 5,
+      );
+      const debtLimit = Number(this.config.get<number>('business.driverDebtLimit') ?? 2000000);
+      const maxActive = Number(this.config.get<number>('business.driverMaxActiveOrders') ?? 2);
+
+      const staleCutoff = new Date(Date.now() - staleMinutes * 60 * 1000);
+      const orderDebt = order.subtotal + order.platformCommission;
+      const restPos = { lat: order.restaurant.latitude, lng: order.restaurant.longitude };
+      const box = boundingBox(restPos, radiusKm);
+
+      const candidates = (await this.prisma.driverProfile?.findMany?.({
+        where: {
+          isOnline: true,
+          verificationStatus: 'APPROVED',
+          lastLocationAt: { gte: staleCutoff },
+          lastLatitude: { gte: box.minLat, lte: box.maxLat },
+          lastLongitude: { gte: box.minLng, lte: box.maxLng },
+          codBalance: { lte: debtLimit - orderDebt },
+          user: { isActive: true },
+        },
+        select: {
+          userId: true,
+          lastLatitude: true,
+          lastLongitude: true,
+          codBalance: true,
+        },
+      })) ?? [];
+
+      const inRadius = candidates
+        .filter((c) => c.lastLatitude !== null && c.lastLongitude !== null)
+        .map((c) => {
+          const distKm = haversineKm(
+            { lat: c.lastLatitude!, lng: c.lastLongitude! },
+            restPos,
+          );
+          return { ...c, distKm };
+        })
+        .filter((c) => c.distKm <= radiusKm);
+
+      if (inRadius.length === 0) {
+        return [];
+      }
+
+      // Kiểm tra số đơn đang giao của từng tài xế ứng viên
+      const activeOrders =
+        (await this.prisma.order.findMany({
+          where: {
+            driverId: { in: inRadius.map((c) => c.userId) },
+            status: { in: ACTIVE_DELIVERY_STATUSES },
+          },
+          select: { driverId: true },
+        })) ?? [];
+
+      const activeCounts = new Map<string, number>();
+      for (const ao of activeOrders) {
+        if (ao.driverId) {
+          activeCounts.set(ao.driverId, (activeCounts.get(ao.driverId) ?? 0) + 1);
+        }
+      }
+
+      const eligible = inRadius.filter((c) => (activeCounts.get(c.userId) ?? 0) < maxActive);
+      if (eligible.length === 0) {
+        return [];
+      }
+
+      for (const drv of eligible) {
+        const payload = {
+          ...order,
+          distanceToRestaurantKm: Math.round(drv.distKm * 100) / 100,
+          deliveryDistanceKm: order.distanceKm,
+          driverEarning: order.driverEarning,
+          codToCollect: order.total,
+          debtAfterAccept: drv.codBalance + orderDebt,
+        };
+        this.gateway.emitOrderAvailableToDriver(drv.userId, payload);
+      }
+
+      const eligibleIds = eligible.map((e) => e.userId);
+      void this.notifications.notifyDriversOrderAvailable(eligibleIds, order);
+      return eligibleIds;
+    } catch {
+      return [];
+    }
   }
 
   async getDriverStats(driverId: string, days: number): Promise<DriverStats> {

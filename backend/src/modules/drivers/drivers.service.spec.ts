@@ -131,7 +131,19 @@ describe('DriversService', () => {
       );
     });
 
-    it('cho phép bật trực tuyến khi hồ sơ APPROVED và tài khoản active', async () => {
+    it('chặn bật trực tuyến khi thiếu toạ độ GPS', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue({ id: 'driver-1', isActive: true });
+      mockPrisma.driverProfile.findUnique.mockResolvedValue({
+        userId: 'driver-1',
+        verificationStatus: DriverVerificationStatus.APPROVED,
+      });
+
+      await expect(service.updateStatus('driver-1', { isOnline: true })).rejects.toThrow(
+        BadRequestException,
+      );
+    });
+
+    it('cho phép bật trực tuyến khi hồ sơ APPROVED, tài khoản active và có toạ độ GPS', async () => {
       mockPrisma.user.findUnique.mockResolvedValue({ id: 'driver-1', isActive: true });
       mockPrisma.driverProfile.findUnique.mockResolvedValue({
         userId: 'driver-1',
@@ -140,10 +152,16 @@ describe('DriversService', () => {
       mockPrisma.driverProfile.update.mockResolvedValue({
         userId: 'driver-1',
         isOnline: true,
+        lastLatitude: 10.77,
+        lastLongitude: 106.7,
         verificationStatus: DriverVerificationStatus.APPROVED,
       });
 
-      const res = await service.updateStatus('driver-1', { isOnline: true });
+      const res = await service.updateStatus('driver-1', {
+        isOnline: true,
+        latitude: 10.77,
+        longitude: 106.7,
+      });
       expect(res.isOnline).toBe(true);
     });
   });
