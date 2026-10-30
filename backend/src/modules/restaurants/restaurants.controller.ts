@@ -16,6 +16,7 @@ import { Public } from '../../common/decorators/public.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import {
   CreateRestaurantDto,
+  ListRestaurantReviewsQueryDto,
   NearbyRestaurantsQueryDto,
   UpdateRestaurantDto,
 } from './dto/restaurants.dto';
@@ -62,6 +63,27 @@ export class RestaurantsController {
       throw new BadRequestException('days chỉ nhận 1, 7 hoặc 30');
     }
     return this.restaurants.getStats(id, user, days);
+  }
+
+  /** GET /restaurants/:id/reviews?page=1&limit=20&rating=5 – danh sách đánh giá công khai (E3). */
+  @Public()
+  @Get(':id/reviews')
+  getPublicReviews(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Query() query: ListRestaurantReviewsQueryDto,
+  ) {
+    return this.restaurants.getPublicReviews(id, query);
+  }
+
+  /** GET /restaurants/:id/reviews/manage?page=1&limit=20&unrepliedOnly=true – quản lý đánh giá cho Chủ quán / ADMIN (E3). */
+  @Roles(Role.RESTAURANT_OWNER, Role.ADMIN)
+  @Get(':id/reviews/manage')
+  getManageReviews(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: AuthUser,
+    @Query() query: ListRestaurantReviewsQueryDto,
+  ) {
+    return this.restaurants.getManageReviews(id, user, query);
   }
 
   @Public()

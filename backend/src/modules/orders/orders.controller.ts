@@ -86,7 +86,7 @@ export class OrdersController {
     return this.orders.updateStatus(id, user, dto);
   }
 
-  /** POST /orders/:id/review – khách chấm điểm quán (1–5 sao) cho đơn đã giao. */
+  /** POST /orders/:id/review – khách chấm điểm quán và tài xế (1–5 sao) cho đơn đã giao. */
   @Roles(Role.CUSTOMER)
   @Post(':id/review')
   review(
@@ -94,7 +94,7 @@ export class OrdersController {
     @CurrentUser('id') userId: string,
     @Body() dto: ReviewOrderDto,
   ) {
-    return this.orders.review(id, userId, dto.rating, dto.comment);
+    return this.orders.review(id, userId, dto);
   }
 
   @Roles(Role.DRIVER)

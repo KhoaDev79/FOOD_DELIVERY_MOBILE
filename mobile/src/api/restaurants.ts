@@ -1,9 +1,12 @@
 import { apiClient } from './client';
 import {
   Banner,
+  ManageRestaurantReview,
   NearbyDish,
   OrderDetail,
+  OrderReview,
   PaginatedResult,
+  PublicRestaurantReview,
   Restaurant,
   RestaurantDetail,
   RestaurantStats,
@@ -90,4 +93,36 @@ export const restaurantsApi = {
   /** Thống kê bán hàng của quán: days = 1 (hôm nay), 7 hoặc 30 ngày. */
   getStats: (restaurantId: string, days: 1 | 7 | 30) =>
     apiClient.get<any, RestaurantStats>(`/restaurants/${restaurantId}/stats`, { params: { days } }),
+
+  /** E3: Danh sách đánh giá công khai của quán */
+  getPublicReviews: (
+    restaurantId: string,
+    params?: { page?: number; limit?: number; rating?: number },
+  ) =>
+    apiClient.get<
+      any,
+      PaginatedResult<PublicRestaurantReview> & {
+        rating: number;
+        ratingCount: number;
+        total: number;
+      }
+    >(`/restaurants/${restaurantId}/reviews`, { params }),
+
+  /** E3: Danh sách đánh giá dành cho Chủ quán / Admin quản lý */
+  getManageReviews: (
+    restaurantId: string,
+    params?: { page?: number; limit?: number; rating?: number; unrepliedOnly?: boolean },
+  ) =>
+    apiClient.get<
+      any,
+      PaginatedResult<ManageRestaurantReview> & {
+        rating: number;
+        ratingCount: number;
+        total: number;
+      }
+    >(`/restaurants/${restaurantId}/reviews/manage`, { params }),
+
+  /** E3: Chủ quán phản hồi đánh giá (chỉ 1 lần) */
+  replyReview: (reviewId: string, reply: string) =>
+    apiClient.post<any, OrderReview>(`/reviews/${reviewId}/reply`, { reply }),
 };

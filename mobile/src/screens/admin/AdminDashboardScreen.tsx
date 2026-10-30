@@ -1,7 +1,7 @@
 import { useIsFocused, useNavigation } from '@react-navigation/native';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { StatusBar } from 'expo-status-bar';
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Pressable, RefreshControl, ScrollView, View } from 'react-native';
 import { adminApi } from '../../api/admin';
 import { ROLE_META, SectionCard } from '../../components/modules/admin/adminShared';
@@ -17,7 +17,9 @@ import {
   TAB_BAR_CLEARANCE,
   TabHeader,
   Text,
+  useToast,
 } from '../../components/ui';
+import { useSocket } from '../../hooks/useSocket';
 import { palette } from '../../theme';
 import { OrderStatus, Role } from '../../types/api';
 import { formatVND } from '../../utils/format';
@@ -77,12 +79,28 @@ const MetricCard: React.FC<{
 export const AdminDashboardScreen: React.FC = () => {
   const navigation = useNavigation<any>();
   const isFocused = useIsFocused();
+  const queryClient = useQueryClient();
+  const { socket } = useSocket();
+  const toast = useToast();
   const [refreshing, setRefreshing] = useState(false);
 
   const { data: stats, isLoading, isError, refetch } = useQuery({
     queryKey: ['admin', 'stats'],
     queryFn: () => adminApi.getStats(),
   });
+
+  useEffect(() => {
+    if (!socket) return;
+    const onOrderStalled = (payload: { id: string }) => {
+      toast(`Đơn #${payload.id.slice(-6).toUpperCase()} bị ứ đọng!`, 'error');
+      queryClient.invalidateQueries({ queryKey: ['admin', 'stats'] });
+      queryClient.invalidateQueries({ queryKey: ['admin', 'orders'] });
+    };
+    socket.on('order:stalled', onOrderStalled);
+    return () => {
+      socket.off('order:stalled', onOrderStalled);
+    };
+  }, [socket, toast, queryClient]);
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -96,6 +114,7 @@ export const AdminDashboardScreen: React.FC = () => {
   const delivered = statuses.DELIVERED ?? 0;
   const successRate = orders?.total ? Math.round((delivered / orders.total) * 100) : null;
   const pendingRequests = stats?.roleRequests.pending ?? 0;
+  const pendingRestaurants = stats?.restaurants.pendingApproval ?? stats?.restaurants.pending ?? 0;
 
   return (
     <View className="flex-1 bg-canvas-subtle">
@@ -135,6 +154,30 @@ export const AdminDashboardScreen: React.FC = () => {
           <ErrorState onRetry={refetch} />
         ) : (
           <View className="gap-4 px-4 pt-4">
+            {/* Đơn hàng ứ đọng */}
+            {Boolean(orders?.stalled) && (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={`${orders!.stalled} đơn hàng ứ đọng cần xử lý`}
+                onPress={() => navigation.navigate('AdminOrdersTab', { stalledOnly: true })}
+                className="flex-row items-center gap-3 rounded-2xl border border-danger/40 bg-danger-soft p-4 active:opacity-85"
+              >
+                <View className="h-10 w-10 items-center justify-center rounded-full bg-surface">
+                  <Icon name="alert-circle-outline" size="md" tone="danger" />
+                </View>
+                <View className="flex-1">
+                  <Text variant="body" weight="semibold" tone="danger">
+                    Đơn hàng ứ đọng ({orders!.stalled})
+                  </Text>
+                  <Text variant="caption" tone="secondary">
+                    Quá hạn chuẩn bị hoặc chưa có tài xế nhận, cần can thiệp
+                  </Text>
+                </View>
+                <CountBadge count={orders!.stalled ?? 0} />
+                <Icon name="chevron-forward" size="md" tone="muted" />
+              </Pressable>
+            )}
+
             {/* Yêu cầu chờ duyệt */}
             {pendingRequests > 0 && (
               <Pressable
@@ -160,10 +203,10 @@ export const AdminDashboardScreen: React.FC = () => {
             )}
 
             {/* Quán chờ duyệt */}
-            {!!stats?.restaurants.pending && (
+            {pendingRestaurants > 0 && (
               <Pressable
                 accessibilityRole="button"
-                accessibilityLabel={`${stats.restaurants.pending} quán đang chờ duyệt`}
+                accessibilityLabel={`${pendingRestaurants} quán đang chờ duyệt`}
                 onPress={() => navigation.navigate('AdminRestaurantsTab', { filter: 'pending' })}
                 className="flex-row items-center gap-3 rounded-2xl border border-warning/40 bg-warning-soft p-4 active:opacity-85"
               >
@@ -175,10 +218,10 @@ export const AdminDashboardScreen: React.FC = () => {
                     Quán ăn chờ duyệt
                   </Text>
                   <Text variant="caption" tone="secondary">
-                    Có {stats.restaurants.pending} quán đang chờ phê duyệt hồ sơ
+                    Có {pendingRestaurants} quán đang chờ phê duyệt hồ sơ
                   </Text>
                 </View>
-                <CountBadge count={stats.restaurants.pending} />
+                <CountBadge count={pendingRestaurants} />
                 <Icon name="chevron-forward" size="md" tone="muted" />
               </Pressable>
             )}
@@ -208,6 +251,16 @@ export const AdminDashboardScreen: React.FC = () => {
                 icon="receipt"
                 iconTone="success"
                 iconBg="bg-success-soft"
+                onPress={() => navigation.navigate('AdminOrdersTab')}
+              />
+              <MetricCard
+                label="Công nợ COD tài xế"
+                value={isLoading ? '—' : formatVND(stats?.drivers?.totalCodDebt ?? 0)}
+                caption="Tổng tiền mặt đang giữ"
+                icon="wallet-outline"
+                iconTone="brand"
+                iconBg="bg-brand-50"
+                onPress={() => navigation.navigate('AdminUsersTab')}
               />
               <MetricCard
                 label="Tỷ lệ giao thành công"

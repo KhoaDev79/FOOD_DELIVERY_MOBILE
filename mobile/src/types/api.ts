@@ -254,7 +254,43 @@ export interface OrderStatusHistory {
   orderId: string;
   status: OrderStatus;
   changedBy?: string | null;
+  note?: string | null;
   createdAt: string;
+}
+
+export interface OrderReview {
+  id: string;
+  orderId: string;
+  customerId: string;
+  restaurantId: string;
+  rating: number;
+  comment?: string | null;
+  driverId?: string | null;
+  driverRating?: number | null;
+  driverComment?: string | null;
+  ownerReply?: string | null;
+  ownerRepliedAt?: string | null;
+  isHidden?: boolean;
+  createdAt: string;
+}
+
+export interface PublicRestaurantReview {
+  id: string;
+  rating: number;
+  comment?: string | null;
+  ownerReply?: string | null;
+  ownerRepliedAt?: string | null;
+  createdAt: string;
+  customerName: string;
+  customerAvatarUrl?: string | null;
+}
+
+export interface ManageRestaurantReview extends OrderReview {
+  customer?: {
+    id: string;
+    fullName: string;
+    avatarUrl?: string | null;
+  } | null;
 }
 
 export interface OrderDetail {
@@ -296,6 +332,9 @@ export interface OrderDetail {
     lng: number;
     at: string | null;
   } | null;
+  review?: OrderReview | null;
+  canReview?: boolean;
+  stalledAt?: string | null;
   restaurant: {
     id: string;
     name: string;
@@ -353,6 +392,8 @@ export interface OrderSummary {
   cancelReason?: CancelReason | null;
   cancelNote?: string | null;
   failedReason?: FailedDeliveryReason | null;
+  review?: OrderReview | null;
+  canReview?: boolean;
   createdAt: string;
   items: { name: string; quantity: number }[];
   restaurant: {
@@ -426,6 +467,8 @@ export interface DriverProfile {
   bankAccountNumber?: string | null;
   maskedBankAccountNumber?: string | null;
   bankAccountName?: string | null;
+  ratingAvg?: number;
+  ratingCount?: number;
   createdAt: string;
   updatedAt: string;
   user?: {

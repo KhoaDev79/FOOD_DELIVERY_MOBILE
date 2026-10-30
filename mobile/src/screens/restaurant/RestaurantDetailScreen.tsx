@@ -1,8 +1,10 @@
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
+import { useQuery } from '@tanstack/react-query';
 import { StatusBar } from 'expo-status-bar';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ScrollView, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { restaurantsApi } from '../../api/restaurants';
 import { DishOptionSheet, DishSelection } from '../../components/modules/restaurant/DishOptionSheet';
 import { DishPrice, DishRow } from '../../components/modules/restaurant/DishRow';
 import {
@@ -26,10 +28,10 @@ import { useCartStore } from '../../store/useCartStore';
 import { resolveActiveDeliveryAddress, useDeliveryAddressStore } from '../../store/useDeliveryAddressStore';
 import { useToggleFavorite } from '../../hooks/useFavorites';
 import { useFavoritesStore } from '../../store/useFavoritesStore';
-import { MenuItem } from '../../types/api';
+import { MenuItem, PublicRestaurantReview } from '../../types/api';
 import { RootStackParamList } from '../../types/navigation';
 import { calculateDistance, estimateDeliveryTime } from '../../utils/fee';
-import { formatDistance, formatVND } from '../../utils/format';
+import { formatDateTime, formatDistance, formatVND } from '../../utils/format';
 import { discountPercent, hasChoices, linePrice } from '../../utils/menuPricing';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'RestaurantDetail'>;
@@ -67,6 +69,11 @@ const DetailSkeleton: React.FC = () => (
 export const RestaurantDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   const { restaurantId, openDishId } = route.params;
   const { data: restaurant, isLoading, isError, refetch } = useRestaurantDetail(restaurantId);
+  const { data: reviewsData } = useQuery({
+    queryKey: ['restaurant-reviews', restaurantId],
+    queryFn: () => restaurantsApi.getPublicReviews(restaurantId, { page: 1, limit: 10 }),
+    enabled: Boolean(restaurantId),
+  });
   const { coords } = useLocation();
   const { data: addresses } = useAddresses();
   const selectedAddressId = useDeliveryAddressStore((s) => s.selectedAddressId);
@@ -244,7 +251,15 @@ export const RestaurantDetailScreen: React.FC<Props> = ({ route, navigation }) =
             </Text>
           )}
           <View className="flex-row flex-wrap gap-x-4 gap-y-2">
-            {rating && <MetaItem icon="star" tone="rating" label={rating} />}
+            {rating && (
+              <MetaItem
+                icon="star"
+                tone="rating"
+                label={
+                  restaurant.ratingCount ? `${rating} (${restaurant.ratingCount})` : rating
+                }
+              />
+            )}
             {distanceKm !== undefined && (
               <MetaItem icon="navigate-outline" label={`Khoảng ${formatDistance(distanceKm) ?? ''}`} />
             )}
@@ -380,6 +395,68 @@ export const RestaurantDetailScreen: React.FC<Props> = ({ route, navigation }) =
             </View>
           ))
         )}
+
+        {/* Đánh giá thực khách (E3) */}
+        <View className="gap-3 px-4 pt-8">
+          <View className="flex-row items-center justify-between">
+            <View className="flex-row items-center gap-1.5">
+              <Icon name="star" size="md" tone="rating" />
+              <Text variant="title" accessibilityRole="header">
+                Đánh giá thực khách
+              </Text>
+            </View>
+            <Text variant="caption" tone="secondary">
+              {reviewsData?.total ?? restaurant.ratingCount ?? 0} lượt đánh giá
+            </Text>
+          </View>
+
+          {!reviewsData?.items?.length ? (
+            <View className="items-center gap-1.5 rounded-xl bg-surface p-5 shadow-card">
+              <Icon name="chatbubble-ellipses-outline" size="lg" tone="muted" />
+              <Text variant="body" tone="secondary">
+                Chưa có đánh giá nào cho quán này.
+              </Text>
+            </View>
+          ) : (
+            reviewsData.items.map((rv: PublicRestaurantReview) => (
+              <View key={rv.id} className="gap-2 rounded-xl bg-surface p-4 shadow-card">
+                <View className="flex-row items-center justify-between">
+                  <Text variant="body" weight="semibold">
+                    {rv.customerName}
+                  </Text>
+                  <View className="flex-row items-center gap-1">
+                    {Array.from({ length: 5 }, (_, idx) => (
+                      <Icon
+                        key={idx}
+                        name={idx < rv.rating ? 'star' : 'star-outline'}
+                        size="xs"
+                        tone={idx < rv.rating ? 'rating' : 'muted'}
+                      />
+                    ))}
+                  </View>
+                </View>
+                {!!rv.comment && (
+                  <Text variant="body" tone="default">
+                    {rv.comment}
+                  </Text>
+                )}
+                <Text variant="micro" weight="regular" tone="muted">
+                  {formatDateTime(rv.createdAt)}
+                </Text>
+                {!!rv.ownerReply && (
+                  <View className="mt-1 gap-1 rounded-lg bg-canvas-subtle p-3">
+                    <Text variant="caption" weight="semibold" tone="brand">
+                      Phản hồi từ quán:
+                    </Text>
+                    <Text variant="caption" tone="secondary">
+                      {rv.ownerReply}
+                    </Text>
+                  </View>
+                )}
+              </View>
+            ))
+          )}
+        </View>
       </ScrollView>
 
       {/* Thanh giỏ hàng nổi khi giỏ đang có món của quán này */}

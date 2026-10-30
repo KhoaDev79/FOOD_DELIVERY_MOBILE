@@ -3,9 +3,7 @@ import React from 'react';
 import { colors } from '../constants/colors';
 import { LoginScreen } from '../screens/auth/LoginScreen';
 import { RegisterScreen } from '../screens/auth/RegisterScreen';
-import { DriverCallScreen } from '../screens/call/DriverCallScreen';
 import { CartScreen } from '../screens/cart/CartScreen';
-import { ChatScreen } from '../screens/chat/ChatScreen';
 import { CheckoutScreen } from '../screens/checkout/CheckoutScreen';
 import { OrderTrackingScreen } from '../screens/order/OrderTrackingScreen';
 import { AddAddressScreen } from '../screens/profile/AddAddressScreen';
@@ -16,7 +14,6 @@ import { RoleUpgradeRequestScreen } from '../screens/profile/RoleUpgradeRequestS
 import { RatingScreen } from '../screens/rating/RatingScreen';
 import { RestaurantDetailScreen } from '../screens/restaurant/RestaurantDetailScreen';
 import { SearchScreen } from '../screens/search/SearchScreen';
-import { VoucherSelectScreen } from '../screens/voucher/VoucherSelectScreen';
 import { RootStackParamList } from '../types/navigation';
 import { BottomTabNavigator } from './BottomTabNavigator';
 
@@ -98,23 +95,8 @@ export const RootStack: React.FC = () => {
         options={{ headerShown: false }}
       />
       <Stack.Screen
-        name="Chat"
-        component={ChatScreen}
-        options={{ headerShown: false }}
-      />
-      <Stack.Screen
-        name="DriverCall"
-        component={DriverCallScreen}
-        options={{ headerShown: false }}
-      />
-      <Stack.Screen
         name="Rating"
         component={RatingScreen}
-        options={{ headerShown: false }}
-      />
-      <Stack.Screen
-        name="VoucherSelect"
-        component={VoucherSelectScreen}
         options={{ headerShown: false }}
       />
     </Stack.Navigator>

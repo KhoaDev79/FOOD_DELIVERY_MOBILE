@@ -25,6 +25,8 @@ describe('OrdersService (V4 C4 Ledger & C5 Failed Delivery)', () => {
     driverLedger: { create: jest.Mock };
     orderStatusHistory: { create: jest.Mock };
     deliveryContactAttempt: { count: jest.Mock; findFirst: jest.Mock; create: jest.Mock };
+    review: { create: jest.Mock; aggregate: jest.Mock };
+    restaurant: { update: jest.Mock };
     auditLog: { create: jest.Mock; count: jest.Mock };
     $queryRaw: jest.Mock;
     $transaction: jest.Mock;
@@ -105,6 +107,13 @@ describe('OrdersService (V4 C4 Ledger & C5 Failed Delivery)', () => {
         count: jest.fn().mockResolvedValue(3),
         findFirst: jest.fn().mockResolvedValue(null),
         create: jest.fn().mockResolvedValue({ id: 'att-1' }),
+      },
+      review: {
+        create: jest.fn().mockResolvedValue({ id: 'rev-1', rating: 5 }),
+        aggregate: jest.fn().mockResolvedValue({ _avg: { rating: 4.8 }, _count: { rating: 10 } }),
+      },
+      restaurant: {
+        update: jest.fn().mockResolvedValue({}),
       },
       auditLog: {
         create: jest.fn().mockResolvedValue({}),
@@ -363,6 +372,71 @@ describe('OrdersService (V4 C4 Ledger & C5 Failed Delivery)', () => {
       expect(res.items[1].id).toBe('ord-far');
       expect(res.items[0].codToCollect).toBe(125000);
       expect(res.items[0].debtAfterAccept).toBe(205000); // 100k + (100k + 5k)
+    });
+  });
+
+  describe('E3: Đánh giá theo đơn (một lần mỗi đơn, trong REVIEW_WINDOW_DAYS)', () => {
+    it('cho phép đánh giá quán và tài xế một lần khi đơn DELIVERED trong thời hạn', async () => {
+      prisma.order.findUnique.mockResolvedValue({
+        ...baseOrder,
+        status: OrderStatus.DELIVERED,
+        review: null,
+        statusHistory: [{ status: OrderStatus.DELIVERED, createdAt: new Date() }],
+      });
+
+      const res = await service.review(baseOrder.id, 'cust-1', {
+        rating: 5,
+        comment: 'Món ngon',
+        driverRating: 5,
+        driverComment: 'Giao nhanh',
+      });
+
+      expect(res).toBeDefined();
+      expect(prisma.review.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            orderId: baseOrder.id,
+            rating: 5,
+            driverId: 'driver-1',
+            driverRating: 5,
+          }),
+        }),
+      );
+      expect(prisma.restaurant.update).toHaveBeenCalledWith({
+        where: { id: 'rest-1' },
+        data: { rating: 4.8, ratingCount: 10 },
+      });
+    });
+
+    it('từ chối (409) khi đơn đã được đánh giá trước đó', async () => {
+      prisma.order.findUnique.mockResolvedValue({
+        ...baseOrder,
+        status: OrderStatus.DELIVERED,
+        review: { id: 'rev-existing' },
+        statusHistory: [{ status: OrderStatus.DELIVERED, createdAt: new Date() }],
+      });
+
+      await expect(
+        service.review(baseOrder.id, 'cust-1', { rating: 5 }),
+      ).rejects.toThrow(ConflictException);
+    });
+
+    it('từ chối khi đơn đã quá thời hạn REVIEW_WINDOW_DAYS (7 ngày)', async () => {
+      prisma.order.findUnique.mockResolvedValue({
+        ...baseOrder,
+        status: OrderStatus.DELIVERED,
+        review: null,
+        statusHistory: [
+          {
+            status: OrderStatus.DELIVERED,
+            createdAt: new Date(Date.now() - 8 * 24 * 60 * 60 * 1000),
+          },
+        ],
+      });
+
+      await expect(
+        service.review(baseOrder.id, 'cust-1', { rating: 4 }),
+      ).rejects.toThrow(/quá thời hạn đánh giá/);
     });
   });
 });

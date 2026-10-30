@@ -3,6 +3,7 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import React from 'react';
 import { FloatingTabBar, TabMeta } from '../components/ui/FloatingTabBar';
 import { AdminDashboardScreen } from '../screens/admin/AdminDashboardScreen';
+import { AdminOrdersScreen } from '../screens/admin/AdminOrdersScreen';
 import { AdminProfileScreen } from '../screens/admin/AdminProfileScreen';
 import { AdminRestaurantsScreen } from '../screens/admin/AdminRestaurantsScreen';
 import { AdminUsersScreen } from '../screens/admin/AdminUsersScreen';
@@ -14,6 +15,7 @@ const Stack = createNativeStackNavigator<AdminStackParamList>();
 
 const TAB_META: Record<keyof AdminTabParamList, TabMeta> = {
   AdminDashboardTab: { label: 'Tổng quan', icon: 'stats-chart-outline', iconActive: 'stats-chart' },
+  AdminOrdersTab: { label: 'Đơn hàng', icon: 'receipt-outline', iconActive: 'receipt' },
   AdminUsersTab: { label: 'Người dùng', icon: 'people-outline', iconActive: 'people' },
   AdminRestaurantsTab: { label: 'Quán ăn', icon: 'storefront-outline', iconActive: 'storefront' },
   AdminProfileTab: { label: 'Hệ thống', icon: 'settings-outline', iconActive: 'settings' },
@@ -26,6 +28,7 @@ const TAB_META: Record<keyof AdminTabParamList, TabMeta> = {
 const AdminTabs: React.FC = () => (
   <Tab.Navigator screenOptions={{ headerShown: false }} tabBar={(props) => <FloatingTabBar {...props} meta={TAB_META} />}>
     <Tab.Screen name="AdminDashboardTab" component={AdminDashboardScreen} options={{ title: TAB_META.AdminDashboardTab.label }} />
+    <Tab.Screen name="AdminOrdersTab" component={AdminOrdersScreen} options={{ title: TAB_META.AdminOrdersTab.label }} />
     <Tab.Screen name="AdminUsersTab" component={AdminUsersScreen} options={{ title: TAB_META.AdminUsersTab.label }} />
     <Tab.Screen
       name="AdminRestaurantsTab"

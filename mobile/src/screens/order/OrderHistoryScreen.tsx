@@ -42,9 +42,14 @@ const matches = (o: OrderSummary, f: FilterKey) =>
   (f === 'done' && o.status === 'DELIVERED') ||
   (f === 'cancelled' && (o.status === 'CANCELLED' || o.status === 'DELIVERY_FAILED'));
 
-const OrderCard = memo<{ order: OrderSummary; onOpen: (o: OrderSummary) => void }>(({ order, onOpen }) => {
+const OrderCard = memo<{
+  order: OrderSummary;
+  onOpen: (o: OrderSummary) => void;
+  onReview: (o: OrderSummary) => void;
+}>(({ order, onOpen, onReview }) => {
   const active = ACTIVE.includes(order.status);
   const itemCount = order.items.reduce((s, i) => s + i.quantity, 0);
+  const canReview = Boolean(order.canReview || (order.status === 'DELIVERED' && !order.review && order.canReview !== false));
   return (
     <Pressable
       accessibilityRole="button"
@@ -108,6 +113,23 @@ const OrderCard = memo<{ order: OrderSummary; onOpen: (o: OrderSummary) => void 
           <Icon name="chevron-forward" size="sm" tone="brand" />
         </View>
       )}
+
+      {canReview && (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`Đánh giá đơn hàng từ ${order.restaurant.name}`}
+          onPress={(e) => {
+            e.stopPropagation();
+            onReview(order);
+          }}
+          className="h-button-sm flex-row items-center justify-center gap-1.5 rounded-sm border border-warning/40 bg-warning-soft/30 active:opacity-80"
+        >
+          <Icon name="star" size="xs" tone="rating" />
+          <Text variant="caption" weight="bold">
+            Đánh giá đơn hàng
+          </Text>
+        </Pressable>
+      )}
     </Pressable>
   );
 });
@@ -146,6 +168,12 @@ export const OrderHistoryScreen: React.FC = () => {
   const visible = useMemo(() => orders.filter((o) => matches(o, filter)), [orders, filter]);
   const activeCount = orders.filter((o) => ACTIVE.includes(o.status)).length;
   const openOrder = (o: OrderSummary) => navigation.navigate('OrderTracking', { orderId: o.id });
+  const openReview = (o: OrderSummary) =>
+    navigation.navigate('Rating', {
+      orderId: o.id,
+      restaurantName: o.restaurant.name,
+      hasDriver: Boolean(o.driverId),
+    });
 
   return (
     <View className="flex-1 bg-canvas-subtle">
@@ -177,7 +205,9 @@ export const OrderHistoryScreen: React.FC = () => {
           data={visible}
           keyExtractor={(o) => o.id}
           contentContainerClassName={cn('flex-grow gap-3 px-4 pt-2', TAB_BAR_CLEARANCE)}
-          renderItem={({ item }) => <OrderCard order={item} onOpen={openOrder} />}
+          renderItem={({ item }) => (
+            <OrderCard order={item} onOpen={openOrder} onReview={openReview} />
+          )}
           refreshControl={
             <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[palette.brand['500']]} />
           }

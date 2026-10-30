@@ -88,15 +88,24 @@ export const OrderTrackingScreen: React.FC<Props> = ({ route, navigation }) => {
     if (phone) {
       Linking.openURL(`tel:${phone}`);
     } else {
-      Alert.alert('Thông báo', 'Tài xế chưa cập nhật số điện thoại.');
+      Alert.alert('Thông báo', 'Số điện thoại tài xế hiện không khả dụng.');
+    }
+  };
+
+  const handleCallRestaurant = () => {
+    const phone = order?.restaurant?.phone;
+    if (phone) {
+      Linking.openURL(`tel:${phone}`);
+    } else {
+      Alert.alert('Thông báo', 'Nhà hàng chưa cập nhật số điện thoại.');
     }
   };
 
   const handleOpenRating = () => {
     navigation.navigate('Rating', {
       orderId,
-      driverName: order?.driver?.fullName || 'Tài xế',
       restaurantName: order?.restaurant?.name,
+      hasDriver: Boolean(order?.driverId),
     });
   };
 
@@ -353,8 +362,8 @@ export const OrderTrackingScreen: React.FC<Props> = ({ route, navigation }) => {
           </View>
         ) : null}
 
-        {/* Nút đánh giá dịch vụ nếu đơn đã hoàn thành */}
-        {order.status === 'DELIVERED' && (
+        {/* Nút đánh giá dịch vụ nếu đơn đã hoàn thành và còn trong thời hạn (canReview) */}
+        {order.status === 'DELIVERED' && !order.review && order.canReview !== false && (
           <Pressable
             accessibilityRole="button"
             className="flex-row items-center justify-between rounded-2xl border border-warning-soft bg-warning-soft/20 p-4 shadow-card active:opacity-80"
@@ -363,11 +372,48 @@ export const OrderTrackingScreen: React.FC<Props> = ({ route, navigation }) => {
             <View className="flex-row items-center gap-2.5">
               <Icon name="star" size="md" tone="rating" />
               <Text variant="body" weight="bold" tone="default">
-                Đánh giá tài xế & Món ăn
+                Đánh giá quán & Tài xế
               </Text>
             </View>
             <Icon name="chevron-forward" size="sm" tone="secondary" />
           </Pressable>
+        )}
+
+        {/* Hiển thị đánh giá đã gửi + phản hồi của quán (nếu có) */}
+        {!!order.review && (
+          <View className="gap-2 rounded-2xl border border-line bg-surface p-4 shadow-card">
+            <View className="flex-row items-center justify-between">
+              <Text variant="caption" weight="bold" tone="secondary" className="uppercase">
+                Đánh giá của bạn
+              </Text>
+              <View className="flex-row items-center gap-1">
+                <Icon name="star" size="xs" tone="rating" />
+                <Text variant="body" weight="bold">
+                  {order.review.rating}/5
+                </Text>
+                {!!order.review.driverRating && (
+                  <Text variant="caption" tone="secondary">
+                    · Tài xế {order.review.driverRating}/5
+                  </Text>
+                )}
+              </View>
+            </View>
+            {!!order.review.comment && (
+              <Text variant="body" tone="default">
+                {order.review.comment}
+              </Text>
+            )}
+            {!!order.review.ownerReply && (
+              <View className="mt-1 rounded-xl bg-canvas-subtle p-3">
+                <Text variant="caption" weight="bold" tone="brand">
+                  Phản hồi từ nhà hàng:
+                </Text>
+                <Text variant="caption" tone="secondary" className="mt-0.5">
+                  {order.review.ownerReply}
+                </Text>
+              </View>
+            )}
+          </View>
         )}
 
         {/* Địa chỉ giao hàng */}
@@ -394,9 +440,24 @@ export const OrderTrackingScreen: React.FC<Props> = ({ route, navigation }) => {
 
         {/* Chi tiết đơn hàng */}
         <View className="gap-3 rounded-2xl border border-line bg-surface p-4 shadow-card">
-          <Text variant="caption" weight="bold" tone="secondary" className="uppercase">
-            Chi tiết đơn hàng · {order.restaurant.name}
-          </Text>
+          <View className="flex-row items-center justify-between">
+            <Text variant="caption" weight="bold" tone="secondary" className="flex-1 uppercase" numberOfLines={1}>
+              Chi tiết đơn hàng · {order.restaurant.name}
+            </Text>
+            {!!order.restaurant.phone && (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Gọi cho nhà hàng"
+                onPress={handleCallRestaurant}
+                className="flex-row items-center gap-1 rounded-full bg-brand-50 px-2.5 py-1 active:bg-brand-100"
+              >
+                <Icon name="call" size="xs" tone="brand" />
+                <Text variant="micro" weight="bold" tone="brand">
+                  Gọi quán
+                </Text>
+              </Pressable>
+            )}
+          </View>
 
           <View className="gap-2">
             {order.items.map((item) => (

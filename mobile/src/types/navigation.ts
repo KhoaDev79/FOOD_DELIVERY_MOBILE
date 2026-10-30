@@ -29,10 +29,7 @@ export type RootStackParamList = {
   EditProfile: undefined;
   /** Khách hàng đăng ký mở quán / làm tài xế. */
   RoleUpgradeRequest: undefined;
-  Chat: { orderId: string; recipientName?: string; recipientRole?: string };
-  DriverCall: { orderId: string; driverName?: string; driverPhone?: string };
-  Rating: { orderId: string; driverName?: string; restaurantName?: string };
-  VoucherSelect: { selectedVoucherId?: string; onSelectVoucher?: (voucher: any) => void };
+  Rating: { orderId: string; restaurantName?: string; driverName?: string; hasDriver?: boolean };
 };
 
 export type OwnerTabParamList = {
@@ -41,12 +38,14 @@ export type OwnerTabParamList = {
   OwnerRestaurantTab: undefined;
 };
 
-/** Stack của chủ quán: các tab + màn sửa tài khoản (trước đây không mở được vì thiếu route). */
+/** Stack của chủ quán: các tab + màn sửa tài khoản + thống kê + quản lý đánh giá. */
 export type OwnerStackParamList = {
   OwnerTabs: NavigatorScreenParams<OwnerTabParamList>;
   EditProfile: undefined;
   /** Thống kê bán hàng của quán. */
   OwnerStats: undefined;
+  /** Quản lý và phản hồi đánh giá của quán (E3). */
+  OwnerReviews: undefined;
   /** Dùng lại màn chọn địa chỉ trên bản đồ của khách hàng để ghim vị trí quán. */
   AddressPicker: RootStackParamList['AddressPicker'];
 };
@@ -57,21 +56,21 @@ export type DriverTabParamList = {
   DriverProfileTab: undefined;
 };
 
-/** Stack của tài xế: các tab + chi tiết chuyến có bản đồ + sửa tài khoản + thông tin xe. */
+/** Stack của tài xế: các tab + chi tiết chuyến có bản đồ + sửa tài khoản + thông tin xe + sổ quỹ COD. */
 export type DriverStackParamList = {
   DriverTabs: NavigatorScreenParams<DriverTabParamList>;
   DriverDeliveryDetail: { orderId: string };
   EditProfile: undefined;
   DriverVehicle?: undefined;
   DriverWallet: undefined;
-  Chat: { orderId: string; recipientName?: string; recipientRole?: string };
 };
 
 export type AdminTabParamList = {
   AdminDashboardTab: undefined;
+  AdminOrdersTab: { stalledOnly?: boolean; status?: string } | undefined;
   /** openRequests: mở ngay danh sách yêu cầu nâng cấp chờ duyệt. */
   AdminUsersTab: { openRequests?: boolean } | undefined;
-  AdminRestaurantsTab: { filter?: 'all' | 'open' | 'closed' | 'unassigned' } | undefined;
+  AdminRestaurantsTab: { filter?: 'all' | 'open' | 'closed' | 'unassigned' | 'pending' | 'suspended' } | undefined;
   AdminProfileTab: undefined;
 };
 

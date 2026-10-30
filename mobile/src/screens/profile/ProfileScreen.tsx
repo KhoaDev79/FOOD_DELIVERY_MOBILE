@@ -126,7 +126,6 @@ export const ProfileScreen: React.FC = () => {
                     <Text variant="headline" tone="inverse" weight="bold">
                       Chào mừng bạn!
                     </Text>
-                    <Text className="text-base">👋</Text>
                   </View>
                   <Text variant="caption" tone="inverse" className="opacity-85 mt-0.5">
                     Đăng nhập để đặt món và nhận ngàn ưu đãi từ ZomZom.

@@ -25,6 +25,7 @@ import {
   CreateOrderDto,
   DriverArrivedDto,
   ListOrdersQueryDto,
+  ReviewOrderDto,
   UpdateOrderStatusDto,
 } from './dto/orders.dto';
 import { canViewOrder } from './order-access';
@@ -37,7 +38,7 @@ import {
   validateCancellationInput,
 } from './order-state-machine';
 
-const ORDER_DETAIL_INCLUDE = {
+export const ORDER_DETAIL_INCLUDE = {
   items: true,
   restaurant: {
     select: {
@@ -74,6 +75,7 @@ const ORDER_DETAIL_INCLUDE = {
   },
   statusHistory: { orderBy: { createdAt: 'asc' } },
   contactAttempts: { orderBy: { createdAt: 'asc' } },
+  review: true,
 } satisfies Prisma.OrderInclude;
 
 export type OrderDetail = Prisma.OrderGetPayload<{ include: typeof ORDER_DETAIL_INCLUDE }>;
@@ -619,9 +621,43 @@ export class OrdersService {
           }
         : null;
 
+    // E2: Ẩn số điện thoại khách và tài xế khi đơn đã kết thúc quá 2 giờ (trừ ADMIN)
+    const isFinished =
+      order.status === 'DELIVERED' ||
+      order.status === 'CANCELLED' ||
+      order.status === 'DELIVERY_FAILED';
+    const terminalHistory = [...(order.statusHistory ?? [])]
+      .reverse()
+      .find((h) => h.status === order.status);
+    const finishedAt = terminalHistory?.createdAt ?? order.updatedAt;
+    const shouldMaskPhone =
+      user.role !== 'ADMIN' &&
+      isFinished &&
+      Date.now() - finishedAt.getTime() > 2 * 60 * 60 * 1000;
+
+    // E3: Tính canReview cho khách hàng trong thời hạn REVIEW_WINDOW_DAYS kể từ lúc giao
+    const reviewWindowDays = Number(
+      this.config.get<number>('business.reviewWindowDays') ?? 7,
+    );
+    const deliveredHistory = [...(order.statusHistory ?? [])]
+      .reverse()
+      .find((h) => h.status === 'DELIVERED');
+    const deliveredAt = deliveredHistory?.createdAt ?? order.updatedAt;
+    const withinReviewWindow =
+      Date.now() - deliveredAt.getTime() <= reviewWindowDays * 24 * 60 * 60 * 1000;
+    const canReview =
+      order.status === 'DELIVERED' &&
+      !order.review &&
+      withinReviewWindow &&
+      order.customerId === user.id;
+
     return {
       ...order,
+      customer: shouldMaskPhone ? { ...order.customer, phone: null } : order.customer,
+      driver:
+        order.driver && shouldMaskPhone ? { ...order.driver, phone: null } : order.driver,
       driverLocation,
+      canReview,
     };
   }
 
@@ -875,44 +911,103 @@ export class OrdersService {
   }
 
   // =========================================================================
-  //  ĐÁNH GIÁ — khách chấm điểm quán sau khi nhận hàng
+  //  ĐÁNH GIÁ — E3: khách chấm điểm quán + tài xế theo từng đơn trong REVIEW_WINDOW_DAYS
   // =========================================================================
-  async review(orderId: string, customerId: string, rating: number, comment?: string) {
-    const order = await this.prisma.order.findUnique({ where: { id: orderId } });
-    if (!order || order.customerId !== customerId) throw new NotFoundException('Không tìm thấy đơn hàng');
-    if (order.status !== 'DELIVERED') throw new BadRequestException('Chỉ đánh giá được đơn đã giao thành công');
+  async review(
+    orderId: string,
+    customerId: string,
+    dtoOrRating: ReviewOrderDto | number,
+    legacyComment?: string,
+  ) {
+    const dto: ReviewOrderDto =
+      typeof dtoOrRating === 'number'
+        ? { rating: dtoOrRating, comment: legacyComment }
+        : dtoOrRating;
 
-    const where = { customerId, restaurantId: order.restaurantId };
-    const [reviews, delivered] = await Promise.all([
-      this.prisma.review.count({ where }),
-      this.prisma.order.count({ where: { ...where, status: 'DELIVERED' } }),
-    ]);
-    if (reviews >= delivered) throw new ConflictException('Bạn đã đánh giá đơn hàng này rồi');
-
-    return this.prisma.$transaction(async (tx) => {
-      const review = await tx.review.create({
-        data: { ...where, orderId: order.id, rating, comment: comment?.trim() || null },
-      });
-      const { _avg, _count } = await tx.review.aggregate({
-        where: { restaurantId: order.restaurantId, isHidden: false },
-        _avg: { rating: true },
-        _count: { rating: true },
-      });
-      await tx.restaurant.update({
-        where: { id: order.restaurantId },
-        data: {
-          rating: Math.round((_avg.rating ?? rating) * 10) / 10,
-          ratingCount: _count.rating,
+    const order = await this.prisma.order.findUnique({
+      where: { id: orderId },
+      include: {
+        review: true,
+        statusHistory: {
+          where: { status: OrderStatus.DELIVERED },
+          orderBy: { createdAt: 'desc' },
+          take: 1,
         },
-      });
-      return review;
+      },
     });
+    if (!order || order.customerId !== customerId) {
+      throw new NotFoundException('Không tìm thấy đơn hàng');
+    }
+    if (order.status !== 'DELIVERED') {
+      throw new BadRequestException('Chỉ đánh giá được đơn đã giao thành công');
+    }
+    if (order.review) {
+      throw new ConflictException('Bạn đã đánh giá đơn này');
+    }
+
+    const reviewWindowDays = Number(
+      this.config.get<number>('business.reviewWindowDays') ?? 7,
+    );
+    const deliveredAt = order.statusHistory?.[0]?.createdAt ?? order.updatedAt;
+    if (
+      deliveredAt &&
+      Date.now() - deliveredAt.getTime() > reviewWindowDays * 24 * 60 * 60 * 1000
+    ) {
+      throw new BadRequestException(
+        `Đã quá thời hạn đánh giá đơn hàng (tối đa ${reviewWindowDays} ngày sau khi giao)`,
+      );
+    }
+
+    const hasDriver = Boolean(order.driverId);
+
+    try {
+      return await this.prisma.$transaction(async (tx) => {
+        const review = await tx.review.create({
+          data: {
+            orderId: order.id,
+            customerId,
+            restaurantId: order.restaurantId,
+            rating: dto.rating,
+            comment: dto.comment?.trim() || null,
+            driverId: hasDriver ? order.driverId : null,
+            driverRating: hasDriver && dto.driverRating ? dto.driverRating : null,
+            driverComment:
+              hasDriver && dto.driverComment ? dto.driverComment.trim() || null : null,
+          },
+        });
+        const { _avg, _count } = await tx.review.aggregate({
+          where: { restaurantId: order.restaurantId, isHidden: false },
+          _avg: { rating: true },
+          _count: { rating: true },
+        });
+        await tx.restaurant.update({
+          where: { id: order.restaurantId },
+          data: {
+            rating:
+              (_count.rating ?? 0) > 0
+                ? Math.round((_avg.rating ?? dto.rating) * 10) / 10
+                : 0,
+            ratingCount: _count.rating ?? 1,
+          },
+        });
+        return review;
+      });
+    } catch (err: any) {
+      if (err?.code === 'P2002') {
+        throw new ConflictException('Bạn đã đánh giá đơn này');
+      }
+      throw err;
+    }
   }
 
   // =========================================================================
   //  HELPERS
   // =========================================================================
   private async paginate(where: Prisma.OrderWhereInput, q: ListOrdersQueryDto, order: 'asc' | 'desc' = 'desc') {
+    const reviewWindowDays = Number(
+      this.config.get<number>('business.reviewWindowDays') ?? 7,
+    );
+    const windowMs = reviewWindowDays * 24 * 60 * 60 * 1000;
     const rows = await this.prisma.order.findMany({
       where,
       include: {
@@ -929,12 +1024,21 @@ export class OrdersService {
           },
         },
         customer: { select: { id: true, fullName: true, phone: true } },
+        review: true,
       },
       orderBy: { createdAt: order },
       skip: (q.page - 1) * q.limit,
       take: q.limit + 1,
     });
-    return { items: rows.slice(0, q.limit), page: q.page, limit: q.limit, hasMore: rows.length > q.limit };
+    const now = Date.now();
+    const mapped = rows.slice(0, q.limit).map((r) => ({
+      ...r,
+      canReview:
+        r.status === 'DELIVERED' &&
+        !r.review &&
+        now - r.updatedAt.getTime() <= windowMs,
+    }));
+    return { items: mapped, page: q.page, limit: q.limit, hasMore: rows.length > q.limit };
   }
 
   private async getOrderOrThrow(orderId: string): Promise<OrderDetail> {

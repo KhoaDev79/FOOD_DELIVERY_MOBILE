@@ -38,13 +38,19 @@ const LOCATION_RATE_LIMIT_SECONDS = 15;
 export type SanitizedDriverProfile = Omit<DriverProfile, 'bankAccountNumber'> & {
   bankAccountNumber: string | null;
   maskedBankAccountNumber: string | null;
+  ratingAvg?: number;
+  ratingCount?: number;
 };
 
-function sanitizeProfile(profile: DriverProfile): SanitizedDriverProfile {
+function sanitizeProfile(
+  profile: DriverProfile,
+  ratingStats?: { ratingAvg: number; ratingCount: number },
+): SanitizedDriverProfile {
   return {
     ...profile,
     bankAccountNumber: maskBankAccountNumber(profile.bankAccountNumber),
     maskedBankAccountNumber: maskBankAccountNumber(profile.bankAccountNumber),
+    ...(ratingStats ? ratingStats : {}),
   };
 }
 
@@ -78,7 +84,27 @@ export class DriversService {
       });
     }
 
-    return sanitizeProfile(profile);
+    const ratingStats = await this.getDriverRatingStats(userId);
+    return sanitizeProfile(profile, ratingStats);
+  }
+
+  private async getDriverRatingStats(userId: string): Promise<{ ratingAvg: number; ratingCount: number }> {
+    try {
+      const agg = await (this.prisma as any).review?.aggregate?.({
+        where: {
+          driverId: userId,
+          driverRating: { not: null },
+          isHidden: false,
+        },
+        _avg: { driverRating: true },
+        _count: { driverRating: true },
+      });
+      const count = agg?._count?.driverRating ?? 0;
+      const avg = count > 0 ? Math.round((agg?._avg?.driverRating ?? 0) * 10) / 10 : 0;
+      return { ratingAvg: avg, ratingCount: count };
+    } catch {
+      return { ratingAvg: 0, ratingCount: 0 };
+    }
   }
 
   /**
@@ -494,11 +520,20 @@ export class DriversService {
       this.prisma.driverProfile.count({ where }),
     ]);
 
+    const enriched = await Promise.all(
+      items.map(async (p) => {
+        const stats = await this.getDriverRatingStats(p.userId);
+        return {
+          ...p,
+          bankAccountNumber: maskBankAccountNumber(p.bankAccountNumber),
+          ratingAvg: stats.ratingAvg,
+          ratingCount: stats.ratingCount,
+        };
+      }),
+    );
+
     return {
-      items: items.map((p) => ({
-        ...p,
-        bankAccountNumber: maskBankAccountNumber(p.bankAccountNumber),
-      })),
+      items: enriched,
       total,
       page,
       limit,

@@ -1,5 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import React, { useState } from 'react';
 import {
   KeyboardAvoidingView,
@@ -10,56 +11,71 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { ordersApi } from '../../api/orders';
 import { Button, Text, TopBar, useToast } from '../../components/ui';
+import { queryKeys } from '../../constants/queryKeys';
+import { useOrderDetail } from '../../services/useOrders';
 import { RootStackParamList } from '../../types/navigation';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Rating'>;
 
-const FEEDBACK_TAGS = [
+const RESTAURANT_TAGS = [
   'Món ăn ngon',
   'Món còn nóng hổi',
   'Đúng món đã đặt',
   'Đóng gói cẩn thận',
-  'Giao nhanh',
-  'Tài xế thân thiện',
+];
+
+const DRIVER_TAGS = [
+  'Giao hàng nhanh',
+  'Tài xế lịch sự, thân thiện',
+  'Bảo quản món tốt',
 ];
 
 export const RatingScreen: React.FC<Props> = ({ navigation, route }) => {
-  const { orderId, restaurantName } = route.params;
+  const { orderId, restaurantName, hasDriver: paramHasDriver } = route.params;
+  const { data: order } = useOrderDetail(orderId);
   const toast = useToast();
   const queryClient = useQueryClient();
-  const [stars, setStars] = useState(5);
-  const [selectedTags, setSelectedTags] = useState<string[]>([]);
-  const [comment, setComment] = useState('');
 
-  // Gửi đánh giá thật lên server (trước đây chỉ giả lập, điểm của quán không bao giờ đổi)
+  const [stars, setStars] = useState(5);
+  const [comment, setComment] = useState('');
+  const [driverStars, setDriverStars] = useState(5);
+  const [driverComment, setDriverComment] = useState('');
+
+  const hasDriver = Boolean(order?.driverId ?? order?.driver?.id ?? paramHasDriver);
+  const displayRestName = order?.restaurant?.name || restaurantName;
+  const displayDriverName = order?.driver?.fullName || 'Tài xế giao hàng';
+
+  const appendSuggestion = (current: string, tag: string, setter: (v: string) => void) => {
+    const trimmed = current.trim();
+    if (trimmed.includes(tag)) return;
+    setter(trimmed ? `${trimmed}. ${tag}` : tag);
+  };
+
   const reviewMutation = useMutation({
     mutationFn: () =>
       ordersApi.review(orderId, {
         rating: stars,
-        comment: [selectedTags.join(', '), comment.trim()].filter(Boolean).join('. ') || undefined,
+        comment: comment.trim() || undefined,
+        ...(hasDriver
+          ? {
+              driverRating: driverStars,
+              driverComment: driverComment.trim() || undefined,
+            }
+          : {}),
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['restaurants'] });
-      toast('Cảm ơn bạn! Đánh giá đã được ghi nhận.', 'success');
-      navigation.navigate('MainTabs', { screen: 'HomeTab' });
+      queryClient.invalidateQueries({ queryKey: queryKeys.orders.detail(orderId) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.orders.all });
+      toast('Cảm ơn bạn! Đánh giá đơn hàng đã được ghi nhận.', 'success');
+      navigation.goBack();
     },
     onError: (err: any) => {
       toast(err.response?.data?.message || 'Không gửi được đánh giá, vui lòng thử lại.', 'error');
     },
   });
-
-  const toggleTag = (tag: string) => {
-    if (selectedTags.includes(tag)) {
-      setSelectedTags((prev) => prev.filter((t) => t !== tag));
-    } else {
-      setSelectedTags((prev) => [...prev, tag]);
-    }
-  };
-
-  const handleSubmit = () => reviewMutation.mutate();
 
   return (
     <SafeAreaView edges={['top', 'bottom']} style={{ flex: 1 }} className="flex-1 bg-surface">
@@ -73,105 +89,164 @@ export const RatingScreen: React.FC<Props> = ({ navigation, route }) => {
         <ScrollView
           style={{ flex: 1 }}
           className="flex-1"
-          contentContainerClassName="px-4 py-5 gap-5"
+          contentContainerClassName="px-4 py-5 gap-6"
           keyboardShouldPersistTaps="handled"
         >
-          {/* Avatar & Title */}
-          <View className="items-center py-2">
-            <View className="h-20 w-20 items-center justify-center rounded-full bg-brand-500 shadow-raised mb-3">
-              <Ionicons name="storefront" size={40} color="#FFFFFF" />
+          {/* PHẦN 1: ĐÁNH GIÁ QUÁN */}
+          <View className="gap-4 rounded-2xl border border-line bg-surface p-4 shadow-card">
+            <View className="items-center py-1">
+              <View className="mb-2.5 h-14 w-14 items-center justify-center rounded-full bg-brand-500 shadow-raised">
+                <Ionicons name="storefront" size={28} color="#FFFFFF" />
+              </View>
+              <Text variant="headline" weight="bold" className="text-center">
+                {displayRestName ? `Đánh giá quán ${displayRestName}` : 'Đánh giá nhà hàng'}
+              </Text>
+              <Text variant="caption" tone="secondary" className="mt-0.5 text-center">
+                Chất lượng món ăn và quy cách đóng gói
+              </Text>
             </View>
-            <Text variant="title" weight="bold" className="text-center">
-              {restaurantName ? `Bạn thấy ${restaurantName} thế nào?` : 'Bạn thấy đơn hàng thế nào?'}
-            </Text>
-            <Text variant="body" tone="secondary" className="mt-1 text-center">
-              Số sao được tính vào điểm đánh giá của quán
-            </Text>
-          </View>
 
-          {/* 5 Stars Rating Bar */}
-          <View className="flex-row justify-center gap-3 py-2">
-            {[1, 2, 3, 4, 5].map((index) => {
-              const isFilled = index <= stars;
-              return (
-                <Pressable
-                  key={index}
-                  accessibilityRole="button"
-                  accessibilityLabel={`${index} sao`}
-                  accessibilityState={{ selected: isFilled }}
-                  onPress={() => setStars(index)}
-                  className="p-1 active:opacity-70"
-                >
-                  <Ionicons
-                    name={isFilled ? 'star' : 'star-outline'}
-                    size={40}
-                    color={isFilled ? '#FFB400' : '#D1D5DB'}
-                  />
-                </Pressable>
-              );
-            })}
-          </View>
-
-          {/* Quick Feedback Tags */}
-          <View className="gap-2.5">
-            <Text variant="caption" weight="bold" tone="secondary" className="uppercase">
-              Chọn điểm bạn hài lòng:
-            </Text>
-            <View className="flex-row flex-wrap gap-2">
-              {FEEDBACK_TAGS.map((tag) => {
-                const isSelected = selectedTags.includes(tag);
+            <View className="flex-row justify-center gap-3 py-1">
+              {[1, 2, 3, 4, 5].map((index) => {
+                const isFilled = index <= stars;
                 return (
                   <Pressable
-                    key={tag}
-                    className={`flex-row items-center rounded-full border px-3.5 py-2 active:opacity-70 ${
-                      isSelected
-                        ? 'border-brand-500 bg-brand-50'
-                        : 'border-line bg-canvas-subtle'
-                    }`}
-                    onPress={() => toggleTag(tag)}
+                    key={index}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Quán ${index} sao`}
+                    accessibilityState={{ selected: isFilled }}
+                    onPress={() => setStars(index)}
+                    className="p-1 active:opacity-70"
                   >
                     <Ionicons
-                      name={isSelected ? 'checkmark-circle' : 'add-circle-outline'}
-                      size={16}
-                      color={isSelected ? '#1EB9CE' : '#6B6F76'}
-                      style={{ marginRight: 6 }}
+                      name={isFilled ? 'star' : 'star-outline'}
+                      size={36}
+                      color={isFilled ? '#FFB400' : '#D1D5DB'}
                     />
-                    <Text
-                      variant="caption"
-                      weight="medium"
-                      className={isSelected ? 'text-brand-600' : 'text-ink-secondary'}
-                    >
-                      {tag}
-                    </Text>
                   </Pressable>
                 );
               })}
             </View>
-          </View>
 
-          {/* Comment Area */}
-          <View className="gap-2">
-            <Text variant="caption" weight="bold" tone="secondary" className="uppercase">
-              Để lại lời nhắn (không bắt buộc):
-            </Text>
+            <View className="gap-2">
+              <Text variant="caption" weight="bold" tone="secondary">
+                Gợi ý nhận xét nhanh:
+              </Text>
+              <View className="flex-row flex-wrap gap-2">
+                {RESTAURANT_TAGS.map((tag) => (
+                  <Pressable
+                    key={tag}
+                    className="flex-row items-center rounded-full border border-line bg-canvas-subtle px-3 py-1.5 active:bg-brand-50"
+                    onPress={() => appendSuggestion(comment, tag, setComment)}
+                  >
+                    <Ionicons
+                      name="add-circle-outline"
+                      size={14}
+                      color="#1EB9CE"
+                      style={{ marginRight: 4 }}
+                    />
+                    <Text variant="caption" weight="medium">
+                      {tag}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+            </View>
+
             <TextInput
-              placeholder="Chia sẻ thêm về món ăn, quán hoặc tài xế..."
+              placeholder="Nhận xét về món ăn của quán (tối đa 500 ký tự)..."
               placeholderTextColor="#9A9EA5"
               value={comment}
               onChangeText={setComment}
+              maxLength={500}
               multiline
-              numberOfLines={4}
+              numberOfLines={3}
               textAlignVertical="top"
-              className="min-h-[110px] rounded-xl border border-line bg-canvas-subtle p-3.5 font-body text-body text-ink"
+              className="min-h-[90px] rounded-xl border border-line bg-canvas-subtle p-3 font-body text-body text-ink"
             />
           </View>
+
+          {/* PHẦN 2: ĐÁNH GIÁ TÀI XẾ (Chỉ hiển thị khi đơn có tài xế) */}
+          {hasDriver && (
+            <View className="gap-4 rounded-2xl border border-line bg-surface p-4 shadow-card">
+              <View className="items-center py-1">
+                <View className="mb-2.5 h-14 w-14 items-center justify-center rounded-full bg-brand-50">
+                  <Ionicons name="bicycle" size={28} color="#1EB9CE" />
+                </View>
+                <Text variant="headline" weight="bold" className="text-center">
+                  Đánh giá tài xế {displayDriverName}
+                </Text>
+                <Text variant="caption" tone="secondary" className="mt-0.5 text-center">
+                  Thái độ phục vụ và tốc độ giao hàng
+                </Text>
+              </View>
+
+              <View className="flex-row justify-center gap-3 py-1">
+                {[1, 2, 3, 4, 5].map((index) => {
+                  const isFilled = index <= driverStars;
+                  return (
+                    <Pressable
+                      key={index}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Tài xế ${index} sao`}
+                      accessibilityState={{ selected: isFilled }}
+                      onPress={() => setDriverStars(index)}
+                      className="p-1 active:opacity-70"
+                    >
+                      <Ionicons
+                        name={isFilled ? 'star' : 'star-outline'}
+                        size={36}
+                        color={isFilled ? '#FFB400' : '#D1D5DB'}
+                      />
+                    </Pressable>
+                  );
+                })}
+              </View>
+
+              <View className="gap-2">
+                <Text variant="caption" weight="bold" tone="secondary">
+                  Gợi ý nhận xét tài xế:
+                </Text>
+                <View className="flex-row flex-wrap gap-2">
+                  {DRIVER_TAGS.map((tag) => (
+                    <Pressable
+                      key={tag}
+                      className="flex-row items-center rounded-full border border-line bg-canvas-subtle px-3 py-1.5 active:bg-brand-50"
+                      onPress={() => appendSuggestion(driverComment, tag, setDriverComment)}
+                    >
+                      <Ionicons
+                        name="add-circle-outline"
+                        size={14}
+                        color="#1EB9CE"
+                        style={{ marginRight: 4 }}
+                      />
+                      <Text variant="caption" weight="medium">
+                        {tag}
+                      </Text>
+                    </Pressable>
+                  ))}
+                </View>
+              </View>
+
+              <TextInput
+                placeholder="Nhận xét thêm cho tài xế (tối đa 300 ký tự)..."
+                placeholderTextColor="#9A9EA5"
+                value={driverComment}
+                onChangeText={setDriverComment}
+                maxLength={300}
+                multiline
+                numberOfLines={2}
+                textAlignVertical="top"
+                className="min-h-[75px] rounded-xl border border-line bg-canvas-subtle p-3 font-body text-body text-ink"
+              />
+            </View>
+          )}
         </ScrollView>
 
-        {/* Nút gửi đánh giá */}
         <View className="border-t border-line bg-surface p-4 shadow-card">
           <Button
             label="Gửi đánh giá"
-            onPress={handleSubmit}
+            onPress={() => reviewMutation.mutate()}
             loading={reviewMutation.isPending}
             variant="primary"
             size="lg"

@@ -159,3 +159,34 @@ export class UpdateRestaurantDto {
   @Matches(TIME_HHMM, { message: 'Giờ đóng cửa phải có dạng HH:mm' })
   closeTime?: string;
 }
+
+export class ListRestaurantReviewsQueryDto {
+  @IsOptional()
+  @Type(() => Number)
+  @Min(1)
+  page: number = 1;
+
+  @IsOptional()
+  @Type(() => Number)
+  @Min(1)
+  @Max(50)
+  limit: number = 20;
+
+  @IsOptional()
+  @Type(() => Number)
+  @Min(1)
+  @Max(5)
+  rating?: number;
+
+  @IsOptional()
+  @Transform(({ value }) => value === true || value === 'true')
+  @IsBoolean()
+  unrepliedOnly?: boolean;
+}
+
+export class ReplyReviewDto {
+  @IsString()
+  @MinLength(1)
+  @MaxLength(500)
+  reply: string;
+}

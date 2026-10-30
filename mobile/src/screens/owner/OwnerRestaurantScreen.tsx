@@ -414,6 +414,14 @@ export const OwnerRestaurantScreen: React.FC = () => {
               {/* Thông tin quán */}
               <Group title="Thông tin quán">
                 <ListRow
+                  icon="star-outline"
+                  iconTone="brand"
+                  title="Đánh giá thực khách"
+                  subtitle={`${restaurant.rating.toFixed(1)} sao (${restaurant.ratingCount ?? 0} lượt) · Xem & phản hồi`}
+                  onPress={() => navigation.navigate('OwnerReviews')}
+                />
+                <Divider inset />
+                <ListRow
                   icon="location-outline"
                   iconTone="brand"
                   title="Địa chỉ"

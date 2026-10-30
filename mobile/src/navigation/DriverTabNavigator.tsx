@@ -3,7 +3,6 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import React from 'react';
 import { FloatingTabBar, TabMeta } from '../components/ui/FloatingTabBar';
 import { useDriverLocationReporter } from '../hooks/useDriverLocationReporter';
-import { ChatScreen } from '../screens/chat/ChatScreen';
 import { DriverAvailableOrdersScreen } from '../screens/driver/DriverAvailableOrdersScreen';
 import { DriverDeliveriesScreen } from '../screens/driver/DriverDeliveriesScreen';
 import { DriverDeliveryDetailScreen } from '../screens/driver/DriverDeliveryDetailScreen';
@@ -69,10 +68,6 @@ export const DriverTabNavigator: React.FC = () => {
       <Stack.Screen
         name="EditProfile"
         component={EditProfileScreen as React.ComponentType<any>}
-      />
-      <Stack.Screen
-        name="Chat"
-        component={ChatScreen as React.ComponentType<any>}
       />
       <Stack.Screen
         name="DriverVehicle"

@@ -130,6 +130,18 @@ export class ReviewOrderDto {
   @IsString()
   @MaxLength(500)
   comment?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(5)
+  driverRating?: number;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(300)
+  driverComment?: string;
 }
 
 export class ReleaseOrderDto {

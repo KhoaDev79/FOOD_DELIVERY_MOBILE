@@ -195,7 +195,7 @@ export const AddAddressScreen: React.FC<Props> = ({ navigation, route }) => {
                   </Text>
                   {Boolean(selectedAddressLine) && isCoordinateAddressString(selectedAddressLine) && (
                     <Text variant="caption" tone="danger" className="mt-1">
-                      ⚠️ Địa chỉ đang là toạ độ thô, vui lòng bấm để chọn vị trí có tên đường.
+                      Địa chỉ đang là toạ độ thô, vui lòng bấm để chọn vị trí có tên đường.
                     </Text>
                   )}
                 </View>
@@ -230,8 +230,8 @@ export const AddAddressScreen: React.FC<Props> = ({ navigation, route }) => {
                   tone={isPinConfirmed ? 'success' : 'warning'}
                 >
                   {isPinConfirmed
-                    ? `✓ Đã ghim toạ độ (${pickedCoords?.latitude.toFixed(4)}, ${pickedCoords?.longitude.toFixed(4)})`
-                    : '⚠ Chưa xác nhận vị trí ghim giao hàng'}
+                    ? `Đã ghim toạ độ (${pickedCoords?.latitude.toFixed(4)}, ${pickedCoords?.longitude.toFixed(4)})`
+                    : 'Chưa xác nhận vị trí ghim giao hàng'}
                 </Text>
                 {!isPinConfirmed && coords && (
                   <Pressable

@@ -1,5 +1,13 @@
 import { apiClient } from './client';
-import { OrderStatus, PaginatedResult, RestaurantStatus, Role, RoleUpgradeRequest, User } from '../types/api';
+import {
+  OrderDetail,
+  OrderStatus,
+  PaginatedResult,
+  RestaurantStatus,
+  Role,
+  RoleUpgradeRequest,
+  User,
+} from '../types/api';
 
 export interface AdminStats {
   users: {
@@ -17,12 +25,18 @@ export interface AdminStats {
     open: number;
     closed: number;
     unassigned: number;
-    pending: number;
+    pending?: number;
+    pendingApproval?: number;
+    suspended?: number;
   };
   orders: {
     total: number;
+    stalled?: number;
     statuses: Partial<Record<OrderStatus, number>>;
     totalRevenue: number;
+  };
+  drivers?: {
+    totalCodDebt: number;
   };
   roleRequests: { pending: number };
 }
@@ -101,7 +115,7 @@ export interface AdminUserActivity {
   roleRequests: RoleUpgradeRequest[];
 }
 
-export type RestaurantFilter = 'all' | 'open' | 'closed' | 'unassigned' | 'pending';
+export type RestaurantFilter = 'all' | 'open' | 'closed' | 'unassigned' | 'pending' | 'suspended';
 
 export interface AdminRoleRequest extends RoleUpgradeRequest {
   user: Pick<User, 'id' | 'fullName' | 'email' | 'phone' | 'role' | 'avatarUrl' | 'isActive'>;
@@ -162,16 +176,32 @@ export const adminApi = {
       ...(reason ? { reason } : {}),
     }),
 
+  /* -------------------------------- Đơn hàng -------------------------------- */
+  listOrders: (params?: {
+    status?: OrderStatus;
+    stalled?: boolean;
+    q?: string;
+    page?: number;
+    limit?: number;
+  }) =>
+    apiClient.get<any, PaginatedResult<OrderDetail & { _count?: { contactAttempts: number } }> & { total: number }>(
+      '/admin/orders',
+      { params },
+    ),
+
+  getOrderDetail: (orderId: string) =>
+    apiClient.get<any, OrderDetail>(`/admin/orders/${orderId}`),
+
   unassignDriver: (orderId: string, reason?: string) =>
     apiClient.post<any, { id: string; status: OrderStatus }>(
       `/admin/orders/${orderId}/unassign-driver`,
       reason ? { reason } : {},
     ),
 
-  updateReviewVisibility: (reviewId: string, isVisible: boolean, reason?: string) =>
-    apiClient.patch<any, { id: string; isVisible: boolean }>(`/admin/reviews/${reviewId}/visibility`, {
-      isVisible,
-      ...(reason ? { reason } : {}),
+  updateReviewVisibility: (reviewId: string, isHidden: boolean, reason: string) =>
+    apiClient.patch<any, { id: string; isHidden: boolean }>(`/admin/reviews/${reviewId}/visibility`, {
+      isHidden,
+      reason,
     }),
 
   /* ----------------------- Yêu cầu nâng cấp vai trò ----------------------- */

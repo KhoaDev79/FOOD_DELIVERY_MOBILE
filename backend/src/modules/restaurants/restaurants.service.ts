@@ -1,4 +1,11 @@
-import { ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+  Optional,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Prisma, Restaurant, RestaurantStatus, Role } from '@prisma/client';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
@@ -6,9 +13,11 @@ import { boundingBox, calcDeliveryFee, estimateDelivery, haversineKm } from '../
 import { isAcceptingOrders } from '../../common/utils/opening-hours';
 import { foldVietnamese, VI_ACCENTED, VI_PLAIN } from '../../common/utils/vietnamese';
 import { BusinessConfig } from '../../config/configuration';
+import { NotificationsService } from '../notifications/notifications.service';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   CreateRestaurantDto,
+  ListRestaurantReviewsQueryDto,
   NearbyRestaurantsQueryDto,
   UpdateRestaurantDto,
 } from './dto/restaurants.dto';
@@ -57,6 +66,7 @@ export class RestaurantsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
+    @Optional() private readonly notifications?: NotificationsService,
   ) {}
 
   /**
@@ -446,5 +456,168 @@ export class RestaurantsService {
       throw new ForbiddenException('Bạn không phải chủ nhà hàng này');
     }
     return restaurant;
+  }
+
+  // =========================================================================
+  //  ĐÁNH GIÁ QUÁN & PHẢN HỒI CỦA CHỦ QUÁN (E3)
+  // =========================================================================
+
+  /** Rút gọn tên khách hàng để hiển thị công khai (ví dụ: "Nguyễn Văn An" -> "Nguyễn V. A.") */
+  private maskCustomerName(fullName?: string | null): string {
+    const clean = (fullName ?? '').trim();
+    if (!clean) return 'Khách hàng';
+    const parts = clean.split(/\s+/);
+    if (parts.length === 1) return parts[0];
+    return `${parts[0]} ${parts
+      .slice(1)
+      .map((p) => `${p.charAt(0).toUpperCase()}.`)
+      .join(' ')}`;
+  }
+
+  /** E3: Danh sách đánh giá công khai của quán (chỉ đánh giá chưa ẩn, ẩn thông tin nhạy cảm của khách) */
+  async getPublicReviews(restaurantId: string, query: ListRestaurantReviewsQueryDto) {
+    const rest = await this.prisma.restaurant.findUnique({
+      where: { id: restaurantId },
+      select: { id: true, rating: true, ratingCount: true },
+    });
+    if (!rest) throw new NotFoundException('Không tìm thấy nhà hàng');
+
+    const page = Number(query.page) || 1;
+    const limit = Number(query.limit) || 20;
+    const where: Prisma.ReviewWhereInput = {
+      restaurantId,
+      isHidden: false,
+      ...(query.rating ? { rating: Number(query.rating) } : {}),
+    };
+
+    const [rows, total] = await Promise.all([
+      this.prisma.review.findMany({
+        where,
+        select: {
+          id: true,
+          rating: true,
+          comment: true,
+          ownerReply: true,
+          ownerRepliedAt: true,
+          createdAt: true,
+          customer: { select: { fullName: true, avatarUrl: true } },
+        },
+        orderBy: { createdAt: 'desc' },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      this.prisma.review.count({ where }),
+    ]);
+
+    return {
+      rating: rest.rating,
+      ratingCount: rest.ratingCount,
+      items: rows.map((r) => ({
+        id: r.id,
+        rating: r.rating,
+        comment: r.comment,
+        ownerReply: r.ownerReply,
+        ownerRepliedAt: r.ownerRepliedAt,
+        createdAt: r.createdAt,
+        customerName: this.maskCustomerName(r.customer?.fullName),
+        customerAvatarUrl: r.customer?.avatarUrl ?? null,
+      })),
+      total,
+      page,
+      limit,
+      hasMore: page * limit < total,
+    };
+  }
+
+  /** E3: Danh sách đánh giá dành cho Chủ quán / Admin quản lý & trả lời */
+  async getManageReviews(restaurantId: string, user: AuthUser, query: ListRestaurantReviewsQueryDto) {
+    const rest = await this.assertCanManage(restaurantId, user);
+    const page = Number(query.page) || 1;
+    const limit = Number(query.limit) || 20;
+
+    const where: Prisma.ReviewWhereInput = {
+      restaurantId,
+      ...(query.rating ? { rating: Number(query.rating) } : {}),
+      ...(query.unrepliedOnly ? { ownerReply: null } : {}),
+    };
+
+    const [rows, total] = await Promise.all([
+      this.prisma.review.findMany({
+        where,
+        select: {
+          id: true,
+          orderId: true,
+          rating: true,
+          comment: true,
+          driverRating: true,
+          driverComment: true,
+          ownerReply: true,
+          ownerRepliedAt: true,
+          isHidden: true,
+          createdAt: true,
+          customer: { select: { id: true, fullName: true, avatarUrl: true } },
+        },
+        orderBy: { createdAt: 'desc' },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      this.prisma.review.count({ where }),
+    ]);
+
+    return {
+      rating: rest.rating,
+      ratingCount: rest.ratingCount,
+      items: rows,
+      total,
+      page,
+      limit,
+      hasMore: page * limit < total,
+    };
+  }
+
+  /** E3: Chủ quán phản hồi đánh giá (chỉ được trả lời đúng 1 lần) */
+  async replyToReview(reviewId: string, user: AuthUser, replyText: string) {
+    const cleanReply = replyText.trim();
+    if (!cleanReply) {
+      throw new BadRequestException('Nội dung phản hồi không được để trống');
+    }
+
+    const review = await this.prisma.review.findUnique({
+      where: { id: reviewId },
+      include: {
+        restaurant: { select: { id: true, name: true, ownerId: true } },
+      },
+    });
+    if (!review) {
+      throw new NotFoundException('Không tìm thấy đánh giá');
+    }
+    if (user.role !== 'ADMIN' && review.restaurant.ownerId !== user.id) {
+      throw new ForbiddenException('Bạn không phải chủ nhà hàng của đánh giá này');
+    }
+    if (review.ownerReply !== null) {
+      throw new ConflictException('Đánh giá này đã được phản hồi trước đó');
+    }
+
+    const { count } = await this.prisma.review.updateMany({
+      where: { id: reviewId, ownerReply: null },
+      data: {
+        ownerReply: cleanReply,
+        ownerRepliedAt: new Date(),
+      },
+    });
+    if (count === 0) {
+      throw new ConflictException('Đánh giá này đã được phản hồi trước đó');
+    }
+
+    const updated = await this.prisma.review.findUniqueOrThrow({ where: { id: reviewId } });
+    if (review.orderId && review.customerId) {
+      void this.notifications?.notifyReviewReplied({
+        id: review.id,
+        orderId: review.orderId,
+        customerId: review.customerId,
+        restaurantName: review.restaurant.name,
+      });
+    }
+    return updated;
   }
 }

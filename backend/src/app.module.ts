@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
+import { ScheduleModule } from '@nestjs/schedule';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { RolesGuard } from './common/guards/roles.guard';
@@ -13,6 +14,7 @@ import { AdminModule } from './modules/admin/admin.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { BannersModule } from './modules/banners/banners.module';
 import { DriversModule } from './modules/drivers/drivers.module';
+import { JobsModule } from './modules/jobs/jobs.module';
 import { MapsModule } from './modules/maps/maps.module';
 import { MenusModule } from './modules/menus/menus.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
@@ -26,6 +28,7 @@ import { UsersModule } from './modules/users/users.module';
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true, load: [configuration], validate: validateEnv }),
+    ScheduleModule.forRoot(),
     PrismaModule,
     AuthModule,
     AdminModule,
@@ -39,6 +42,7 @@ import { UsersModule } from './modules/users/users.module';
     RealtimeModule,
     NotificationsModule,
     PaymentsModule,
+    JobsModule,
   ],
   controllers: [HealthController, PublicConfigController],
   providers: [

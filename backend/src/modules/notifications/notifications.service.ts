@@ -58,14 +58,28 @@ export class NotificationsService {
     const tasks: Promise<void>[] = [];
 
     if (order.status === 'CANCELLED') {
+      const isTimeout = order.cancelReason === CancelReason.RESTAURANT_TIMEOUT;
       const reasonText = order.cancelReason ? CANCEL_REASON_LABELS[order.cancelReason] : 'Đơn đã bị huỷ';
+      const customerBody = isTimeout
+        ? 'Quán chưa xác nhận kịp, đơn đã được huỷ'
+        : `Đơn hàng đã bị hủy: ${reasonText}`;
+
       tasks.push(
         this.sendToUsers([order.customerId], {
           title: order.restaurant.name,
-          body: `Đơn hàng đã bị hủy: ${reasonText}`,
+          body: customerBody,
           data: { type: 'order', orderId: order.id, status: order.status },
         }),
       );
+      if (isTimeout && order.restaurant.ownerId) {
+        tasks.push(
+          this.sendToUsers([order.restaurant.ownerId], {
+            title: 'Đơn hàng quá hạn xác nhận',
+            body: `Đơn #${order.id.slice(0, 8).toUpperCase()} đã tự động bị huỷ do quá thời gian xác nhận`,
+            data: { type: 'order', orderId: order.id, status: order.status },
+          }),
+        );
+      }
       if (order.driverId) {
         tasks.push(
           this.sendToUsers([order.driverId], {

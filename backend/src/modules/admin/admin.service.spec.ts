@@ -17,6 +17,7 @@ describe('AdminService', () => {
       orderStatusHistory: { create: jest.fn() },
       roleUpgradeRequest: { findUnique: jest.fn(), update: jest.fn(), count: jest.fn() },
       driverProfile: { findFirst: jest.fn(), upsert: jest.fn(), updateMany: jest.fn() },
+      review: { findUnique: jest.fn(), update: jest.fn(), aggregate: jest.fn() },
       auditLog: { create: jest.fn() },
     };
     // Transaction chạy callback với chính mock client
@@ -192,6 +193,41 @@ describe('AdminService', () => {
       await expect(
         service.reviewRoleRequest('req', 'admin', { status: RoleRequestStatus.APPROVED }),
       ).rejects.toBeInstanceOf(ConflictException);
+    });
+  });
+
+  describe('updateReviewVisibility (E3)', () => {
+    it('ẩn đánh giá, tính lại điểm trung bình + ratingCount của quán và ghi AuditLog', async () => {
+      prisma.review.findUnique.mockResolvedValue({
+        id: 'rev-1',
+        restaurantId: 'r1',
+        isHidden: false,
+      });
+      prisma.review.update.mockResolvedValue({
+        id: 'rev-1',
+        restaurantId: 'r1',
+        isHidden: true,
+      });
+      prisma.review.aggregate.mockResolvedValue({
+        _avg: { rating: 4.5 },
+        _count: { id: 4 },
+      });
+
+      const res = await service.updateReviewVisibility('rev-1', 'admin', {
+        isHidden: true,
+        reason: 'Ngôn từ không phù hợp',
+      });
+
+      expect(res.isHidden).toBe(true);
+      expect(prisma.restaurant.update).toHaveBeenCalledWith({
+        where: { id: 'r1' },
+        data: { rating: 4.5, ratingCount: 4 },
+      });
+      expect(prisma.auditLog.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ action: 'REVIEW_HIDE', targetId: 'rev-1' }),
+        }),
+      );
     });
   });
 });

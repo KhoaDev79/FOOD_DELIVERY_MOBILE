@@ -5,6 +5,7 @@ import { FloatingTabBar, TabMeta } from '../components/ui/FloatingTabBar';
 import { OwnerMenuScreen } from '../screens/owner/OwnerMenuScreen';
 import { OwnerOrdersScreen } from '../screens/owner/OwnerOrdersScreen';
 import { OwnerRestaurantScreen } from '../screens/owner/OwnerRestaurantScreen';
+import { OwnerReviewsScreen } from '../screens/owner/OwnerReviewsScreen';
 import { OwnerStatsScreen } from '../screens/owner/OwnerStatsScreen';
 import { AddressPickerScreen } from '../screens/profile/AddressPickerScreen';
 import { EditProfileScreen } from '../screens/profile/EditProfileScreen';
@@ -41,6 +42,7 @@ export const OwnerTabNavigator: React.FC = () => (
   <Stack.Navigator screenOptions={{ headerShown: false }}>
     <Stack.Screen name="OwnerTabs" component={OwnerTabs} />
     <Stack.Screen name="OwnerStats" component={OwnerStatsScreen} />
+    <Stack.Screen name="OwnerReviews" component={OwnerReviewsScreen} />
     <Stack.Screen name="EditProfile" component={EditProfileScreen as React.ComponentType<any>} />
     <Stack.Screen name="AddressPicker" component={AddressPickerScreen as React.ComponentType<any>} />
   </Stack.Navigator>
