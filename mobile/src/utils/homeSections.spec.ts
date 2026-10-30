@@ -1,5 +1,5 @@
 import { Restaurant } from '../types/api';
-import { buildHomeSections, filterRestaurants } from './homeSections';
+import { filterRestaurants, sortByDistance } from './homeSections';
 
 const make = (id: string, rating: number, distanceKm?: number, name = `Quán ${id}`): Restaurant => ({
   id,
@@ -13,34 +13,14 @@ const make = (id: string, rating: number, distanceKm?: number, name = `Quán ${i
   distanceKm,
 });
 
-describe('buildHomeSections', () => {
-  it('không quán nào xuất hiện hai lần giữa các khối', () => {
-    const list = Array.from({ length: 20 }, (_, i) => make(String(i), (i % 5) + 1, i * 0.3));
-    const s = buildHomeSections(list);
-    const ids = [...s.topRated, ...s.nearest, ...s.rest].map((r) => r.id);
-    expect(new Set(ids).size).toBe(ids.length);
-    expect(ids.length).toBe(20);
-    expect(s.topRated).toHaveLength(6);
-    expect(s.nearest).toHaveLength(6);
+describe('sortByDistance', () => {
+  it('sắp theo khoảng cách, quán thiếu khoảng cách xuống cuối', () => {
+    expect(sortByDistance([make('a', 5, 3), make('b', 4, 1), make('c', 3)]).map((r) => r.id)).toEqual(['b', 'a', 'c']);
   });
 
   it('loại bản ghi trùng id từ API', () => {
-    const list = [...Array.from({ length: 10 }, (_, i) => make(String(i), 4, i)), make('3', 4, 3)];
-    const s = buildHomeSections(list);
-    const ids = [...s.topRated, ...s.nearest, ...s.rest].map((r) => r.id);
-    expect(ids.filter((x) => x === '3')).toHaveLength(1);
-  });
-
-  it('ít quán thì chỉ có danh sách, sắp theo khoảng cách', () => {
-    const s = buildHomeSections([make('a', 5, 3), make('b', 4, 1), make('c', 3)]);
-    expect(s.topRated).toHaveLength(0);
-    expect(s.nearest).toHaveLength(0);
-    expect(s.rest.map((r) => r.id)).toEqual(['b', 'a', 'c']);
-  });
-
-  it('khối đánh giá cao bỏ qua quán chưa có điểm', () => {
-    const list = Array.from({ length: 12 }, (_, i) => make(String(i), i < 3 ? 4.5 : 0, i));
-    expect(buildHomeSections(list).topRated.map((r) => r.id)).toEqual(['0', '1', '2']);
+    const ids = sortByDistance([make('1', 4, 2), make('2', 4, 1), make('1', 4, 2)]).map((r) => r.id);
+    expect(ids).toEqual(['2', '1']);
   });
 });
 

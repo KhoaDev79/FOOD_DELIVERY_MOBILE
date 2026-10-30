@@ -14,15 +14,14 @@ import {
 } from 'react-native';
 import Animated, { FadeIn, FadeOut, ReduceMotion } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import {
-  RestaurantCardVertical,
-  RestaurantRow,
-  RestaurantTile,
-} from '../../components/modules/restaurant/RestaurantCards';
+import { BannerCarousel, BannerSkeleton } from '../../components/modules/home/BannerCarousel';
+import { DishCard } from '../../components/modules/home/DishCard';
+import { RestaurantRow } from '../../components/modules/restaurant/RestaurantCards';
 import {
   AppImage,
   Button,
   cn,
+  ConfirmDialog,
   EmptyState,
   ErrorState,
   Gradient,
@@ -34,15 +33,17 @@ import {
   TAB_BAR_CLEARANCE,
   Text,
   TileSkeleton,
+  useToast,
 } from '../../components/ui';
 import { HOME_CATEGORIES, HomeCategory } from '../../constants/homeCategories';
 import { useLocation } from '../../hooks/useLocation';
-import { useNearbyRestaurants } from '../../services/useRestaurants';
+import { useBanners, useNearbyDishes, useNearbyRestaurants } from '../../services/useRestaurants';
 import { useAddresses } from '../../services/useUser';
 import { palette } from '../../theme';
-import { Restaurant } from '../../types/api';
+import { useCartStore } from '../../store/useCartStore';
+import { Banner, MenuItem, NearbyDish, Restaurant } from '../../types/api';
 import { RootStackParamList } from '../../types/navigation';
-import { buildHomeSections, filterRestaurants } from '../../utils/homeSections';
+import { filterRestaurants, sortByDistance } from '../../utils/homeSections';
 
 const COORD_LIKE = /^(t[oọ][aạ]\s*đ[oộ]|[-+]?\d+\.\d+)/i;
 /** Cuộn quá mức này thì hiện thanh tìm kiếm gọn dính trên cùng (ảnh mẫu 3–6). */
@@ -69,11 +70,7 @@ const CategoryTile: React.FC<{ item: HomeCategory; selected: boolean; onPress: (
         selected ? 'border-brand-500' : 'border-transparent',
       )}
     >
-      <AppImage
-        uri={item.image}
-        className="h-16 w-16 rounded-full shadow-raised"
-        fallbackIcon="fast-food-outline"
-      />
+      <AppImage uri={item.image} className="h-16 w-16 rounded-full shadow-raised" fallbackIcon="fast-food-outline" />
     </View>
     <Text
       variant="caption"
@@ -100,6 +97,21 @@ const RailSkeleton: React.FC = () => (
     </View>
   </View>
 );
+
+/** Tách món (kèm thông tin quán) thành dữ liệu cho giỏ hàng. */
+const toCartPayload = (d: NearbyDish) => {
+  const { restaurant, ...item } = d;
+  return {
+    restaurant: {
+      id: restaurant.id,
+      name: restaurant.name,
+      imageUrl: restaurant.imageUrl,
+      latitude: restaurant.latitude,
+      longitude: restaurant.longitude,
+    },
+    item: item as MenuItem,
+  };
+};
 
 /* --------------------------------- Màn chính -------------------------------- */
 
@@ -151,11 +163,17 @@ export const HomeScreen: React.FC = () => {
     radiusKm: 15,
   });
 
+  const bannersQuery = useBanners();
+  const dishesQuery = useNearbyDishes({ lat: coords.latitude, lng: coords.longitude, radiusKm: 15, limit: 20 });
+
+  const { refetch: refetchBanners } = bannersQuery;
+  const { refetch: refetchDishes } = dishesQuery;
+
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    await refetch();
+    await Promise.all([refetch(), refetchBanners(), refetchDishes()]);
     setRefreshing(false);
-  }, [refetch]);
+  }, [refetch, refetchBanners, refetchDishes]);
 
   const category = HOME_CATEGORIES.find((c) => c.id === categoryId) ?? null;
   const isFiltering = !!searchFilter.trim() || !!category;
@@ -164,8 +182,43 @@ export const HomeScreen: React.FC = () => {
     () => filterRestaurants(allRestaurants, searchFilter, category?.keywords ?? []),
     [allRestaurants, searchFilter, category],
   );
-  const sections = useMemo(() => buildHomeSections(allRestaurants), [allRestaurants]);
-  const listData = isFiltering ? filtered : sections.rest;
+  const nearbyList = useMemo(() => sortByDistance(allRestaurants), [allRestaurants]);
+  const listData = isFiltering ? filtered : nearbyList;
+
+  const banners = bannersQuery.data ?? [];
+  const dishes = useMemo(() => dishesQuery.data?.items ?? [], [dishesQuery.data]);
+  // Hai khối món, mỗi món chỉ xuất hiện một lần.
+  const dishesNear = dishes.slice(0, 10);
+  const dishesMore = dishes.slice(10, 20);
+
+  const toast = useToast();
+  const addItem = useCartStore((s) => s.addItem);
+  const clearCart = useCartStore((s) => s.clearCart);
+  const [pendingDish, setPendingDish] = useState<NearbyDish | null>(null);
+
+  // Cùng quy tắc với màn Chi tiết quán: giỏ chỉ chứa món của một quán.
+  const addDish = (d: NearbyDish) => {
+    const { restaurant, item } = toCartPayload(d);
+    if (addItem(restaurant, item) === 'DIFFERENT_RESTAURANT') setPendingDish(d);
+    else toast(`Đã thêm ${d.name} vào giỏ`, 'success');
+  };
+  const confirmNewCart = () => {
+    if (!pendingDish) return;
+    const { restaurant, item } = toCartPayload(pendingDish);
+    clearCart();
+    addItem(restaurant, item);
+    toast(`Đã tạo giỏ mới với ${pendingDish.name}`, 'success');
+    setPendingDish(null);
+  };
+  const openDish = useCallback(
+    (d: NearbyDish) => navigation.navigate('RestaurantDetail', { restaurantId: d.restaurant.id }),
+    [navigation],
+  );
+  const openBanner = (b: Banner) => {
+    if (b.actionType === 'RESTAURANT' && b.actionValue) {
+      navigation.navigate('RestaurantDetail', { restaurantId: b.actionValue });
+    }
+  };
   const expanded = data as (typeof data & { isExpandedRadius?: boolean; notice?: string }) | undefined;
 
   const openRestaurant = useCallback(
@@ -261,42 +314,61 @@ export const HomeScreen: React.FC = () => {
         </View>
       ) : (
         <>
-          {/* Khối ô vuông: đánh giá cao (ảnh mẫu 3, 4) */}
-          {sections.topRated.length > 0 && (
-            <View className="gap-3 pt-6">
-              <SectionHeader
-                title="Đánh giá cao"
-                subtitle="Quán được chấm điểm cao gần bạn"
-                icon="star"
-                iconTone="rating"
-              />
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerClassName="gap-3 px-4">
-                {sections.topRated.map((r) => (
-                  <RestaurantTile key={r.id} restaurant={r} onPress={openRestaurant} />
-                ))}
-              </ScrollView>
+          {/* Banner tự chuyển (ảnh mẫu 1, 3) – dữ liệu từ GET /banners */}
+          {bannersQuery.isLoading ? (
+            <View className="pt-4">
+              <BannerSkeleton />
             </View>
-          )}
-
-          {/* Khối thẻ dọc trên nền gradient (ảnh mẫu 5) */}
-          {sections.nearest.length > 0 && (
-            <Gradient preset="sectionBrand" className="mt-6 gap-3 pb-6 pt-5">
-              <SectionHeader
-                title="Giao nhanh"
-                subtitle="Gần bạn nhất, giao trong ít phút"
-                icon="flash"
-                iconTone="brand"
+          ) : banners.length > 0 ? (
+            <View className="pt-4">
+              <BannerCarousel
+                banners={banners}
+                onPress={openBanner}
+                canPress={(b) => b.actionType === 'RESTAURANT' && !!b.actionValue}
               />
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerClassName="gap-3 px-4">
-                {sections.nearest.map((r) => (
-                  <RestaurantCardVertical key={r.id} restaurant={r} onPress={openRestaurant} />
-                ))}
-              </ScrollView>
-            </Gradient>
+            </View>
+          ) : null}
+
+          {/* Khối món ăn (ảnh mẫu 3) – dữ liệu từ GET /restaurants/nearby/dishes */}
+          {dishesQuery.isLoading ? (
+            <RailSkeleton />
+          ) : (
+            <>
+              {dishesNear.length > 0 && (
+                <Gradient preset="sectionBrand" className="mt-6 gap-3 pb-6 pt-5">
+                  <SectionHeader
+                    title="Món ngon gần bạn"
+                    subtitle="Từ các quán đang mở quanh đây"
+                    icon="restaurant"
+                    iconTone="brand"
+                  />
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerClassName="gap-3 px-4">
+                    {dishesNear.map((d) => (
+                      <DishCard key={d.id} dish={d} onPress={openDish} onAdd={addDish} />
+                    ))}
+                  </ScrollView>
+                </Gradient>
+              )}
+              {dishesMore.length > 0 && (
+                <Gradient preset="sectionAccent" className="gap-3 pb-6 pt-5">
+                  <SectionHeader
+                    title="Khám phá thêm món"
+                    subtitle="Thêm lựa chọn cho bữa hôm nay"
+                    icon="sparkles"
+                    iconTone="accent"
+                  />
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerClassName="gap-3 px-4">
+                    {dishesMore.map((d) => (
+                      <DishCard key={d.id} dish={d} onPress={openDish} onAdd={addDish} />
+                    ))}
+                  </ScrollView>
+                </Gradient>
+              )}
+            </>
           )}
 
           {/* Danh sách quán gần (ảnh mẫu 6) */}
-          {sections.rest.length > 0 && (
+          {nearbyList.length > 0 && (
             <View className="gap-0.5 bg-canvas-subtle px-4 pb-3 pt-6">
               <View className="flex-row items-center gap-1.5">
                 <Icon name="location" size="md" tone="danger" />
@@ -361,6 +433,17 @@ export const HomeScreen: React.FC = () => {
         }
         initialNumToRender={6}
         windowSize={7}
+      />
+
+      <ConfirmDialog
+        visible={!!pendingDish}
+        title="Tạo giỏ hàng mới?"
+        message="Giỏ hàng của bạn đang có món của nhà hàng khác. Bạn có muốn xóa giỏ cũ để thêm món của quán này?"
+        confirmLabel="Tạo giỏ mới"
+        cancelLabel="Hủy"
+        destructive
+        onCancel={() => setPendingDish(null)}
+        onConfirm={confirmNewCart}
       />
 
       {/* Thanh tìm kiếm gọn khi cuộn (ảnh mẫu 3–6) */}

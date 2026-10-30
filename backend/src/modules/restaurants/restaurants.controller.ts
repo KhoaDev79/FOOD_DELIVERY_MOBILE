@@ -21,6 +21,16 @@ export class RestaurantsController {
     return this.restaurants.findNearby(query);
   }
 
+  /**
+   * GET /restaurants/nearby/dishes?lat=..&lng=..&radiusKm=..&limit=..
+   * Món đang bán của các quán đang mở trong bán kính giao hàng (chỉ đọc, dùng cho trang chủ).
+   */
+  @Public()
+  @Get('nearby/dishes')
+  nearbyDishes(@Query() query: NearbyRestaurantsQueryDto) {
+    return this.restaurants.findNearbyDishes(query);
+  }
+
   @Roles(Role.RESTAURANT_OWNER, Role.ADMIN)
   @Get('mine')
   mine(@CurrentUser('id') userId: string) {

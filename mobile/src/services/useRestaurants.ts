@@ -18,3 +18,19 @@ export function useRestaurantDetail(id: string) {
   });
 }
 
+
+export function useNearbyDishes(params: { lat: number; lng: number; radiusKm?: number; limit?: number }) {
+  return useQuery({
+    queryKey: queryKeys.restaurants.nearbyDishes(params as unknown as Record<string, unknown>),
+    queryFn: () => restaurantsApi.getNearbyDishes(params),
+    staleTime: 1000 * 60,
+  });
+}
+
+export function useBanners() {
+  return useQuery({
+    queryKey: queryKeys.banners,
+    queryFn: () => restaurantsApi.getBanners(),
+    staleTime: 1000 * 60 * 10,
+  });
+}

@@ -3,7 +3,9 @@ export const queryKeys = {
     all: ['restaurants'] as const,
     nearby: (params: Record<string, unknown>) => ['restaurants', 'nearby', params] as const,
     detail: (id: string) => ['restaurants', 'detail', id] as const,
+    nearbyDishes: (params: Record<string, unknown>) => ['restaurants', 'nearby-dishes', params] as const,
   },
+  banners: ['banners'] as const,
   orders: {
     all: ['orders'] as const,
     mine: (status?: string) => ['orders', 'mine', { status }] as const,

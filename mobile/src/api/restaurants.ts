@@ -1,5 +1,5 @@
 import { apiClient } from './client';
-import { OrderDetail, PaginatedResult, Restaurant, RestaurantDetail } from '../types/api';
+import { Banner, NearbyDish, OrderDetail, PaginatedResult, Restaurant, RestaurantDetail } from '../types/api';
 
 export interface NearbyQueryParams {
   lat: number;
@@ -14,6 +14,11 @@ export interface NearbyQueryParams {
 export const restaurantsApi = {
   getNearby: (params: NearbyQueryParams) =>
     apiClient.get<any, PaginatedResult<Restaurant>>('/restaurants/nearby', { params }),
+
+  getNearbyDishes: (params: Pick<NearbyQueryParams, 'lat' | 'lng' | 'radiusKm' | 'limit'>) =>
+    apiClient.get<any, { items: NearbyDish[] }>('/restaurants/nearby/dishes', { params }),
+
+  getBanners: () => apiClient.get<any, Banner[]>('/banners'),
 
   getDetail: (id: string) =>
     apiClient.get<any, RestaurantDetail>(`/restaurants/${id}`),

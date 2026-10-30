@@ -104,6 +104,91 @@ export class RestaurantsService {
     return { items, page, limit, hasMore, isExpandedRadius: false };
   }
 
+  /**
+   * Món ăn quanh người dùng cho trang chủ: lấy các quán đang mở trong bán kính
+   * (cùng điều kiện với findNearby), rồi lấy món còn bán của các quán đó.
+   * Sắp xếp theo khoảng cách quán; mỗi quán tối đa `perRestaurant` món để danh sách đa dạng.
+   */
+  async findNearbyDishes(query: NearbyRestaurantsQueryDto, perRestaurant = 3) {
+    const { lat, lng, radiusKm, limit } = query;
+    const box = boundingBox({ lat, lng }, radiusKm);
+
+    const restaurants = await this.prisma.$queryRaw<
+      Pick<NearbyRestaurant, 'id' | 'name' | 'imageUrl' | 'isOpen' | 'distanceKm' | 'latitude' | 'longitude'>[]
+    >`
+      SELECT * FROM (
+        SELECT
+          r.id, r.name, r."imageUrl", r."isOpen", r."deliveryRadiusKm", r.latitude, r.longitude,
+          2 * 6371 * ASIN(LEAST(1, SQRT(
+            POWER(SIN(RADIANS(r.latitude - ${lat}) / 2), 2) +
+            COS(RADIANS(${lat})) * COS(RADIANS(r.latitude)) *
+            POWER(SIN(RADIANS(r.longitude - ${lng}) / 2), 2)
+          ))) AS "distanceKm"
+        FROM restaurants r
+        WHERE r."isOpen" = true
+          AND r.latitude BETWEEN ${box.minLat} AND ${box.maxLat}
+          AND r.longitude BETWEEN ${box.minLng} AND ${box.maxLng}
+      ) AS candidates
+      WHERE "distanceKm" <= ${radiusKm} AND "distanceKm" <= "deliveryRadiusKm"
+      ORDER BY "distanceKm" ASC
+      LIMIT 30
+    `;
+    if (restaurants.length === 0) return { items: [] };
+
+    const byId = new Map(restaurants.map((r) => [r.id, r]));
+    const menuItems = await this.prisma.menuItem.findMany({
+      where: { restaurantId: { in: [...byId.keys()] }, isAvailable: true, isArchived: false },
+      select: {
+        id: true,
+        restaurantId: true,
+        categoryId: true,
+        name: true,
+        description: true,
+        price: true,
+        imageUrl: true,
+        isAvailable: true,
+        isArchived: true,
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+
+    // Xếp xen kẽ giữa các quán (món 1 của từng quán theo khoảng cách, rồi món 2...)
+    // để hai món liền nhau thường khác quán; mỗi quán tối đa `perRestaurant` món.
+    const groups = new Map<string, typeof menuItems>();
+    for (const m of menuItems) {
+      const g = groups.get(m.restaurantId) ?? [];
+      if (g.length < perRestaurant) g.push(m);
+      groups.set(m.restaurantId, g);
+    }
+    const orderedGroups = [...groups.entries()]
+      .sort(([a], [b]) => Number(byId.get(a)!.distanceKm) - Number(byId.get(b)!.distanceKm))
+      .map(([, g]) => g);
+    const interleaved: typeof menuItems = [];
+    for (let round = 0; round < perRestaurant; round++) {
+      for (const g of orderedGroups) if (g[round]) interleaved.push(g[round]);
+    }
+
+    const items = interleaved
+      .slice(0, limit)
+      .map((m) => {
+        const r = byId.get(m.restaurantId)!;
+        return {
+          ...m,
+          restaurant: {
+            id: r.id,
+            name: r.name,
+            imageUrl: r.imageUrl,
+            isOpen: r.isOpen,
+            latitude: r.latitude,
+            longitude: r.longitude,
+            distanceKm: Math.round(Number(r.distanceKm) * 100) / 100,
+          },
+        };
+      });
+
+    return { items };
+  }
+
   async findOneWithMenu(id: string) {
     const restaurant = await this.prisma.restaurant.findUnique({
       where: { id },

@@ -75,6 +75,29 @@ export interface MenuItem {
   isArchived: boolean;
 }
 
+/** Món ăn quanh người dùng (GET /restaurants/nearby/dishes). */
+export interface NearbyDish extends MenuItem {
+  restaurant: {
+    id: string;
+    name: string;
+    imageUrl?: string | null;
+    isOpen: boolean;
+    latitude: number;
+    longitude: number;
+    distanceKm: number;
+  };
+}
+
+/** Banner trang chủ (GET /banners). */
+export interface Banner {
+  id: string;
+  title: string;
+  imageUrl: string;
+  actionType?: string | null;
+  actionValue?: string | null;
+  sortOrder: number;
+}
+
 export interface Category {
   id: string;
   restaurantId: string;
