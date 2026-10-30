@@ -118,7 +118,7 @@ export const RestaurantRow = memo<CardProps>(({ restaurant: r, onPress, classNam
       <AppImage uri={r.imageUrl} className="h-28 w-28 rounded-md">
         {!r.isOpen && <ClosedOverlay />}
       </AppImage>
-      <View className="flex-1 justify-between py-0.5">
+      <View className="flex-1 justify-center gap-2">
         <Text variant="body-lg" weight="semibold" numberOfLines={2}>
           {r.name}
         </Text>
