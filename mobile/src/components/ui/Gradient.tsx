@@ -8,6 +8,8 @@ const PRESETS = {
   header: `linear-gradient(180deg, ${palette.brand['900']} 0%, ${palette.brand['700']} 30%, ${palette.brand['100']} 58%, ${palette.canvas.DEFAULT} 78%)`,
   /** Nền khối chủ đề màu xanh nhạt (ảnh mẫu 3, 5). */
   sectionBrand: `linear-gradient(180deg, ${palette.brand['50']} 0%, ${palette.canvas.DEFAULT} 70%)`,
+  /** Dải tiêu đề khối gợi ý: xanh ngọc đậm nhạt dần sang trắng (ảnh mẫu "Gợi ý dành cho …"). */
+  sectionHeaderBand: `linear-gradient(180deg, ${palette.brand['400']} 0%, ${palette.brand['100']} 60%, ${palette.canvas.DEFAULT} 100%)`,
   /** Nền khối chủ đề màu cam nhạt (ảnh mẫu 4, 5). */
   sectionAccent: `linear-gradient(180deg, ${palette.accent['50']} 0%, ${palette.canvas.DEFAULT} 70%)`,
   /** Thẻ minh hoạ trạng thái rỗng (ảnh mẫu 8). */

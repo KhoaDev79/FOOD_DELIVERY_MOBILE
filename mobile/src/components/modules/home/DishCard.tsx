@@ -2,7 +2,45 @@ import { memo } from 'react';
 import { Pressable, View } from 'react-native';
 import { AppImage, Badge, cn, Icon, IconButton, Text } from '../../ui';
 import { NearbyDish } from '../../../types/api';
-import { formatVND } from '../../../utils/format';
+import { formatDistance, formatVND } from '../../../utils/format';
+
+/**
+ * Ô món nhỏ cho lưới 2 hàng (ảnh mẫu "Gợi ý dành cho …"): ảnh vuông bo 16, nhãn giá đè góc dưới trái
+ * trên nền tối mờ, tên món 2 dòng, dòng khoảng cách + tên quán.
+ * Món không có điểm đánh giá riêng nên nhãn trên ảnh là giá (không mượn điểm của quán).
+ */
+export const DishTile = memo<{ dish: NearbyDish; onPress: (d: NearbyDish) => void; className?: string }>(
+  ({ dish, onPress, className }) => {
+    const distance = formatDistance(dish.restaurant.distanceKm);
+    return (
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={`${dish.name}, ${formatVND(dish.price)}, quán ${dish.restaurant.name}${distance ? `, cách ${distance}` : ''}`}
+        onPress={() => onPress(dish)}
+        className={cn('w-32 gap-1.5 active:opacity-80', className)}
+      >
+        <AppImage uri={dish.imageUrl} className="h-32 w-32 rounded-lg" fallbackIcon="fast-food-outline">
+          <Badge label={formatVND(dish.price)} tone="scrim" className="absolute bottom-2 left-2" />
+          {!dish.restaurant.isOpen && (
+            <View className="absolute inset-0 items-center justify-center bg-scrim">
+              <Badge label="Quán đã đóng" tone="neutral" />
+            </View>
+          )}
+        </AppImage>
+        <Text variant="body" weight="medium" numberOfLines={2} className="min-h-10">
+          {dish.name}
+        </Text>
+        <View className="flex-row items-center gap-1">
+          <Icon name="navigate-outline" size="xs" tone="muted" />
+          <Text variant="caption" weight="regular" tone="secondary" numberOfLines={1} className="flex-1">
+            {[distance, dish.restaurant.name].filter(Boolean).join(' · ')}
+          </Text>
+        </View>
+      </Pressable>
+    );
+  },
+);
+DishTile.displayName = 'DishTile';
 
 interface Props {
   dish: NearbyDish;

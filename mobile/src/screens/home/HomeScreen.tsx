@@ -15,7 +15,7 @@ import {
 import Animated, { FadeIn, FadeOut, ReduceMotion } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { BannerCarousel, BannerSkeleton } from '../../components/modules/home/BannerCarousel';
-import { DishCard } from '../../components/modules/home/DishCard';
+import { DishCard, DishTile } from '../../components/modules/home/DishCard';
 import { RestaurantRow } from '../../components/modules/restaurant/RestaurantCards';
 import {
   AppImage,
@@ -188,8 +188,12 @@ export const HomeScreen: React.FC = () => {
   const banners = bannersQuery.data ?? [];
   const dishes = useMemo(() => dishesQuery.data?.items ?? [], [dishesQuery.data]);
   // Hai khối món, mỗi món chỉ xuất hiện một lần.
-  const dishesNear = dishes.slice(0, 10);
-  const dishesMore = dishes.slice(10, 20);
+  const dishesNear = dishes.slice(0, 12);
+  const dishesMore = dishes.slice(12, 20);
+  // Lưới 2 hàng: ghép từng cặp món thành một cột.
+  const nearColumns = Array.from({ length: Math.ceil(dishesNear.length / 2) }, (_, i) =>
+    dishesNear.slice(i * 2, i * 2 + 2),
+  );
 
   const toast = useToast();
   const addItem = useCartStore((s) => s.addItem);
@@ -334,20 +338,26 @@ export const HomeScreen: React.FC = () => {
             <RailSkeleton />
           ) : (
             <>
+              {/* Lưới 2 hàng cuộn ngang với dải tiêu đề gradient (ảnh mẫu "Gợi ý dành cho …") */}
               {dishesNear.length > 0 && (
-                <Gradient preset="sectionBrand" className="mt-6 gap-3 pb-6 pt-5">
-                  <SectionHeader
-                    title="Món ngon gần bạn"
-                    subtitle="Từ các quán đang mở quanh đây"
-                    icon="restaurant"
-                    iconTone="brand"
-                  />
-                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerClassName="gap-3 px-4">
-                    {dishesNear.map((d) => (
-                      <DishCard key={d.id} dish={d} onPress={openDish} onAdd={addDish} />
+                <View className="mt-6 pb-6">
+                  <Gradient preset="sectionHeaderBand" className="pb-3 pt-5">
+                    <SectionHeader title="Món ngon gần bạn" icon="restaurant" iconTone="accent" />
+                  </Gradient>
+                  <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    contentContainerClassName="gap-3 px-4 pt-1"
+                  >
+                    {nearColumns.map((col) => (
+                      <View key={col[0].id} className="gap-4">
+                        {col.map((d) => (
+                          <DishTile key={d.id} dish={d} onPress={openDish} />
+                        ))}
+                      </View>
                     ))}
                   </ScrollView>
-                </Gradient>
+                </View>
               )}
               {dishesMore.length > 0 && (
                 <Gradient preset="sectionAccent" className="gap-3 pb-6 pt-5">
