@@ -3,7 +3,7 @@ import { Pressable, PressableProps } from 'react-native';
 import { cn } from './cn';
 import { Icon, IconName, IconTone } from './Icon';
 
-export type IconButtonVariant = 'surface' | 'subtle' | 'brand' | 'ghost' | 'scrim';
+export type IconButtonVariant = 'surface' | 'subtle' | 'brand' | 'ghost' | 'scrim' | 'glass';
 export type IconButtonSize = 'sm' | 'md' | 'lg';
 
 const VARIANT: Record<IconButtonVariant, string> = {
@@ -12,6 +12,8 @@ const VARIANT: Record<IconButtonVariant, string> = {
   brand: 'bg-brand-500 shadow-glow active:bg-brand-600',
   ghost: 'bg-transparent active:bg-canvas-subtle',
   scrim: 'bg-scrim active:opacity-80',
+  /** Nền trắng trong suốt, viền mờ – nút đè trên ảnh mà không che ảnh. */
+  glass: 'bg-surface/70 border border-surface/80 shadow-card active:bg-surface/90',
 };
 
 const TONE: Record<IconButtonVariant, IconTone> = {
@@ -20,6 +22,7 @@ const TONE: Record<IconButtonVariant, IconTone> = {
   brand: 'inverse',
   ghost: 'default',
   scrim: 'inverse',
+  glass: 'default',
 };
 
 const SIZE: Record<IconButtonSize, string> = {

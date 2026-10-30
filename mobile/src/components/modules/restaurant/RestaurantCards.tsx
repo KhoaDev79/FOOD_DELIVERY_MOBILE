@@ -12,7 +12,15 @@ const useMeta = (r: Restaurant) => {
   const fee = r.distanceKm !== undefined ? calculateDeliveryFee(r.distanceKm).fee : null;
   const rating =
     r.rating > 0 ? r.rating.toLocaleString('vi-VN', { minimumFractionDigits: 1, maximumFractionDigits: 1 }) : null;
-  const a11y = [r.name, rating && `${rating} sao`, distance, time && `khoảng ${time}`, !r.isOpen && 'đã đóng cửa']
+  const hours = r.openTime && r.closeTime ? `giờ mở cửa ${r.openTime} đến ${r.closeTime}` : null;
+  const a11y = [
+    r.name,
+    rating && `${rating} sao`,
+    distance,
+    time && `giao khoảng ${time}`,
+    hours,
+    !r.isOpen && 'đã đóng cửa',
+  ]
     .filter(Boolean)
     .join(', ');
   return { distance, time, fee, rating, a11y };
@@ -141,14 +149,26 @@ export const RestaurantRow = memo<CardProps>(({ restaurant: r, onPress, classNam
               </View>
             )}
             {m.time && (
-              <View className="flex-row items-center gap-1">
-                <Icon name="time-outline" size="xs" tone="brand" />
+              <View className="flex-row items-center gap-1" accessibilityLabel={`Giao khoảng ${m.time}`}>
+                <Icon name="bicycle-outline" size="xs" tone="brand" />
                 <Text variant="caption" weight="regular" tone="secondary">
                   {m.time}
                 </Text>
               </View>
             )}
           </View>
+          {/* Khung giờ hoạt động của quán (openTime – closeTime từ API) */}
+          {r.openTime && r.closeTime && (
+            <View className="flex-row items-center gap-1">
+              <Icon name="time-outline" size="xs" tone={r.isOpen ? 'success' : 'danger'} />
+              <Text variant="caption" weight="medium" tone={r.isOpen ? 'success' : 'danger'}>
+                {r.isOpen ? 'Mở cửa' : 'Đã đóng'}
+              </Text>
+              <Text variant="caption" weight="regular" tone="secondary">
+                · {r.openTime} - {r.closeTime}
+              </Text>
+            </View>
+          )}
           {m.fee !== null && <InfoChip label={`Ship ${formatVND(m.fee)}`} tone="freeship" icon="cube-outline" />}
         </View>
       </View>

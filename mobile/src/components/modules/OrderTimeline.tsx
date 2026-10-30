@@ -33,13 +33,7 @@ export const OrderTimeline: React.FC<OrderTimelineProps> = ({ currentStatus, sta
         return (
           <View key={step.key} style={styles.stepRow}>
             <View style={styles.indicatorCol}>
-              <View
-                style={[
-                  styles.circle,
-                  isCompleted && styles.circleCompleted,
-                  isCurrent && styles.circleCurrent,
-                ]}
-              >
+              <View style={[styles.circle, isCompleted && styles.circleCompleted, isCurrent && styles.circleCurrent]}>
                 {isCompleted ? (
                   <Ionicons name="checkmark" size={14} color={colors.white} />
                 ) : (
@@ -47,28 +41,15 @@ export const OrderTimeline: React.FC<OrderTimelineProps> = ({ currentStatus, sta
                 )}
               </View>
               {index < ORDER_STEPS.length - 1 && (
-                <View
-                  style={[
-                    styles.line,
-                    index < currentStep && styles.lineCompleted,
-                  ]}
-                />
+                <View style={[styles.line, index < currentStep && styles.lineCompleted]} />
               )}
             </View>
 
             <View style={styles.contentCol}>
-              <Text
-                style={[
-                  styles.label,
-                  isCompleted && styles.labelCompleted,
-                  isCurrent && styles.labelCurrent,
-                ]}
-              >
+              <Text style={[styles.label, isCompleted && styles.labelCompleted, isCurrent && styles.labelCurrent]}>
                 {step.label}
               </Text>
-              {historyItem && (
-                <Text style={styles.timeText}>{formatDateTime(historyItem.createdAt)}</Text>
-              )}
+              {historyItem && <Text style={styles.timeText}>{formatDateTime(historyItem.createdAt)}</Text>}
             </View>
           </View>
         );
@@ -154,4 +135,3 @@ const styles = StyleSheet.create({
     color: colors.danger,
   },
 });
-

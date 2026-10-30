@@ -13,12 +13,7 @@ interface MenuItemRowProps {
   onToggleFavorite?: () => void;
 }
 
-export const MenuItemRow: React.FC<MenuItemRowProps> = ({
-  item,
-  onAdd,
-  isFavorite,
-  onToggleFavorite,
-}) => {
+export const MenuItemRow: React.FC<MenuItemRowProps> = ({ item, onAdd, isFavorite, onToggleFavorite }) => {
   return (
     <View style={styles.container}>
       <View style={styles.info}>
@@ -51,12 +46,7 @@ export const MenuItemRow: React.FC<MenuItemRowProps> = ({
       </View>
 
       <View style={styles.imageWrapper}>
-        <AppImage
-          uri={item.imageUrl}
-          style={styles.image}
-          fallbackTitle={item.name}
-          fallbackIcon="fast-food-outline"
-        />
+        <AppImage uri={item.imageUrl} style={styles.image} fallbackTitle={item.name} fallbackIcon="fast-food-outline" />
 
         <TouchableOpacity
           style={[styles.addButton, !item.isAvailable && styles.disabledButton]}

@@ -1,13 +1,7 @@
 export type Role = 'CUSTOMER' | 'RESTAURANT_OWNER' | 'DRIVER' | 'ADMIN';
 
 export type OrderStatus =
-  | 'PENDING'
-  | 'CONFIRMED'
-  | 'PREPARING'
-  | 'READY_FOR_PICKUP'
-  | 'PICKED_UP'
-  | 'DELIVERED'
-  | 'CANCELLED';
+  'PENDING' | 'CONFIRMED' | 'PREPARING' | 'READY_FOR_PICKUP' | 'PICKED_UP' | 'DELIVERED' | 'CANCELLED';
 
 export type PaymentMethod = 'COD' | 'VNPAY';
 export type PaymentStatus = 'UNPAID' | 'PAID' | 'FAILED' | 'REFUNDED';
@@ -61,6 +55,9 @@ export interface Restaurant {
   isOpen: boolean;
   rating: number;
   distanceKm?: number;
+  /** Giờ mở/đóng cửa "HH:mm" (trả về từ /restaurants/nearby). */
+  openTime?: string;
+  closeTime?: string;
 }
 
 export interface MenuItem {
@@ -82,6 +79,7 @@ export interface NearbyDish extends MenuItem {
     name: string;
     imageUrl?: string | null;
     isOpen: boolean;
+    rating: number;
     latitude: number;
     longitude: number;
     distanceKm: number;
@@ -192,4 +190,3 @@ export interface OrderSummary {
     imageUrl?: string | null;
   };
 }
-

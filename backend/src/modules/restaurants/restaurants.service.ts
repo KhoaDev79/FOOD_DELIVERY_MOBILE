@@ -20,6 +20,9 @@ export interface NearbyRestaurant {
   deliveryRadiusKm: number;
   isOpen: boolean;
   rating: number;
+  /** Giờ mở/đóng cửa dạng "HH:mm" (bổ sung cho trang chủ). */
+  openTime: string;
+  closeTime: string;
   distanceKm: number;
 }
 
@@ -49,7 +52,7 @@ export class RestaurantsService {
       SELECT * FROM (
         SELECT
           r.id, r.name, r.description, r."imageUrl", r.address,
-          r.latitude, r.longitude, r."deliveryRadiusKm", r."isOpen", r.rating,
+          r.latitude, r.longitude, r."deliveryRadiusKm", r."isOpen", r.rating, r."openTime", r."closeTime",
           2 * 6371 * ASIN(LEAST(1, SQRT(
             POWER(SIN(RADIANS(r.latitude - ${lat}) / 2), 2) +
             COS(RADIANS(${lat})) * COS(RADIANS(r.latitude)) *
@@ -74,7 +77,7 @@ export class RestaurantsService {
       const nearestRows = await this.prisma.$queryRaw<NearbyRestaurant[]>`
         SELECT
           r.id, r.name, r.description, r."imageUrl", r.address,
-          r.latitude, r.longitude, r."deliveryRadiusKm", r."isOpen", r.rating,
+          r.latitude, r.longitude, r."deliveryRadiusKm", r."isOpen", r.rating, r."openTime", r."closeTime",
           2 * 6371 * ASIN(LEAST(1, SQRT(
             POWER(SIN(RADIANS(r.latitude - ${lat}) / 2), 2) +
             COS(RADIANS(${lat})) * COS(RADIANS(r.latitude)) *
@@ -114,11 +117,11 @@ export class RestaurantsService {
     const box = boundingBox({ lat, lng }, radiusKm);
 
     const restaurants = await this.prisma.$queryRaw<
-      Pick<NearbyRestaurant, 'id' | 'name' | 'imageUrl' | 'isOpen' | 'distanceKm' | 'latitude' | 'longitude'>[]
+      Pick<NearbyRestaurant, 'id' | 'name' | 'imageUrl' | 'isOpen' | 'distanceKm' | 'latitude' | 'longitude' | 'rating'>[]
     >`
       SELECT * FROM (
         SELECT
-          r.id, r.name, r."imageUrl", r."isOpen", r."deliveryRadiusKm", r.latitude, r.longitude,
+          r.id, r.name, r."imageUrl", r."isOpen", r."deliveryRadiusKm", r.latitude, r.longitude, r.rating,
           2 * 6371 * ASIN(LEAST(1, SQRT(
             POWER(SIN(RADIANS(r.latitude - ${lat}) / 2), 2) +
             COS(RADIANS(${lat})) * COS(RADIANS(r.latitude)) *
@@ -179,6 +182,7 @@ export class RestaurantsService {
             name: r.name,
             imageUrl: r.imageUrl,
             isOpen: r.isOpen,
+            rating: r.rating,
             latitude: r.latitude,
             longitude: r.longitude,
             distanceKm: Math.round(Number(r.distanceKm) * 100) / 100,
