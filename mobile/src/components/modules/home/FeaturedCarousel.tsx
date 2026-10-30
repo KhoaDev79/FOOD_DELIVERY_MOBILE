@@ -17,16 +17,6 @@ import { formatDistance } from '../../../utils/format';
 const GAP = 12;
 const AUTO_MS = 4000;
 const SIDE_SCALE = 0.86;
-const SCALLOPS = 9;
-
-/** Viền răng cưa (kiểu vé) ở mép dưới ảnh như ảnh mẫu khối "Giật Deal Sốc". */
-const ScallopEdge: React.FC = () => (
-  <View pointerEvents="none" className="absolute -bottom-1.5 left-0 right-0 flex-row justify-around">
-    {Array.from({ length: SCALLOPS }, (_, i) => (
-      <View key={i} className="h-3 w-3 rounded-full bg-surface" />
-    ))}
-  </View>
-);
 
 const FeaturedCard: React.FC<{
   restaurant: Restaurant;
@@ -68,7 +58,6 @@ const FeaturedCard: React.FC<{
               </Text>
             </View>
           )}
-          <ScallopEdge />
         </AppImage>
         <View className="min-h-20 gap-1 px-3 pb-3 pt-3">
           <Text variant="body-lg" weight="medium" numberOfLines={2}>
@@ -93,7 +82,7 @@ const FeaturedCard: React.FC<{
 
 /**
  * Khối "Quán được yêu thích" theo bố cục ảnh mẫu "Giật Deal Sốc":
- * khung bo 24 nền kem, tiêu đề có icon, thẻ ở giữa phóng to, thẻ hai bên nhỏ lại.
+ * khung bo 24 nền kem, tiêu đề có icon, thẻ ở giữa phóng to, thẻ hai bên nhỏ lại (không có viền chấm tròn).
  * Dữ liệu: các quán điểm cao nhất (không hứa khuyến mãi).
  */
 export const FeaturedCarousel: React.FC<{
