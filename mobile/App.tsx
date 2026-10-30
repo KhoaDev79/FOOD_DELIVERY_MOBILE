@@ -7,6 +7,7 @@ import { useFonts } from 'expo-font';
 import { StatusBar } from 'expo-status-bar';
 import { Platform } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { ToastProvider } from './src/components/ui/Overlays';
 import { DevGallery } from './src/dev/DevGallery';
 import { AppNavigator } from './src/navigation/AppNavigator';
 import { fontAssets } from './src/theme';
@@ -42,6 +43,7 @@ export default function App() {
   return (
     <SafeAreaProvider className="flex-1 min-h-full">
       <QueryClientProvider client={queryClient}>
+        <ToastProvider>
         {showGallery ? (
           <DevGallery />
         ) : (
@@ -50,6 +52,7 @@ export default function App() {
             <AppNavigator />
           </NavigationContainer>
         )}
+        </ToastProvider>
       </QueryClientProvider>
     </SafeAreaProvider>
   );

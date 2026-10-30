@@ -4,7 +4,6 @@ export type MainTabParamList = {
   HomeTab: undefined;
   OrdersTab: undefined;
   FavoritesTab: undefined;
-  InboxTab: undefined;
   ProfileTab: undefined;
 };
 

@@ -1,9 +1,10 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import React from 'react';
+import React, { useState } from 'react';
 import {
   Alert,
+  Modal,
   SafeAreaView,
   ScrollView,
   StyleSheet,
@@ -11,7 +12,9 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { ListRow } from '../../components/ui';
 import { colors } from '../../constants/colors';
+import { DevGallery } from '../../dev/DevGallery';
 import { useMe } from '../../services/useUser';
 import { useAuthStore } from '../../store/useAuthStore';
 import { RootStackParamList } from '../../types/navigation';
@@ -20,6 +23,7 @@ export const ProfileScreen: React.FC = () => {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const { data: user } = useMe();
   const logout = useAuthStore((s) => s.logout);
+  const [galleryOpen, setGalleryOpen] = useState(false);
 
   const handleLogout = () => {
     Alert.alert('Đăng xuất', 'Bạn có chắc chắn muốn đăng xuất khỏi tài khoản?', [
@@ -88,7 +92,15 @@ export const ProfileScreen: React.FC = () => {
           <Ionicons name="log-out-outline" size={22} color={colors.danger} />
           <Text style={styles.logoutText}>Đăng xuất</Text>
         </TouchableOpacity>
+        {__DEV__ && (
+          <ListRow icon="color-palette-outline" title="Thư viện thành phần" subtitle="Chỉ hiện ở chế độ phát triển" onPress={() => setGalleryOpen(true)} />
+        )}
       </ScrollView>
+      {__DEV__ && (
+        <Modal visible={galleryOpen} animationType="slide" onRequestClose={() => setGalleryOpen(false)}>
+          <DevGallery onClose={() => setGalleryOpen(false)} />
+        </Modal>
+      )}
     </SafeAreaView>
   );
 };
