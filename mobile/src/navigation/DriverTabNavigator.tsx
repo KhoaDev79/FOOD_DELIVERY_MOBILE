@@ -8,6 +8,7 @@ import { DriverDeliveriesScreen } from '../screens/driver/DriverDeliveriesScreen
 import { DriverDeliveryDetailScreen } from '../screens/driver/DriverDeliveryDetailScreen';
 import { DriverProfileScreen } from '../screens/driver/DriverProfileScreen';
 import { DriverVehicleScreen } from '../screens/driver/DriverVehicleScreen';
+import { DriverWalletScreen } from '../screens/driver/DriverWalletScreen';
 import { EditProfileScreen } from '../screens/profile/EditProfileScreen';
 import { DriverStackParamList, DriverTabParamList } from '../types/navigation';
 
@@ -72,6 +73,10 @@ export const DriverTabNavigator: React.FC = () => (
     <Stack.Screen
       name="DriverVehicle"
       component={DriverVehicleScreen as React.ComponentType<any>}
+    />
+    <Stack.Screen
+      name="DriverWallet"
+      component={DriverWalletScreen as React.ComponentType<any>}
     />
   </Stack.Navigator>
 );

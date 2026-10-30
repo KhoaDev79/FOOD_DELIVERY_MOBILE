@@ -1,14 +1,19 @@
+import { Type } from 'class-transformer';
 import { DriverVerificationStatus, VehicleType } from '@prisma/client';
 import {
   IsBoolean,
   IsEnum,
+  IsInt,
   IsLatitude,
   IsLongitude,
   IsNotEmpty,
   IsNumber,
   IsOptional,
   IsString,
+  Max,
+  MaxLength,
   Min,
+  MinLength,
   ValidateIf,
 } from 'class-validator';
 
@@ -105,5 +110,51 @@ export class AdminVerifyDriverDto {
   @IsNotEmpty({ message: 'Lý do bắt buộc phải nhập khi từ chối hoặc tạm khoá hồ sơ' })
   @IsString({ message: 'Lý do phải là chuỗi ký tự' })
   reason?: string;
+}
+
+export class DriverLedgerQueryDto {
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  page?: number = 1;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(50)
+  limit?: number = 20;
+}
+
+export class AdminDriversLedgerQueryDto extends DriverLedgerQueryDto {
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  minBalance?: number = 0;
+}
+
+export class DriverSettlementDto {
+  @Type(() => Number)
+  @IsInt({ message: 'Số tiền nộp phải là số nguyên (VNĐ)' })
+  @Min(1000, { message: 'Số tiền nộp tối thiểu là 1.000đ' })
+  amount: number;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(300)
+  note?: string;
+}
+
+export class DriverAdjustmentDto {
+  @Type(() => Number)
+  @IsInt({ message: 'Số tiền điều chỉnh phải là số nguyên (VNĐ)' })
+  amount: number;
+
+  @IsString({ message: 'Ghi chú điều chỉnh là bắt buộc' })
+  @MinLength(1, { message: 'Vui lòng nhập lý do điều chỉnh công nợ' })
+  @MaxLength(300)
+  note: string;
 }
 

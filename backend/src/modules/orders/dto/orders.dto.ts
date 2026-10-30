@@ -5,6 +5,8 @@ import {
   ArrayMinSize,
   IsEnum,
   IsInt,
+  IsLatitude,
+  IsLongitude,
   IsOptional,
   IsString,
   IsUUID,
@@ -128,4 +130,21 @@ export class ReviewOrderDto {
   @IsString()
   @MaxLength(500)
   comment?: string;
+}
+
+export class ReleaseOrderDto {
+  @IsString()
+  @MinLength(1)
+  @MaxLength(200)
+  reason: string;
+}
+
+export class DriverArrivedDto {
+  @Type(() => Number)
+  @IsLatitude()
+  lat: number;
+
+  @Type(() => Number)
+  @IsLongitude()
+  lng: number;
 }

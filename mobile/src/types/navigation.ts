@@ -63,6 +63,7 @@ export type DriverStackParamList = {
   DriverDeliveryDetail: { orderId: string };
   EditProfile: undefined;
   DriverVehicle?: undefined;
+  DriverWallet: undefined;
   Chat: { orderId: string; recipientName?: string; recipientRole?: string };
 };
 

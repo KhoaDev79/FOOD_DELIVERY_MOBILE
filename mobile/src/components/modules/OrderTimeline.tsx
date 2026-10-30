@@ -9,14 +9,19 @@ import { ORDER_STATUS_CONFIG, ORDER_STEPS } from '../../utils/orderStatus';
 interface OrderTimelineProps {
   currentStatus: string;
   statusHistory: OrderStatusHistory[];
+  reasonText?: string | null;
 }
 
-export const OrderTimeline: React.FC<OrderTimelineProps> = ({ currentStatus, statusHistory }) => {
-  if (currentStatus === 'CANCELLED') {
+export const OrderTimeline: React.FC<OrderTimelineProps> = ({ currentStatus, statusHistory, reasonText }) => {
+  if (currentStatus === 'CANCELLED' || currentStatus === 'DELIVERY_FAILED') {
+    const title = currentStatus === 'DELIVERY_FAILED' ? 'Giao hàng không thành công' : 'Đơn hàng đã bị hủy';
     return (
       <View style={styles.cancelledBox}>
         <Ionicons name="close-circle" size={32} color={colors.danger} />
-        <Text style={styles.cancelledText}>Đơn hàng đã bị hủy</Text>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.cancelledText}>{title}</Text>
+          {!!reasonText && <Text style={styles.timeText}>{reasonText}</Text>}
+        </View>
       </View>
     );
   }

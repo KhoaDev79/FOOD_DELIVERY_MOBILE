@@ -22,6 +22,11 @@ describe('DriversService', () => {
       auditLog: {
         create: jest.fn(),
       },
+      driverLedger: {
+        create: jest.fn(),
+        findMany: jest.fn(),
+      },
+      $queryRaw: jest.fn().mockResolvedValue([]),
     };
     mockPrisma.$transaction = jest.fn((cb: (tx: any) => unknown) => cb(mockPrisma));
     service = new DriversService(mockPrisma);
@@ -157,6 +162,61 @@ describe('DriversService', () => {
 
       expect(res.verificationStatus).toBe(DriverVerificationStatus.SUSPENDED);
       expect(res.isOnline).toBe(false);
+    });
+  });
+
+  describe('adminRecordSettlement (C4 Ledger)', () => {
+    it('từ chối nộp tiền vượt quá công nợ hiện tại của tài xế', async () => {
+      mockPrisma.driverProfile.findUnique.mockResolvedValue({
+        id: 'p-1',
+        userId: 'driver-1',
+        codBalance: 500000,
+      });
+
+      await expect(
+        service.adminRecordSettlement('driver-1', 'admin-1', {
+          amount: 600000,
+          note: 'Nộp dư',
+        }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('ghi nhận nộp tiền hợp lệ với số âm trong DriverLedger và giảm codBalance', async () => {
+      mockPrisma.driverProfile.findUnique.mockResolvedValue({
+        id: 'p-1',
+        userId: 'driver-1',
+        codBalance: 500000,
+      });
+      mockPrisma.driverProfile.update.mockResolvedValue({
+        id: 'p-1',
+        userId: 'driver-1',
+        codBalance: 200000,
+      });
+      mockPrisma.driverLedger.create.mockImplementation(({ data }: any) => Promise.resolve(data));
+
+      const res = await service.adminRecordSettlement('driver-1', 'admin-1', {
+        amount: 300000,
+        note: 'Nộp tiền mặt tại văn phòng',
+      });
+
+      expect(res.balance).toBe(200000);
+      expect(mockPrisma.driverLedger.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            driverId: 'driver-1',
+            type: 'SETTLEMENT',
+            amount: -300000,
+            balanceAfter: 200000,
+          }),
+        }),
+      );
+      expect(mockPrisma.auditLog.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            action: 'DRIVER_SETTLEMENT',
+          }),
+        }),
+      );
     });
   });
 });

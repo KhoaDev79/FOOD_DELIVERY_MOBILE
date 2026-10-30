@@ -29,7 +29,6 @@ const linking = {
   prefixes: ['fooddelivery://'],
   config: {
     screens: {
-      Checkout: 'payment-result',
       OrderTracking: 'order/:orderId',
     },
   },

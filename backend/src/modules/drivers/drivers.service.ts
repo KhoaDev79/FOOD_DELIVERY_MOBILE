@@ -4,8 +4,17 @@ import {
   ForbiddenException,
   Injectable,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
-import { DriverProfile, DriverVerificationStatus, Prisma, Role, VehicleType } from '@prisma/client';
+import { ConfigService } from '@nestjs/config';
+import {
+  DriverProfile,
+  DriverVerificationStatus,
+  LedgerEntryType,
+  Prisma,
+  Role,
+  VehicleType,
+} from '@prisma/client';
 import {
   isValidVietnameseLicensePlate,
   maskBankAccountNumber,
@@ -13,7 +22,11 @@ import {
 } from '../../common/utils/vietnamese-plate.util';
 import { PrismaService } from '../prisma/prisma.service';
 import {
+  AdminDriversLedgerQueryDto,
   AdminVerifyDriverDto,
+  DriverAdjustmentDto,
+  DriverLedgerQueryDto,
+  DriverSettlementDto,
   ListDriversAdminQueryDto,
   UpdateDriverLocationDto,
   UpdateDriverStatusDto,
@@ -37,7 +50,14 @@ function sanitizeProfile(profile: DriverProfile): SanitizedDriverProfile {
 
 @Injectable()
 export class DriversService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    @Optional() private readonly config?: ConfigService,
+  ) {}
+
+  private getDebtLimit(): number {
+    return Number(this.config?.get<number>('business.driverDebtLimit') ?? 2000000);
+  }
 
   /** Lấy hồ sơ tài xế hiện hành (tự khởi tạo trạng thái PENDING nếu chưa có). */
   async getMe(userId: string): Promise<SanitizedDriverProfile> {
@@ -217,6 +237,224 @@ export class DriversService {
   }
 
   // =========================================================================
+  //  CÔNG NỢ COD (DRIVER LEDGER) — C4
+  // =========================================================================
+
+  /** Tài xế xem sổ quỹ COD và hạn mức công nợ của mình */
+  async getMyLedger(userId: string, query: DriverLedgerQueryDto) {
+    const profile = await this.getMe(userId);
+    const page = Number(query.page) || 1;
+    const limit = Number(query.limit) || 20;
+
+    const rows = await this.prisma.driverLedger.findMany({
+      where: { driverId: userId },
+      orderBy: { createdAt: 'desc' },
+      skip: (page - 1) * limit,
+      take: limit + 1,
+    });
+
+    return {
+      balance: profile.codBalance,
+      limit: this.getDebtLimit(),
+      items: rows.slice(0, limit),
+      page,
+      pageSize: limit,
+      hasMore: rows.length > limit,
+    };
+  }
+
+  /** Admin: Danh sách tài xế kèm số dư công nợ COD (sắp giảm dần) */
+  async adminListDriverLedgers(query: AdminDriversLedgerQueryDto) {
+    const page = Number(query.page) || 1;
+    const limit = Number(query.limit) || 20;
+    const minBalance = Number(query.minBalance) || 0;
+
+    const where: Prisma.DriverProfileWhereInput =
+      minBalance > 0 ? { codBalance: { gte: minBalance } } : {};
+
+    const [profiles, total, agg] = await Promise.all([
+      this.prisma.driverProfile.findMany({
+        where,
+        include: {
+          user: {
+            select: {
+              id: true,
+              email: true,
+              fullName: true,
+              phone: true,
+              avatarUrl: true,
+              isActive: true,
+            },
+          },
+        },
+        orderBy: [{ codBalance: 'desc' }, { updatedAt: 'desc' }],
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      this.prisma.driverProfile.count({ where }),
+      this.prisma.driverProfile.aggregate({
+        _sum: { codBalance: true },
+      }),
+    ]);
+
+    return {
+      items: profiles.map((p) => sanitizeProfile(p)),
+      total,
+      page,
+      limit,
+      debtLimit: this.getDebtLimit(),
+      totalDebt: agg._sum.codBalance ?? 0,
+    };
+  }
+
+  /** Admin: Xem chi tiết sổ quỹ COD của 1 tài xế */
+  async adminGetDriverLedger(driverUserId: string, query: DriverLedgerQueryDto) {
+    const profile = await this.prisma.driverProfile.findUnique({
+      where: { userId: driverUserId },
+      include: {
+        user: { select: { id: true, fullName: true, email: true, phone: true, isActive: true } },
+      },
+    });
+    if (!profile) {
+      throw new NotFoundException('Không tìm thấy hồ sơ tài xế');
+    }
+
+    const page = Number(query.page) || 1;
+    const limit = Number(query.limit) || 20;
+    const rows = await this.prisma.driverLedger.findMany({
+      where: { driverId: driverUserId },
+      orderBy: { createdAt: 'desc' },
+      skip: (page - 1) * limit,
+      take: limit + 1,
+    });
+
+    return {
+      driver: profile.user,
+      balance: profile.codBalance,
+      limit: this.getDebtLimit(),
+      items: rows.slice(0, limit),
+      page,
+      pageSize: limit,
+      hasMore: rows.length > limit,
+    };
+  }
+
+  /** Admin: Ghi nhận tài xế nộp tiền mặt về công ty (SETTLEMENT) */
+  async adminRecordSettlement(driverUserId: string, adminId: string, dto: DriverSettlementDto) {
+    if (dto.amount <= 0) {
+      throw new BadRequestException('Số tiền nộp phải lớn hơn 0');
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT "id" FROM "driver_profiles" WHERE "userId" = ${driverUserId}::uuid FOR UPDATE`;
+      const profile = await tx.driverProfile.findUnique({ where: { userId: driverUserId } });
+      if (!profile) {
+        throw new NotFoundException('Không tìm thấy hồ sơ tài xế');
+      }
+      if (dto.amount > profile.codBalance) {
+        throw new BadRequestException(
+          `Số tiền nộp (${dto.amount.toLocaleString('vi-VN')}đ) vượt quá công nợ hiện tại (${profile.codBalance.toLocaleString('vi-VN')}đ)`,
+        );
+      }
+
+      const updatedProfile = await tx.driverProfile.update({
+        where: { userId: driverUserId },
+        data: { codBalance: { decrement: dto.amount } },
+      });
+
+      const entry = await tx.driverLedger.create({
+        data: {
+          driverId: driverUserId,
+          type: LedgerEntryType.SETTLEMENT,
+          amount: -dto.amount,
+          balanceAfter: updatedProfile.codBalance,
+          note: dto.note?.trim() || 'Tài xế nộp tiền thu hộ COD',
+          createdById: adminId,
+        },
+      });
+
+      await tx.auditLog.create({
+        data: {
+          actorId: adminId,
+          action: 'DRIVER_SETTLEMENT',
+          targetType: 'DRIVER',
+          targetId: profile.id,
+          metadata: {
+            driverId: driverUserId,
+            amount: dto.amount,
+            previousBalance: profile.codBalance,
+            balanceAfter: updatedProfile.codBalance,
+            note: dto.note?.trim() || null,
+          },
+        },
+      });
+
+      return {
+        entry,
+        balance: updatedProfile.codBalance,
+        limit: this.getDebtLimit(),
+      };
+    });
+  }
+
+  /** Admin: Điều chỉnh công nợ COD thủ công (+/-) kèm lý do bắt buộc */
+  async adminRecordAdjustment(driverUserId: string, adminId: string, dto: DriverAdjustmentDto) {
+    if (!dto.amount || dto.amount === 0) {
+      throw new BadRequestException('Số tiền điều chỉnh phải khác 0');
+    }
+    const cleanNote = dto.note?.trim();
+    if (!cleanNote) {
+      throw new BadRequestException('Ghi chú điều chỉnh là bắt buộc');
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT "id" FROM "driver_profiles" WHERE "userId" = ${driverUserId}::uuid FOR UPDATE`;
+      const profile = await tx.driverProfile.findUnique({ where: { userId: driverUserId } });
+      if (!profile) {
+        throw new NotFoundException('Không tìm thấy hồ sơ tài xế');
+      }
+
+      const updatedProfile = await tx.driverProfile.update({
+        where: { userId: driverUserId },
+        data: { codBalance: { increment: dto.amount } },
+      });
+
+      const entry = await tx.driverLedger.create({
+        data: {
+          driverId: driverUserId,
+          type: LedgerEntryType.ADJUSTMENT,
+          amount: dto.amount,
+          balanceAfter: updatedProfile.codBalance,
+          note: cleanNote,
+          createdById: adminId,
+        },
+      });
+
+      await tx.auditLog.create({
+        data: {
+          actorId: adminId,
+          action: 'DRIVER_LEDGER_ADJUSTMENT',
+          targetType: 'DRIVER',
+          targetId: profile.id,
+          metadata: {
+            driverId: driverUserId,
+            amount: dto.amount,
+            previousBalance: profile.codBalance,
+            balanceAfter: updatedProfile.codBalance,
+            note: cleanNote,
+          },
+        },
+      });
+
+      return {
+        entry,
+        balance: updatedProfile.codBalance,
+        limit: this.getDebtLimit(),
+      };
+    });
+  }
+
+  // =========================================================================
   //  ADMIN ENDPOINTS
   // =========================================================================
 
@@ -313,4 +551,3 @@ export class DriversService {
     return sanitizeProfile(updated);
   }
 }
-

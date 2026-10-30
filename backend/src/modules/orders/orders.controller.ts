@@ -4,8 +4,10 @@ import { AuthUser, CurrentUser } from '../../common/decorators/current-user.deco
 import { Roles } from '../../common/decorators/roles.decorator';
 import {
   CreateOrderDto,
+  DriverArrivedDto,
   ListOrdersQueryDto,
   QuoteOrderDto,
+  ReleaseOrderDto,
   ReviewOrderDto,
   UpdateOrderStatusDto,
 } from './dto/orders.dto';
@@ -81,7 +83,7 @@ export class OrdersController {
     @CurrentUser() user: AuthUser,
     @Body() dto: UpdateOrderStatusDto,
   ) {
-    return this.orders.updateStatus(id, user, dto.status);
+    return this.orders.updateStatus(id, user, dto);
   }
 
   /** POST /orders/:id/review – khách chấm điểm quán (1–5 sao) cho đơn đã giao. */
@@ -99,5 +101,31 @@ export class OrdersController {
   @Post(':id/accept')
   accept(@Param('id', ParseUUIDPipe) id: string, @CurrentUser('id') driverId: string) {
     return this.orders.acceptByDriver(id, driverId);
+  }
+
+  @Roles(Role.DRIVER)
+  @Post(':id/release')
+  release(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser('id') driverId: string,
+    @Body() dto: ReleaseOrderDto,
+  ) {
+    return this.orders.releaseByDriver(id, driverId, dto.reason);
+  }
+
+  @Roles(Role.DRIVER)
+  @Post(':id/arrived')
+  arrived(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser('id') driverId: string,
+    @Body() dto: DriverArrivedDto,
+  ) {
+    return this.orders.markDriverArrived(id, driverId, dto);
+  }
+
+  @Roles(Role.DRIVER)
+  @Post(':id/contact-attempts')
+  contactAttempt(@Param('id', ParseUUIDPipe) id: string, @CurrentUser('id') driverId: string) {
+    return this.orders.recordContactAttempt(id, driverId);
   }
 }

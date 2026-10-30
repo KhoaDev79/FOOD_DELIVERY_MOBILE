@@ -23,6 +23,7 @@ import { palette } from '../../theme';
 import { OrderStatus, OrderSummary } from '../../types/api';
 import { RootStackParamList } from '../../types/navigation';
 import { formatDateTime, formatVND } from '../../utils/format';
+import { formatOrderEndReason } from '../../utils/orderStatus';
 
 type FilterKey = 'all' | 'active' | 'done' | 'cancelled';
 
@@ -32,14 +33,14 @@ const FILTERS: { value: FilterKey; label: string }[] = [
   { value: 'all', label: 'Tất cả' },
   { value: 'active', label: 'Đang xử lý' },
   { value: 'done', label: 'Hoàn thành' },
-  { value: 'cancelled', label: 'Đã huỷ' },
+  { value: 'cancelled', label: 'Đã huỷ / Thất bại' },
 ];
 
 const matches = (o: OrderSummary, f: FilterKey) =>
   f === 'all' ||
   (f === 'active' && ACTIVE.includes(o.status)) ||
   (f === 'done' && o.status === 'DELIVERED') ||
-  (f === 'cancelled' && o.status === 'CANCELLED');
+  (f === 'cancelled' && (o.status === 'CANCELLED' || o.status === 'DELIVERY_FAILED'));
 
 const OrderCard = memo<{ order: OrderSummary; onOpen: (o: OrderSummary) => void }>(({ order, onOpen }) => {
   const active = ACTIVE.includes(order.status);
@@ -85,6 +86,15 @@ const OrderCard = memo<{ order: OrderSummary; onOpen: (o: OrderSummary) => void 
           {formatVND(order.total)}
         </Text>
       </View>
+
+      {(order.status === 'CANCELLED' || order.status === 'DELIVERY_FAILED') && !!formatOrderEndReason(order) && (
+        <View className="flex-row items-center gap-1.5 rounded-sm bg-danger-soft/30 px-2.5 py-1.5">
+          <Icon name="alert-circle-outline" size="xs" tone="danger" />
+          <Text variant="caption" tone="danger" className="flex-1" numberOfLines={2}>
+            {formatOrderEndReason(order)}
+          </Text>
+        </View>
+      )}
 
       {/* Chỉ là nhãn hiển thị: cả thẻ đã là nút mở trang theo dõi (tránh nút lồng nút). */}
       {active && (

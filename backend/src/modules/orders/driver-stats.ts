@@ -4,16 +4,19 @@ import { statsRangeStart, vnDateKey, VN_OFFSET_MINUTES } from '../restaurants/re
 export interface DriverStatsOrderInput {
   status: OrderStatus;
   deliveryFee: number;
+  driverEarning?: number;
   total: number;
   paymentMethod: string;
   createdAt: Date;
+  /** Thời điểm giao thành công lấy từ OrderStatusHistory (DELIVERED) */
+  deliveredAt?: Date | null;
 }
 
 export interface DriverStats {
   days: number;
   from: string; // YYYY-MM-DD (giờ VN), ngày đầu của khoảng
   to: string; // YYYY-MM-DD (giờ VN), hôm nay
-  /** Thu nhập của tài xế = tổng deliveryFee của các đơn đã giao thành công (DELIVERED). */
+  /** Thu nhập thực nhận của tài xế = tổng driverEarning của các đơn đã giao thành công (DELIVERED). */
   earnings: number;
   /** Số chuyến giao thành công. */
   deliveredTrips: number;
@@ -46,19 +49,25 @@ export function buildDriverStats(
 
   for (const o of orders) {
     if (o.status === 'DELIVERED') {
+      const effectiveDate = o.deliveredAt ?? o.createdAt;
+      if (effectiveDate < start) continue;
+
+      const tripEarning = o.driverEarning !== undefined ? o.driverEarning : o.deliveryFee;
       deliveredTrips += 1;
-      earnings += o.deliveryFee;
+      earnings += tripEarning;
       if (o.paymentMethod === 'COD') {
         cashCollected += o.total;
       }
-      const key = vnDateKey(o.createdAt, offsetMinutes);
+      const key = vnDateKey(effectiveDate, offsetMinutes);
       const day = daily.get(key);
       if (day) {
-        day.earnings += o.deliveryFee;
+        day.earnings += tripEarning;
         day.trips += 1;
       }
     } else if (o.status === 'CANCELLED') {
-      cancelledTrips += 1;
+      if (o.createdAt >= start) {
+        cancelledTrips += 1;
+      }
     }
   }
 
@@ -76,4 +85,3 @@ export function buildDriverStats(
     daily: Array.from(daily.values()),
   };
 }
-

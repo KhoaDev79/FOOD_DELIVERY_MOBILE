@@ -1,7 +1,65 @@
 export type Role = 'CUSTOMER' | 'RESTAURANT_OWNER' | 'DRIVER' | 'ADMIN';
 
 export type OrderStatus =
-  'PENDING' | 'CONFIRMED' | 'PREPARING' | 'READY_FOR_PICKUP' | 'PICKED_UP' | 'DELIVERED' | 'CANCELLED';
+  | 'PENDING'
+  | 'CONFIRMED'
+  | 'PREPARING'
+  | 'READY_FOR_PICKUP'
+  | 'PICKED_UP'
+  | 'DELIVERED'
+  | 'DELIVERY_FAILED'
+  | 'CANCELLED';
+
+export type CancelReason =
+  | 'CUSTOMER_CHANGED_MIND'
+  | 'RESTAURANT_TIMEOUT'
+  | 'RESTAURANT_OUT_OF_STOCK'
+  | 'RESTAURANT_CLOSED'
+  | 'RESTAURANT_OTHER'
+  | 'ADMIN_INTERVENTION';
+
+export type FailedDeliveryReason =
+  | 'CUSTOMER_UNREACHABLE'
+  | 'CUSTOMER_REFUSED'
+  | 'WRONG_ADDRESS'
+  | 'UNSAFE_LOCATION';
+
+export type DriverLedgerType = 'COD_COLLECTED' | 'SETTLEMENT' | 'ADJUSTMENT';
+
+export interface DriverLedgerEntry {
+  id: string;
+  driverId: string;
+  orderId?: string | null;
+  type: DriverLedgerType;
+  amount: number;
+  balanceAfter: number;
+  note?: string | null;
+  createdById?: string | null;
+  createdAt: string;
+}
+
+export interface DriverLedgerResponse {
+  balance: number;
+  limit: number;
+  items: DriverLedgerEntry[];
+  page: number;
+  pageSize: number;
+  hasMore: boolean;
+  driver?: {
+    id: string;
+    fullName: string;
+    email: string;
+    phone?: string | null;
+  };
+}
+
+export interface DeliveryContactAttempt {
+  id: string;
+  orderId: string;
+  driverId: string;
+  channel: string;
+  createdAt: string;
+}
 
 export type PaymentMethod = 'COD' | 'VNPAY';
 export type PaymentStatus = 'UNPAID' | 'PAID' | 'FAILED' | 'REFUNDED';
@@ -67,6 +125,7 @@ export interface User {
     verificationStatus: DriverVerificationStatus;
     rejectionReason?: string | null;
     isOnline: boolean;
+    codBalance?: number;
   } | null;
 }
 
@@ -218,15 +277,22 @@ export interface OrderDetail {
   deliveryLat: number;
   deliveryLng: number;
   estimatedDeliveryAt?: string | null;
+  arrivedAt?: string | null;
+  cancelReason?: CancelReason | null;
+  cancelNote?: string | null;
+  cancelledById?: string | null;
+  failedReason?: FailedDeliveryReason | null;
   note?: string | null;
   createdAt: string;
   updatedAt: string;
   items: OrderItem[];
+  contactAttempts?: DeliveryContactAttempt[];
   restaurant: {
     id: string;
     name: string;
     imageUrl?: string | null;
     address: string;
+    phone?: string | null;
     latitude: number;
     longitude: number;
     ownerId: string;
@@ -275,6 +341,9 @@ export interface OrderSummary {
   distanceSource?: DistanceSource;
   deliveryAddress: string;
   estimatedDeliveryAt?: string | null;
+  cancelReason?: CancelReason | null;
+  cancelNote?: string | null;
+  failedReason?: FailedDeliveryReason | null;
   createdAt: string;
   items: { name: string; quantity: number }[];
   restaurant: {
@@ -338,6 +407,7 @@ export interface DriverProfile {
   verifiedAt?: string | null;
   verifiedById?: string | null;
   isOnline: boolean;
+  codBalance?: number;
   lastLatitude?: number | null;
   lastLongitude?: number | null;
   lastLocationAt?: string | null;

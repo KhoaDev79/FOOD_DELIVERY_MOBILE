@@ -403,6 +403,14 @@ export const DriverProfileScreen: React.FC = () => {
           {/* Tiện ích */}
           <View className="rounded-2xl bg-surface px-3 shadow-card">
             <ListRow
+              icon="wallet-outline"
+              iconTone="brand"
+              title="Ví & Công nợ tiền mặt COD"
+              subtitle={`Số dư nợ hiện tại: ${formatVND(profile?.codBalance ?? 0)}`}
+              onPress={() => navigation.navigate('DriverWallet')}
+            />
+            <Divider inset />
+            <ListRow
               icon="person-outline"
               iconTone="brand"
               title="Thông tin cá nhân & mật khẩu"

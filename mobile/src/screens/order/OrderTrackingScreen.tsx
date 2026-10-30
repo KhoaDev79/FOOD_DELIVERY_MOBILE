@@ -10,7 +10,7 @@ import { OrderStatus } from '../../types/api';
 import { RootStackParamList } from '../../types/navigation';
 import { estimateDeliveryTime } from '../../utils/fee';
 import { formatVND } from '../../utils/format';
-import { ORDER_STATUS_CONFIG } from '../../utils/orderStatus';
+import { formatOrderEndReason, ORDER_STATUS_CONFIG } from '../../utils/orderStatus';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'OrderTracking'>;
 
@@ -105,6 +105,9 @@ export const OrderTrackingScreen: React.FC<Props> = ({ route, navigation }) => {
   }
 
   const isCancelled = order.status === 'CANCELLED';
+  const isFailed = order.status === 'DELIVERY_FAILED';
+  const isTerminated = isCancelled || isFailed;
+  const endReasonText = formatOrderEndReason(order);
   const statusConfig = ORDER_STATUS_CONFIG[order.status];
   const currentStep = getStepIndex(order.status);
   const eta = order.estimatedDeliveryAt
@@ -182,16 +185,18 @@ export const OrderTrackingScreen: React.FC<Props> = ({ route, navigation }) => {
         </View>
 
         {/* Thanh trạng thái & tiến trình */}
-        {isCancelled ? (
+        {isTerminated ? (
           <View className="gap-2 rounded-2xl border border-danger-soft bg-danger-soft/30 p-4">
             <View className="flex-row items-center gap-2">
               <Icon name="close-circle" size="md" tone="danger" />
               <Text variant="headline" weight="bold" tone="danger">
-                Đơn hàng đã hủy
+                {isFailed ? 'Giao hàng không thành công' : 'Đơn hàng đã hủy'}
               </Text>
             </View>
             <Text variant="body" tone="secondary">
-              Đơn hàng này đã bị hủy và không còn được giao. Bạn có thể đặt lại món từ nhà hàng.
+              {endReasonText
+                ? `Lý do: ${endReasonText}`
+                : 'Đơn hàng này đã bị hủy và không còn được giao. Bạn có thể đặt lại món từ nhà hàng.'}
             </Text>
           </View>
         ) : (
@@ -324,7 +329,7 @@ export const OrderTrackingScreen: React.FC<Props> = ({ route, navigation }) => {
               </Pressable>
             )}
           </View>
-        ) : !isCancelled && order.status !== 'DELIVERED' ? (
+        ) : !isTerminated && order.status !== 'DELIVERED' ? (
           <View className="flex-row items-center gap-3 rounded-2xl border border-line bg-surface p-4 shadow-card">
             <View className="h-12 w-12 items-center justify-center rounded-full bg-brand-50">
               <Icon name="search" size="md" tone="brand" />

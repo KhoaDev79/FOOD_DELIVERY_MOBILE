@@ -49,6 +49,17 @@ export const DriverAvailableOrdersScreen: React.FC = () => {
     queryFn: () => driversApi.getMe(),
   });
 
+  // Lấy hạn mức công nợ COD
+  const { data: ledgerSummary, refetch: refetchLedger } = useQuery({
+    queryKey: ['driver', 'ledger'],
+    queryFn: () => driversApi.getMyLedger({ page: 1, limit: 5 }),
+  });
+
+  const codBalance = ledgerSummary?.balance ?? driverProfile?.codBalance ?? 0;
+  const debtLimit = ledgerSummary?.limit ?? 2000000;
+  const isOverDebtLimit = codBalance >= debtLimit;
+  const isNearDebtLimit = !isOverDebtLimit && debtLimit > 0 && codBalance >= debtLimit * 0.8;
+
   // Đồng bộ trạng thái trực tuyến ban đầu từ server
   useEffect(() => {
     if (driverProfile !== undefined) {
@@ -187,7 +198,7 @@ export const DriverAvailableOrdersScreen: React.FC = () => {
 
   const onRefresh = async () => {
     setRefreshing(true);
-    await Promise.all([refetch(), refetchDeliveries(), refetchProfile()]);
+    await Promise.all([refetch(), refetchDeliveries(), refetchProfile(), refetchLedger()]);
     setRefreshing(false);
   };
 
@@ -272,6 +283,9 @@ export const DriverAvailableOrdersScreen: React.FC = () => {
     const isReady = order.status === 'READY_FOR_PICKUP';
     const itemCount =
       order.items?.reduce((acc, it) => acc + it.quantity, 0) || 0;
+    const tripEarning = order.driverEarning ?? order.deliveryFee;
+    const orderDebt = order.subtotal + (order.platformCommission ?? Math.max(0, order.deliveryFee - tripEarning));
+    const exceedsDebtForOrder = isOverDebtLimit || codBalance + orderDebt > debtLimit;
 
     return (
       <View className="mb-4 overflow-hidden rounded-2xl border border-line bg-surface p-4 shadow-card">
@@ -359,10 +373,10 @@ export const DriverAvailableOrdersScreen: React.FC = () => {
         <View className="flex-row items-center justify-between border-t border-line-subtle pt-3">
           <View>
             <Text variant="caption" tone="secondary">
-              Thu nhập chuyến
+              Thu nhập thực nhận
             </Text>
             <Text variant="headline" weight="bold" tone="brand">
-              +{formatVND(order.deliveryFee)}
+              +{formatVND(tripEarning)}
             </Text>
           </View>
 
@@ -388,6 +402,12 @@ export const DriverAvailableOrdersScreen: React.FC = () => {
             <View className="items-center rounded-xl bg-surface-subtle py-2.5">
               <Text variant="caption" weight="bold" tone="secondary">
                 Đang giao tối đa ({activeDeliveriesCount}/2 đơn)
+              </Text>
+            </View>
+          ) : exceedsDebtForOrder ? (
+            <View className="items-center rounded-xl bg-danger-soft/40 py-2.5">
+              <Text variant="caption" weight="bold" tone="danger">
+                Vượt hạn mức công nợ COD ({formatVND(codBalance + orderDebt)} / {formatVND(debtLimit)})
               </Text>
             </View>
           ) : (
@@ -458,6 +478,38 @@ export const DriverAvailableOrdersScreen: React.FC = () => {
             </Text>
           </Pressable>
         </View>
+      )}
+
+      {/* Cảnh báo công nợ COD sắp chạm hoặc đã chạm hạn mức (C4) */}
+      {(isOverDebtLimit || isNearDebtLimit) && (
+        <Pressable
+          accessibilityRole="button"
+          onPress={() => navigation.navigate('DriverWallet')}
+          className={cn(
+            'flex-row items-center justify-between border-b px-4 py-3',
+            isOverDebtLimit
+              ? 'border-danger-soft bg-danger-soft/30'
+              : 'border-warning-soft bg-warning-soft/20',
+          )}
+        >
+          <View className="flex-1 pr-2">
+            <Text variant="caption" weight="bold" tone={isOverDebtLimit ? 'danger' : 'warning'}>
+              {isOverDebtLimit
+                ? `Công nợ COD đã chạm hạn mức (${formatVND(codBalance)} / ${formatVND(debtLimit)})`
+                : `Công nợ COD sắp chạm hạn mức (${formatVND(codBalance)} / ${formatVND(debtLimit)})`}
+            </Text>
+            <Text variant="caption" tone="secondary">
+              {isOverDebtLimit
+                ? 'Vui lòng nộp tiền mặt về công ty để mở khoá nhận đơn mới.'
+                : 'Chạm để xem chi tiết sổ quỹ COD và hạn mức.'}
+            </Text>
+          </View>
+          <View className="rounded-lg bg-surface px-2.5 py-1.5 shadow-card">
+            <Text variant="caption" weight="bold" tone="brand">
+              Ví COD
+            </Text>
+          </View>
+        </Pressable>
       )}
 
       {/* Thẻ tóm tắt nhanh hôm nay */}

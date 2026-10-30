@@ -87,6 +87,7 @@ const STATUS_CLASS: Record<OrderStatus, { box: string; text: string }> = {
   READY_FOR_PICKUP: { box: 'bg-brand-100', text: 'text-brand-800' },
   PICKED_UP: { box: 'bg-brand-50', text: 'text-brand-700' },
   DELIVERED: { box: 'bg-success-soft', text: 'text-success-strong' },
+  DELIVERY_FAILED: { box: 'bg-danger-soft', text: 'text-danger-strong' },
   CANCELLED: { box: 'bg-danger-soft', text: 'text-danger-strong' },
 };
 

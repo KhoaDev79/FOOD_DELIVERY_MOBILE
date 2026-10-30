@@ -15,10 +15,12 @@ import { mapsApi } from '../../api/maps';
 import { ordersApi } from '../../api/orders';
 import { AppMapView, MapMarkerItem } from '../../components/common/AppMapView';
 import {
+  BottomSheet,
   Button,
   cn,
   ConfirmDialog,
   Icon,
+  Input,
   OrderStatusBadge,
   Text,
   TopBar,
@@ -28,9 +30,10 @@ import { queryKeys } from '../../constants/queryKeys';
 import { useLocation } from '../../hooks/useLocation';
 import { useSocket } from '../../hooks/useSocket';
 import { useOrderDetail } from '../../services/useOrders';
-import { OrderDetail, OrderStatus } from '../../types/api';
+import { FailedDeliveryReason, OrderDetail, OrderStatus } from '../../types/api';
 import { formatVND } from '../../utils/format';
 import { haversineKm } from '../../utils/geo';
+import { FAILED_DELIVERY_REASON_LABELS, formatOrderEndReason } from '../../utils/orderStatus';
 
 interface Props {
   navigation: any;
@@ -46,7 +49,14 @@ const STEP_LABELS: { status: OrderStatus; label: string; desc: string }[] = [
   { status: 'PREPARING', label: 'Quán đang làm món', desc: 'Đang chờ bếp hoàn tất chế biến' },
   { status: 'READY_FOR_PICKUP', label: 'Sẵn sàng lấy món', desc: 'Món ăn đã sẵn sàng tại quầy' },
   { status: 'PICKED_UP', label: 'Đang đi giao', desc: 'Tài xế đang trên đường đến khách' },
-  { status: 'DELIVERED', label: 'Đã giao thành công', desc: 'Đơn hàng hoàn tất viên mãn' },
+  { status: 'DELIVERED', label: 'Đã giao thành công', desc: 'Đơn hàng hoàn tất' },
+];
+
+const FAILED_REASONS: FailedDeliveryReason[] = [
+  'CUSTOMER_UNREACHABLE',
+  'CUSTOMER_REFUSED',
+  'WRONG_ADDRESS',
+  'UNSAFE_LOCATION',
 ];
 
 function getStepIndex(status: OrderStatus): number {
@@ -97,6 +107,31 @@ export const DriverDeliveryDetailScreen: React.FC<Props> = ({ navigation, route 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
 
+  // C3: Trả lại đơn
+  const [releaseSheetOpen, setReleaseSheetOpen] = useState(false);
+  const [releaseReason, setReleaseReason] = useState('');
+
+  // C5: Giao thất bại & đồng hồ đếm thời gian chờ tại điểm giao
+  const [waitedSeconds, setWaitedSeconds] = useState(0);
+  const [failedSheetOpen, setFailedSheetOpen] = useState(false);
+  const [failedReason, setFailedReason] = useState<FailedDeliveryReason>('CUSTOMER_UNREACHABLE');
+  const [failedNote, setFailedNote] = useState('');
+
+  // Đồng hồ đếm thời gian chờ từ order.arrivedAt
+  useEffect(() => {
+    if (!order?.arrivedAt || order.status !== 'PICKED_UP') {
+      return;
+    }
+    const arrivedMs = new Date(order.arrivedAt).getTime();
+    const updateTimer = () => {
+      const sec = Math.max(0, Math.floor((Date.now() - arrivedMs) / 1000));
+      setWaitedSeconds(sec);
+    };
+    updateTimer();
+    const interval = setInterval(updateTimer, 1000);
+    return () => clearInterval(interval);
+  }, [order?.arrivedAt, order?.status]);
+
   // Lắng nghe socket cập nhật trạng thái đơn
   useEffect(() => {
     if (!orderId) return;
@@ -108,7 +143,8 @@ export const DriverDeliveryDetailScreen: React.FC<Props> = ({ navigation, route 
         if (updatedOrder.status === 'READY_FOR_PICKUP') {
           toast('Món đã sẵn sàng! Quán đã làm xong, hãy đến lấy ngay nhé.', 'success');
         } else if (updatedOrder.status === 'CANCELLED') {
-          toast('Đơn hàng đã bị huỷ bởi quán hoặc hệ thống.', 'error');
+          const reason = formatOrderEndReason(updatedOrder);
+          toast(`Đơn hàng đã bị huỷ${reason ? `: ${reason}` : ''}`, 'error');
         }
       }
     };
@@ -247,21 +283,29 @@ export const DriverDeliveryDetailScreen: React.FC<Props> = ({ navigation, route 
     });
   };
 
-  const handleCall = (phone?: string | null) => {
+  // Gọi khách hàng (tự động ghi nhận contact-attempt nếu đang ở trạng thái PICKED_UP)
+  const handleCallCustomer = async (phone?: string | null) => {
     if (!phone) {
       toast('Khách hàng chưa cung cấp số điện thoại liên lạc.', 'default');
       return;
     }
+    if (order?.status === 'PICKED_UP') {
+      try {
+        await ordersApi.recordContactAttempt(order.id);
+        refetch();
+      } catch {
+        // Bỏ qua lỗi giới hạn 30s để vẫn mở trình gọi điện thoại ngay lập tức
+      }
+    }
     Linking.openURL(`tel:${phone}`);
   };
 
-  const handleOpenChat = () => {
-    if (!order) return;
-    navigation.navigate('Chat', {
-      orderId: order.id,
-      recipientName: order.customer.fullName,
-      recipientRole: 'CUSTOMER',
-    });
+  const handleCallRestaurant = (phone?: string | null) => {
+    if (!phone) {
+      toast('Quán chưa cập nhật số điện thoại liên hệ.', 'default');
+      return;
+    }
+    Linking.openURL(`tel:${phone}`);
   };
 
   // Xử lý xác nhận "Đã lấy món" -> Chuyển sang PICKED_UP
@@ -292,15 +336,80 @@ export const DriverDeliveryDetailScreen: React.FC<Props> = ({ navigation, route 
     });
   };
 
+  // C5: Xác nhận "Đã đến điểm giao" -> POST /orders/:id/arrived
+  const handleMarkArrived = async () => {
+    if (!order) return;
+    if (!driverCoords) {
+      toast('Không xác định được vị trí GPS hiện tại. Hãy bật định vị thiết bị.', 'error');
+      return;
+    }
+    try {
+      setIsSubmitting(true);
+      await ordersApi.markArrived(order.id, driverCoords.latitude, driverCoords.longitude);
+      await refetch();
+      toast('Đã xác nhận đến điểm giao! Khách hàng đã nhận được thông báo.', 'success');
+    } catch (err: any) {
+      toast(
+        err?.response?.data?.message || 'Không thể xác nhận đến điểm giao. Hãy tiến lại gần địa chỉ khách hơn.',
+        'error',
+      );
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // C3: Tài xế trả lại đơn khi chưa lấy món
+  const handleSubmitRelease = async () => {
+    if (!order) return;
+    if (!releaseReason.trim()) {
+      toast('Vui lòng nhập lý do trả lại chuyến giao.', 'error');
+      return;
+    }
+    try {
+      setIsSubmitting(true);
+      await ordersApi.releaseOrder(order.id, releaseReason.trim());
+      setReleaseSheetOpen(false);
+      await queryClient.invalidateQueries({ queryKey: ['driver'] });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.orders.all });
+      toast('Đã trả lại chuyến giao cho hệ thống điều phối.', 'success');
+      navigation.navigate('DriverTabs', { screen: 'DriverAvailableTab' });
+    } catch (err: any) {
+      toast(err?.response?.data?.message || 'Không thể trả lại đơn hàng.', 'error');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // C5: Báo giao thất bại
+  const handleSubmitFailedDelivery = async () => {
+    if (!order) return;
+    try {
+      setIsSubmitting(true);
+      await ordersApi.updateStatus(order.id, 'DELIVERY_FAILED', {
+        failedReason,
+        cancelNote: failedNote.trim() || undefined,
+      });
+      setFailedSheetOpen(false);
+      await queryClient.invalidateQueries({ queryKey: ['driver'] });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.orders.all });
+      await refetch();
+      toast('Đã ghi nhận giao hàng thất bại và cộng công chuyến đi.', 'success');
+    } catch (err: any) {
+      toast(err?.response?.data?.message || 'Chưa đủ điều kiện báo giao thất bại.', 'error');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
   // Xử lý xác nhận "Đã giao cho khách" -> Chuyển sang DELIVERED
   const handleConfirmDelivered = () => {
     if (!order) return;
     const isCod = order.paymentMethod === 'COD';
     const message = isCod
-      ? `⚠️ ĐƠN THU TIỀN MẶT (COD)\n\nVui lòng xác nhận bạn ĐÃ THU ĐỦ ${formatVND(
+      ? `ĐƠN THU TIỀN MẶT (COD)\n\nVui lòng xác nhận bạn ĐÃ THU ĐỦ ${formatVND(
           order.total,
         )} từ khách hàng ${order.customer.fullName} và đã bàn giao món thành công.`
-      : `Khách hàng đã thanh toán trực tuyến qua thẻ/VNPay.\n\nBạn chỉ cần bàn giao món và KHÔNG THU THÊM TIỀN MẶT. Xác nhận hoàn tất?`;
+      : `Khách hàng đã thanh toán trực tuyến.\n\nBạn chỉ cần bàn giao món và KHÔNG THU THÊM TIỀN MẶT. Xác nhận hoàn tất?`;
 
     setConfirmDialog({
       visible: true,
@@ -311,6 +420,7 @@ export const DriverDeliveryDetailScreen: React.FC<Props> = ({ navigation, route 
         try {
           setIsSubmitting(true);
           await ordersApi.updateStatus(order.id, 'DELIVERED');
+          await queryClient.invalidateQueries({ queryKey: ['driver'] });
           await queryClient.invalidateQueries({ queryKey: queryKeys.orders.all });
           await refetch();
           setShowSuccessModal(true);
@@ -340,9 +450,30 @@ export const DriverDeliveryDetailScreen: React.FC<Props> = ({ navigation, route 
 
   const currentStep = getStepIndex(order.status);
   const isCancelled = order.status === 'CANCELLED';
+  const isFailed = order.status === 'DELIVERY_FAILED';
   const isDelivered = order.status === 'DELIVERED';
+  const isFinished = isCancelled || isFailed || isDelivered;
   const isCod = order.paymentMethod === 'COD';
   const isHeadingToCustomer = order.status === 'PICKED_UP';
+  const canRelease =
+    order.status === 'CONFIRMED' ||
+    order.status === 'PREPARING' ||
+    order.status === 'READY_FOR_PICKUP';
+
+  const tripEarning = order.driverEarning ?? order.deliveryFee;
+
+  // Đếm số lần gọi sau thời điểm arrivedAt
+  const callsAfterArrived = !order.contactAttempts
+    ? 0
+    : !order.arrivedAt
+      ? order.contactAttempts.length
+      : order.contactAttempts.filter(
+          (a) => new Date(a.createdAt).getTime() >= new Date(order.arrivedAt!).getTime(),
+        ).length;
+
+  const waitedMin = Math.floor(waitedSeconds / 60);
+  const waitedSecRem = waitedSeconds % 60;
+  const hasWaitedMin10 = Boolean(order.arrivedAt && waitedSeconds >= 10 * 60);
 
   return (
     <SafeAreaView edges={['top']} className="flex-1 bg-surface-subtle">
@@ -356,13 +487,12 @@ export const DriverDeliveryDetailScreen: React.FC<Props> = ({ navigation, route 
         }
       />
 
-      <ScrollView className="flex-1" contentContainerStyle={{ paddingBottom: 110 }}>
+      <ScrollView className="flex-1" contentContainerStyle={{ paddingBottom: 140 }}>
         {/* NỬA TRÊN: BẢN ĐỒ LỘ TRÌNH CHUYẾN GIAO */}
         <View className="h-72 w-full overflow-hidden bg-surface shadow-card">
           <AppMapView initialRegion={mapRegion} markers={markers} style={{ flex: 1 }} />
 
-          {/* Thanh nổi đè lên góc bản đồ: Nút mở chỉ đường Turn-by-Turn */}
-          {!isCancelled && !isDelivered && (
+          {!isFinished && (
             <View className="absolute bottom-3 left-3 right-3 flex-row items-center justify-between gap-2">
               <View className="flex-1 flex-row items-center gap-2 rounded-xl bg-surface/95 px-3 py-2 shadow-float backdrop-blur-md">
                 <Icon
@@ -399,18 +529,85 @@ export const DriverDeliveryDetailScreen: React.FC<Props> = ({ navigation, route 
           )}
         </View>
 
-        {/* THÔNG BÁO NẾU ĐƠN BỊ HUỶ */}
-        {isCancelled && (
+        {/* THÔNG BÁO NẾU ĐƠN BỊ HUỶ HOẶC GIAO THẤT BẠI */}
+        {(isCancelled || isFailed) && (
           <View className="mx-4 mt-4 flex-row items-center gap-3 rounded-2xl border border-danger-soft bg-danger-soft/20 p-4">
             <Icon name="close-circle" size="lg" tone="danger" />
             <View className="flex-1">
               <Text variant="body" weight="bold" tone="danger">
-                Đơn hàng này đã bị huỷ
+                {isFailed ? 'Chuyến giao không thành công' : 'Đơn hàng này đã bị huỷ'}
               </Text>
               <Text variant="caption" tone="secondary">
-                Quán hoặc khách đã huỷ đơn. Bạn không cần tiếp tục giao đơn này nữa.
+                {formatOrderEndReason(order) ||
+                  'Đơn đã kết thúc. Bạn không cần tiếp tục giao đơn này nữa.'}
               </Text>
             </View>
+          </View>
+        )}
+
+        {/* C5: BẢNG ĐỒNG HỒ CHỜ TẠI ĐIỂM GIAO & BÁO GIAO THẤT BẠI */}
+        {order.status === 'PICKED_UP' && (
+          <View className="mx-4 mt-4 gap-3 rounded-2xl border border-brand-200 bg-brand-50/40 p-4 shadow-card">
+            <View className="flex-row items-center justify-between">
+              <View className="flex-row items-center gap-2">
+                <Icon name="location" size="md" tone="brand" />
+                <Text variant="headline" weight="bold">
+                  {order.arrivedAt ? 'Đã đến điểm giao hàng' : 'Xác nhận khi tới điểm giao'}
+                </Text>
+              </View>
+              {order.arrivedAt && (
+                <View className="rounded-full bg-surface px-3 py-1">
+                  <Text variant="caption" weight="bold" tone="brand">
+                    Chờ: {String(waitedMin).padStart(2, '0')}:{String(waitedSecRem).padStart(2, '0')}
+                  </Text>
+                </View>
+              )}
+            </View>
+
+            {!order.arrivedAt ? (
+              <View className="gap-2">
+                <Text variant="caption" tone="secondary">
+                  Khi đến trong phạm vi 200m quanh địa chỉ khách, hãy bấm nút bên dưới để báo cho khách và bắt đầu tính thời gian chờ.
+                </Text>
+                <Button
+                  label="Đã đến điểm giao"
+                  variant="secondary"
+                  size="md"
+                  leftIcon="checkmark-circle-outline"
+                  loading={isSubmitting}
+                  onPress={handleMarkArrived}
+                />
+              </View>
+            ) : (
+              <View className="gap-2">
+                <Text variant="caption" tone="secondary">
+                  Đã gọi liên hệ khách sau khi đến: <Text variant="caption" weight="bold">{callsAfterArrived}/3 lần</Text> • Thời gian chờ tối thiểu: <Text variant="caption" weight="bold">10 phút</Text>.
+                </Text>
+                <View className="flex-row gap-2">
+                  <Button
+                    label="Gọi khách ngay"
+                    variant="outline"
+                    size="sm"
+                    leftIcon="call-outline"
+                    className="flex-1"
+                    onPress={() => handleCallCustomer(order.customer.phone)}
+                  />
+                  <Button
+                    label="Giao thất bại"
+                    variant="dangerSoft"
+                    size="sm"
+                    disabled={!hasWaitedMin10 || isSubmitting}
+                    className="flex-1"
+                    onPress={() => setFailedSheetOpen(true)}
+                  />
+                </View>
+                {!hasWaitedMin10 && (
+                  <Text variant="micro" tone="muted">
+                    Nút "Giao thất bại" sẽ mở sau khi chờ đủ 10 phút tại điểm giao.
+                  </Text>
+                )}
+              </View>
+            )}
           </View>
         )}
 
@@ -532,12 +729,12 @@ export const DriverDeliveryDetailScreen: React.FC<Props> = ({ navigation, route 
             </View>
           </View>
 
-          {/* Nút liên hệ với khách hàng */}
+          {/* Nút liên hệ thật qua số điện thoại */}
           <View className="mt-4 flex-row items-center gap-2 border-t border-line-subtle pt-3">
             <Pressable
               accessibilityRole="button"
               accessibilityLabel="Gọi cho khách hàng"
-              onPress={() => handleCall(order.customer.phone)}
+              onPress={() => handleCallCustomer(order.customer.phone)}
               className="flex-1 flex-row items-center justify-center gap-2 rounded-xl bg-brand-50 py-2.5 active:bg-brand-100"
             >
               <Ionicons name="call" size={16} color="#1EB9CE" />
@@ -546,17 +743,19 @@ export const DriverDeliveryDetailScreen: React.FC<Props> = ({ navigation, route 
               </Text>
             </Pressable>
 
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Nhắn tin với khách hàng"
-              onPress={handleOpenChat}
-              className="flex-1 flex-row items-center justify-center gap-2 rounded-xl bg-surface-subtle py-2.5 active:bg-line-subtle"
-            >
-              <Ionicons name="chatbubble-ellipses" size={16} color="#64748B" />
-              <Text variant="caption" weight="bold" tone="secondary">
-                Nhắn tin
-              </Text>
-            </Pressable>
+            {!!order.restaurant.phone && (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Gọi cho nhà hàng"
+                onPress={() => handleCallRestaurant(order.restaurant.phone)}
+                className="flex-1 flex-row items-center justify-center gap-2 rounded-xl bg-surface-subtle py-2.5 active:bg-line-subtle"
+              >
+                <Ionicons name="call-outline" size={16} color="#64748B" />
+                <Text variant="caption" weight="bold" tone="secondary">
+                  Gọi nhà hàng
+                </Text>
+              </Pressable>
+            )}
           </View>
         </View>
 
@@ -569,15 +768,15 @@ export const DriverDeliveryDetailScreen: React.FC<Props> = ({ navigation, route 
           <View className="flex-row items-center justify-between border-b border-line-subtle pb-3">
             <View>
               <Text variant="caption" tone="secondary">
-                THU NHẬP TÀI XẾ (CÔNG GIAO)
+                THU NHẬP THỰC NHẬN (CÔNG GIAO)
               </Text>
               <Text variant="headline" weight="bold" tone="brand">
-                +{formatVND(order.deliveryFee)}
+                +{formatVND(tripEarning)}
               </Text>
             </View>
             <View className="rounded-full bg-brand-50 px-3 py-1">
               <Text variant="caption" weight="bold" tone="brand">
-                Cộng vào ví khi xong
+                Giữ lại từ tiền thu hộ
               </Text>
             </View>
           </View>
@@ -593,7 +792,7 @@ export const DriverDeliveryDetailScreen: React.FC<Props> = ({ navigation, route 
                 </Text>
               ) : (
                 <Text variant="body-lg" weight="bold" tone="success">
-                  0 ₫ (Khách đã trả qua thẻ/VNPay)
+                  0 ₫ (Khách đã trả trực tuyến)
                 </Text>
               )}
             </View>
@@ -640,10 +839,25 @@ export const DriverDeliveryDetailScreen: React.FC<Props> = ({ navigation, route 
             ))}
           </View>
         </View>
+
+        {/* C3: NÚT TRẢ LẠI ĐƠN KHI CHƯA LẤY MÓN */}
+        {canRelease && (
+          <View className="mx-4 mt-4">
+            <Button
+              label="Gặp sự cố? Trả lại chuyến giao"
+              variant="ghost"
+              size="md"
+              onPress={() => {
+                setReleaseReason('');
+                setReleaseSheetOpen(true);
+              }}
+            />
+          </View>
+        )}
       </ScrollView>
 
       {/* THANH THAO TÁC CỐ ĐỊNH PHÍA DƯỚI */}
-      {!isCancelled && !isDelivered && (
+      {!isFinished && (
         <View className="absolute bottom-0 left-0 right-0 border-t border-line bg-surface p-4 shadow-float">
           {order.status === 'CONFIRMED' || order.status === 'PREPARING' ? (
             <View className="flex-row items-center justify-center gap-2 rounded-xl bg-surface-subtle py-3.5">
@@ -664,8 +878,8 @@ export const DriverDeliveryDetailScreen: React.FC<Props> = ({ navigation, route 
             <Button
               label={
                 isCod
-                  ? `Đã đến nơi — Thu ${formatVND(order.total)} & Hoàn tất`
-                  : 'Đã đến nơi — Hoàn tất giao hàng'
+                  ? `Đã thu ${formatVND(order.total)} & Hoàn tất giao`
+                  : 'Hoàn tất giao hàng'
               }
               variant="primary"
               size="lg"
@@ -688,6 +902,93 @@ export const DriverDeliveryDetailScreen: React.FC<Props> = ({ navigation, route 
         onCancel={() => setConfirmDialog((prev) => ({ ...prev, visible: false }))}
       />
 
+      {/* SHEET TRẢ LẠI ĐƠN (C3) */}
+      <BottomSheet
+        visible={releaseSheetOpen}
+        onClose={() => setReleaseSheetOpen(false)}
+        title="Trả lại chuyến giao"
+        footer={
+          <View className="pb-2">
+            <Button
+              label="Xác nhận trả lại đơn"
+              variant="danger"
+              size="lg"
+              loading={isSubmitting}
+              disabled={!releaseReason.trim()}
+              onPress={handleSubmitRelease}
+            />
+          </View>
+        }
+      >
+        <View className="gap-3 py-2">
+          <Text variant="caption" tone="secondary">
+            Bạn chỉ được trả lại đơn tối đa 3 lần/ngày trước khi lấy món tại quán. Đơn sẽ được chuyển cho tài xế khác gần quán.
+          </Text>
+          <Input
+            label="Lý do trả đơn *"
+            placeholder="Ví dụ: Xe gặp sự cố, quán chờ quá lâu..."
+            value={releaseReason}
+            onChangeText={setReleaseReason}
+            maxLength={200}
+          />
+        </View>
+      </BottomSheet>
+
+      {/* SHEET BÁO GIAO HÀNG THẤT BẠI (C5) */}
+      <BottomSheet
+        visible={failedSheetOpen}
+        onClose={() => setFailedSheetOpen(false)}
+        title="Báo giao hàng thất bại"
+        footer={
+          <View className="pb-2">
+            <Button
+              label="Xác nhận giao thất bại"
+              variant="danger"
+              size="lg"
+              loading={isSubmitting}
+              onPress={handleSubmitFailedDelivery}
+            />
+          </View>
+        }
+      >
+        <View className="gap-3 py-2">
+          <Text variant="caption" tone="secondary">
+            Chọn lý do không thể giao hàng cho khách. Với lý do "Không liên lạc được với khách hàng", hệ thống yêu cầu tối thiểu 3 cuộc gọi sau khi đến điểm giao.
+          </Text>
+          <View className="gap-2">
+            {FAILED_REASONS.map((r) => {
+              const selected = failedReason === r;
+              return (
+                <Pressable
+                  key={r}
+                  onPress={() => setFailedReason(r)}
+                  className={cn(
+                    'flex-row items-center gap-3 rounded-xl border p-3',
+                    selected ? 'border-brand-500 bg-brand-50' : 'border-line bg-surface',
+                  )}
+                >
+                  <Icon
+                    name={selected ? 'radio-button-on' : 'radio-button-off'}
+                    size="md"
+                    tone={selected ? 'brand' : 'muted'}
+                  />
+                  <Text variant="body" weight={selected ? 'semibold' : 'regular'} className="flex-1">
+                    {FAILED_DELIVERY_REASON_LABELS[r]}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+          <Input
+            label="Ghi chú chi tiết (tuỳ chọn)"
+            placeholder="Mô tả thêm tình huống tại điểm giao..."
+            value={failedNote}
+            onChangeText={setFailedNote}
+            maxLength={300}
+          />
+        </View>
+      </BottomSheet>
+
       {/* MODAL TỔNG KẾT HOÀN TẤT CHUYẾN GIAO */}
       <Modal visible={showSuccessModal} transparent animationType="fade">
         <View className="flex-1 items-center justify-center bg-scrim p-6">
@@ -707,10 +1008,10 @@ export const DriverDeliveryDetailScreen: React.FC<Props> = ({ navigation, route 
             <View className="mt-6 gap-3 rounded-2xl bg-surface-subtle p-4">
               <View className="flex-row items-center justify-between">
                 <Text variant="caption" tone="secondary">
-                  Thu nhập chuyến này:
+                  Thu nhập thực nhận:
                 </Text>
                 <Text variant="body" weight="bold" tone="brand">
-                  +{formatVND(order.deliveryFee)}
+                  +{formatVND(tripEarning)}
                 </Text>
               </View>
               <View className="flex-row items-center justify-between">

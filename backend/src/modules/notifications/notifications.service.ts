@@ -1,7 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { OrderStatus } from '@prisma/client';
+import { CancelReason, FailedDeliveryReason, OrderStatus } from '@prisma/client';
 import { Expo, ExpoPushMessage, ExpoPushTicket } from 'expo-server-sdk';
+import { CANCEL_REASON_LABELS, FAILED_DELIVERY_REASON_LABELS } from '../orders/order-state-machine';
 import { PrismaService } from '../prisma/prisma.service';
 
 export interface PushPayload {
@@ -16,6 +17,7 @@ const CUSTOMER_STATUS_MESSAGES: Partial<Record<OrderStatus, string>> = {
   READY_FOR_PICKUP: 'Món đã sẵn sàng, chờ tài xế đến lấy',
   PICKED_UP: 'Tài xế đã lấy món và đang giao đến bạn',
   DELIVERED: 'Đơn hàng đã được giao thành công. Chúc ngon miệng!',
+  DELIVERY_FAILED: 'Đơn hàng giao không thành công',
   CANCELLED: 'Đơn hàng đã bị hủy',
 };
 
@@ -37,13 +39,66 @@ export class NotificationsService {
 
   notifyOrderCreated(order: { id: string; total: number; restaurant: { ownerId: string; name: string } }) {
     return this.sendToUsers([order.restaurant.ownerId], {
-      title: 'Đơn hàng mới 🛎️',
+      title: 'Đơn hàng mới',
       body: `Bạn có đơn mới trị giá ${order.total.toLocaleString('vi-VN')}đ`,
       data: { type: 'order', orderId: order.id },
     });
   }
 
-  notifyStatusChanged(order: { id: string; customerId: string; status: OrderStatus; restaurant: { name: string } }) {
+  notifyStatusChanged(order: {
+    id: string;
+    customerId: string;
+    driverId?: string | null;
+    status: OrderStatus;
+    cancelReason?: CancelReason | null;
+    cancelNote?: string | null;
+    failedReason?: FailedDeliveryReason | null;
+    restaurant: { ownerId?: string; name: string };
+  }) {
+    const tasks: Promise<void>[] = [];
+
+    if (order.status === 'CANCELLED') {
+      const reasonText = order.cancelReason ? CANCEL_REASON_LABELS[order.cancelReason] : 'Đơn đã bị huỷ';
+      tasks.push(
+        this.sendToUsers([order.customerId], {
+          title: order.restaurant.name,
+          body: `Đơn hàng đã bị hủy: ${reasonText}`,
+          data: { type: 'order', orderId: order.id, status: order.status },
+        }),
+      );
+      if (order.driverId) {
+        tasks.push(
+          this.sendToUsers([order.driverId], {
+            title: 'Đơn hàng đã bị hủy',
+            body: `Đơn #${order.id.slice(0, 8).toUpperCase()} đã bị huỷ: ${reasonText}`,
+            data: { type: 'order', orderId: order.id, status: order.status },
+          }),
+        );
+      }
+      return Promise.all(tasks).then(() => undefined);
+    }
+
+    if (order.status === 'DELIVERY_FAILED') {
+      const failedText = order.failedReason ? FAILED_DELIVERY_REASON_LABELS[order.failedReason] : 'Giao thất bại';
+      tasks.push(
+        this.sendToUsers([order.customerId], {
+          title: order.restaurant.name,
+          body: `Đơn hàng giao không thành công: ${failedText}`,
+          data: { type: 'order', orderId: order.id, status: order.status },
+        }),
+      );
+      if (order.restaurant.ownerId) {
+        tasks.push(
+          this.sendToUsers([order.restaurant.ownerId], {
+            title: 'Đơn hàng giao thất bại',
+            body: `Đơn #${order.id.slice(0, 8).toUpperCase()} giao không thành công: ${failedText}`,
+            data: { type: 'order', orderId: order.id, status: order.status },
+          }),
+        );
+      }
+      return Promise.all(tasks).then(() => undefined);
+    }
+
     const body = CUSTOMER_STATUS_MESSAGES[order.status];
     if (!body) return Promise.resolve();
     return this.sendToUsers([order.customerId], {
@@ -55,8 +110,24 @@ export class NotificationsService {
 
   notifyDriverAssigned(order: { id: string; customerId: string; driver: { fullName: string } | null }) {
     return this.sendToUsers([order.customerId], {
-      title: 'Đã có tài xế nhận đơn 🛵',
+      title: 'Đã có tài xế nhận đơn',
       body: `${order.driver?.fullName ?? 'Tài xế'} sẽ giao đơn hàng của bạn`,
+      data: { type: 'order', orderId: order.id },
+    });
+  }
+
+  notifyDriverReleased(order: { id: string; customerId: string; restaurant: { name: string } }) {
+    return this.sendToUsers([order.customerId], {
+      title: order.restaurant.name,
+      body: 'Đang tìm tài xế khác cho đơn hàng của bạn',
+      data: { type: 'order', orderId: order.id },
+    });
+  }
+
+  notifyDriverArrived(order: { id: string; customerId: string; restaurant: { name: string } }) {
+    return this.sendToUsers([order.customerId], {
+      title: 'Tài xế đã đến điểm giao',
+      body: 'Tài xế đã đến điểm giao hàng, vui lòng chuẩn bị nhận món',
       data: { type: 'order', orderId: order.id },
     });
   }
@@ -69,7 +140,7 @@ export class NotificationsService {
         data: { type: 'order', orderId: order.id },
       }),
       this.sendToUsers([order.restaurant.ownerId], {
-        title: 'Đơn hàng mới (đã thanh toán) 🛎️',
+        title: 'Đơn hàng mới (đã thanh toán)',
         body: `Đơn ${order.total.toLocaleString('vi-VN')}đ đã thanh toán VNPay, vui lòng xác nhận`,
         data: { type: 'order', orderId: order.id },
       }),
@@ -120,4 +191,3 @@ export class NotificationsService {
     }
   }
 }
-

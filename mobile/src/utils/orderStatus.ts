@@ -1,4 +1,4 @@
-import { OrderStatus } from '../types/api';
+import { CancelReason, FailedDeliveryReason, OrderStatus } from '../types/api';
 import { colors } from '../constants/colors';
 
 export const ORDER_STATUS_CONFIG: Record<
@@ -41,6 +41,12 @@ export const ORDER_STATUS_CONFIG: Record<
     bgColor: '#D1FAE5',
     step: 5,
   },
+  DELIVERY_FAILED: {
+    label: 'Giao thất bại',
+    color: colors.danger,
+    bgColor: '#FEE2E2',
+    step: -1,
+  },
   CANCELLED: {
     label: 'Đã hủy',
     color: colors.danger,
@@ -58,3 +64,35 @@ export const ORDER_STEPS = [
   { key: 'DELIVERED', label: 'Hoàn thành' },
 ];
 
+export const CANCEL_REASON_LABELS: Record<CancelReason, string> = {
+  CUSTOMER_CHANGED_MIND: 'Khách hàng đổi ý',
+  RESTAURANT_OUT_OF_STOCK: 'Nhà hàng hết món / nguyên liệu',
+  RESTAURANT_CLOSED: 'Nhà hàng đóng cửa đột xuất',
+  RESTAURANT_OTHER: 'Lý do khác từ nhà hàng',
+  RESTAURANT_TIMEOUT: 'Quán không xác nhận đơn đúng hạn',
+  ADMIN_INTERVENTION: 'Hệ thống hỗ trợ can thiệp huỷ đơn',
+};
+
+export const FAILED_DELIVERY_REASON_LABELS: Record<FailedDeliveryReason, string> = {
+  CUSTOMER_UNREACHABLE: 'Không liên lạc được với khách hàng',
+  CUSTOMER_REFUSED: 'Khách hàng từ chối nhận món',
+  WRONG_ADDRESS: 'Sai địa chỉ giao hàng',
+  UNSAFE_LOCATION: 'Khu vực giao hàng không an toàn',
+};
+
+export function formatOrderEndReason(order: {
+  status: OrderStatus;
+  cancelReason?: CancelReason | null;
+  failedReason?: FailedDeliveryReason | null;
+  cancelNote?: string | null;
+}): string | null {
+  if (order.status === 'CANCELLED') {
+    const label = order.cancelReason ? CANCEL_REASON_LABELS[order.cancelReason] : 'Đơn hàng đã bị huỷ';
+    return order.cancelNote ? `${label} (${order.cancelNote})` : label;
+  }
+  if (order.status === 'DELIVERY_FAILED') {
+    const label = order.failedReason ? FAILED_DELIVERY_REASON_LABELS[order.failedReason] : 'Giao không thành công';
+    return order.cancelNote ? `${label} (${order.cancelNote})` : label;
+  }
+  return null;
+}

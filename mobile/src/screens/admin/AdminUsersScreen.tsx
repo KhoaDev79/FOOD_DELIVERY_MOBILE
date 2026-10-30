@@ -259,7 +259,13 @@ export const AdminUsersScreen: React.FC = () => {
           {target?.role === 'DRIVER' && (
             <>
               <Divider inset />
-              <ListRow icon="bicycle-outline" iconTone="brand" title="Duyệt hồ sơ xe" onPress={() => switchTo('driver')} />
+              <ListRow
+                icon="bicycle-outline"
+                iconTone="brand"
+                title="Duyệt hồ sơ xe & Công nợ COD"
+                subtitle="Kiểm duyệt phương tiện, ghi nhận nộp tiền và điều chỉnh công nợ"
+                onPress={() => switchTo('driver')}
+              />
             </>
           )}
           <Divider inset />

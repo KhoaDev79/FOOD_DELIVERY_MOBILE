@@ -1,9 +1,10 @@
-import { Body, Controller, Get, Patch } from '@nestjs/common';
+import { Body, Controller, Get, Patch, Query } from '@nestjs/common';
 import { Role } from '@prisma/client';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { DriversService } from './drivers.service';
 import {
+  DriverLedgerQueryDto,
   UpdateDriverLocationDto,
   UpdateDriverStatusDto,
   UpdateDriverVehicleDto,
@@ -17,6 +18,14 @@ export class DriversController {
   @Get('me')
   getMe(@CurrentUser('id') userId: string) {
     return this.driversService.getMe(userId);
+  }
+
+  @Get('me/ledger')
+  getMyLedger(
+    @CurrentUser('id') userId: string,
+    @Query() query: DriverLedgerQueryDto,
+  ) {
+    return this.driversService.getMyLedger(userId, query);
   }
 
   @Patch('me/vehicle')
@@ -43,4 +52,3 @@ export class DriversController {
     return this.driversService.updateLocation(userId, dto);
   }
 }
-

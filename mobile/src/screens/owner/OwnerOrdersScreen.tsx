@@ -20,10 +20,11 @@ import {
 } from '../../components/ui';
 import { useSocket } from '../../hooks/useSocket';
 import { palette } from '../../theme';
-import { OrderDetail, OrderStatus } from '../../types/api';
+import { CancelReason, OrderDetail, OrderStatus } from '../../types/api';
 import { formatDateTime, formatVND } from '../../utils/format';
+import { CANCEL_REASON_LABELS, formatOrderEndReason } from '../../utils/orderStatus';
 
-/** Bộ lọc theo đủ các trạng thái của đơn (trước đây thiếu "Đã nhận" và "Đã huỷ"). */
+/** Bộ lọc theo đủ các trạng thái của đơn (kể cả Giao thất bại và Đã huỷ). */
 const STATUS_TABS: { label: string; value?: OrderStatus }[] = [
   { label: 'Tất cả' },
   { label: 'Chờ nhận', value: 'PENDING' },
@@ -32,7 +33,14 @@ const STATUS_TABS: { label: string; value?: OrderStatus }[] = [
   { label: 'Chờ tài xế', value: 'READY_FOR_PICKUP' },
   { label: 'Đang giao', value: 'PICKED_UP' },
   { label: 'Hoàn thành', value: 'DELIVERED' },
+  { label: 'Giao thất bại', value: 'DELIVERY_FAILED' },
   { label: 'Đã huỷ', value: 'CANCELLED' },
+];
+
+const OWNER_CANCEL_REASONS: CancelReason[] = [
+  'RESTAURANT_OUT_OF_STOCK',
+  'RESTAURANT_CLOSED',
+  'RESTAURANT_OTHER',
 ];
 
 /** Hành động chủ quán được phép làm, khớp với quy tắc chuyển trạng thái ở backend (order-state-machine). */
@@ -65,20 +73,27 @@ const NEXT_ACTION: Partial<Record<OrderStatus, OrderAction>> = {
   },
 };
 
-/** Backend chỉ cho chủ quán huỷ khi đơn đang "Chờ nhận" hoặc "Đã nhận". */
+/** Chủ quán huỷ khi đơn ở PENDING, CONFIRMED, hoặc PREPARING (PREPARING chỉ cho phép hết món). */
 const CANCEL_ACTION: Partial<Record<OrderStatus, OrderAction>> = {
   PENDING: {
     to: 'CANCELLED',
     label: 'Từ chối',
     confirmTitle: 'Từ chối đơn này?',
-    confirmMessage: 'Đơn sẽ bị huỷ và khách hàng sẽ được thông báo. Không thể hoàn tác.',
+    confirmMessage: 'Chọn lý do từ chối đơn để thông báo cho khách hàng.',
     destructive: true,
   },
   CONFIRMED: {
     to: 'CANCELLED',
     label: 'Huỷ đơn',
     confirmTitle: 'Huỷ đơn này?',
-    confirmMessage: 'Đơn sẽ bị huỷ và khách hàng sẽ được thông báo. Không thể hoàn tác.',
+    confirmMessage: 'Chọn lý do huỷ đơn để thông báo cho khách hàng và tài xế.',
+    destructive: true,
+  },
+  PREPARING: {
+    to: 'CANCELLED',
+    label: 'Báo hết món',
+    confirmTitle: 'Huỷ đơn do hết nguyên liệu?',
+    confirmMessage: 'Khi đang chuẩn bị món, chỉ có thể huỷ đơn với lý do hết món / nguyên liệu.',
     destructive: true,
   },
 };
@@ -99,6 +114,7 @@ export const OwnerOrdersScreen: React.FC = () => {
   const [selectedStatus, setSelectedStatus] = useState<OrderStatus | undefined>(undefined);
   const [refreshing, setRefreshing] = useState(false);
   const [pending, setPending] = useState<{ order: OrderDetail; action: OrderAction } | null>(null);
+  const [cancelReason, setCancelReason] = useState<CancelReason>('RESTAURANT_OUT_OF_STOCK');
 
   // 1. Quán của chủ quán
   const { data: restaurants, isLoading: loadingRest } = useQuery({
@@ -146,7 +162,15 @@ export const OwnerOrdersScreen: React.FC = () => {
   }, [socket, queryClient]);
 
   const updateStatusMutation = useMutation({
-    mutationFn: ({ id, status }: { id: string; status: OrderStatus }) => ordersApi.updateStatus(id, status),
+    mutationFn: ({
+      id,
+      status,
+      reason,
+    }: {
+      id: string;
+      status: OrderStatus;
+      reason?: CancelReason;
+    }) => ordersApi.updateStatus(id, status, reason ? { cancelReason: reason } : undefined),
     onSuccess: (_data, vars) => {
       queryClient.invalidateQueries({ queryKey: ['owner', 'orders'] });
       toast(vars.status === 'CANCELLED' ? 'Đã huỷ đơn hàng.' : 'Đã cập nhật trạng thái đơn.', 'success');
@@ -252,7 +276,10 @@ export const OwnerOrdersScreen: React.FC = () => {
             <OrderCard
               order={item}
               busy={updateStatusMutation.isPending && pending?.order.id === item.id}
-              onAction={(action) => setPending({ order: item, action })}
+              onAction={(action) => {
+                setCancelReason('RESTAURANT_OUT_OF_STOCK');
+                setPending({ order: item, action });
+              }}
             />
           )}
           ListEmptyComponent={
@@ -280,9 +307,49 @@ export const OwnerOrdersScreen: React.FC = () => {
         loading={updateStatusMutation.isPending}
         onCancel={() => !updateStatusMutation.isPending && setPending(null)}
         onConfirm={() =>
-          pending && updateStatusMutation.mutate({ id: pending.order.id, status: pending.action.to })
+          pending &&
+          updateStatusMutation.mutate({
+            id: pending.order.id,
+            status: pending.action.to,
+            reason:
+              pending.action.to === 'CANCELLED'
+                ? pending.order.status === 'PREPARING'
+                  ? 'RESTAURANT_OUT_OF_STOCK'
+                  : cancelReason
+                : undefined,
+          })
         }
-      />
+      >
+        {pending?.action.to === 'CANCELLED' && (
+          <View className="mt-2 gap-1.5">
+            {(pending.order.status === 'PREPARING'
+              ? (['RESTAURANT_OUT_OF_STOCK'] as CancelReason[])
+              : OWNER_CANCEL_REASONS
+            ).map((r) => {
+              const selected =
+                (pending.order.status === 'PREPARING' ? 'RESTAURANT_OUT_OF_STOCK' : cancelReason) === r;
+              return (
+                <Pressable
+                  key={r}
+                  onPress={() => setCancelReason(r)}
+                  className={`flex-row items-center gap-2.5 rounded-lg border p-2.5 ${
+                    selected ? 'border-brand-500 bg-brand-50' : 'border-line bg-surface'
+                  }`}
+                >
+                  <Icon
+                    name={selected ? 'radio-button-on' : 'radio-button-off'}
+                    size="sm"
+                    tone={selected ? 'brand' : 'muted'}
+                  />
+                  <Text variant="caption" weight={selected ? 'semibold' : 'regular'} className="flex-1">
+                    {CANCEL_REASON_LABELS[r]}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        )}
+      </ConfirmDialog>
     </View>
   );
 };
@@ -406,6 +473,16 @@ const OrderCard: React.FC<{
           <Text variant="caption" weight="medium" tone="brand" className="flex-1" numberOfLines={1}>
             Tài xế: {order.driver.fullName}
             {order.driver.phone ? ` · ${order.driver.phone}` : ''}
+          </Text>
+        </View>
+      )}
+
+      {/* Lý do huỷ / giao thất bại */}
+      {(order.status === 'CANCELLED' || order.status === 'DELIVERY_FAILED') && !!formatOrderEndReason(order) && (
+        <View className="flex-row items-center gap-2 rounded-lg bg-danger-soft/40 px-3 py-2">
+          <Icon name="alert-circle-outline" size="sm" tone="danger" />
+          <Text variant="caption" tone="danger" className="flex-1">
+            {formatOrderEndReason(order)}
           </Text>
         </View>
       )}
