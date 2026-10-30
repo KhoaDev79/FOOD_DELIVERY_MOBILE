@@ -15,6 +15,7 @@ import { Restaurant } from '../../../types/api';
 import { formatDistance } from '../../../utils/format';
 
 const GAP = 12;
+const AUTO_MS = 4000;
 const SIDE_SCALE = 0.86;
 const SCALLOPS = 9;
 
@@ -105,6 +106,8 @@ export const FeaturedCarousel: React.FC<{
   const ref = useAnimatedRef<Animated.ScrollView>();
   const [frameW, setFrameW] = useState(0);
   const centered = useRef(false);
+  const dragging = useRef(false);
+  const [index, setIndex] = useState(0);
 
   const cardW = Math.round(frameW * 0.5);
   const step = cardW + GAP;
@@ -119,7 +122,21 @@ export const FeaturedCarousel: React.FC<{
     if (!frameW || centered.current || restaurants.length < 3) return;
     centered.current = true;
     requestAnimationFrame(() => ref.current?.scrollTo({ x: step, animated: false }));
+    setIndex(1);
   }, [frameW, step, restaurants.length, ref]);
+
+  // Tự chuyển như banner: mỗi 4 giây, dừng khi người dùng đang kéo, hết thì quay lại thẻ đầu.
+  // Không tự chuyển khi hệ điều hành bật "giảm chuyển động".
+  useEffect(() => {
+    if (reduced || !frameW || restaurants.length < 2) return;
+    const t = setInterval(() => {
+      if (dragging.current) return;
+      const next = (index + 1) % restaurants.length;
+      ref.current?.scrollTo({ x: next * step, animated: true });
+      setIndex(next);
+    }, AUTO_MS);
+    return () => clearInterval(t);
+  }, [index, reduced, frameW, step, restaurants.length, ref]);
 
   if (restaurants.length === 0) return null;
 
@@ -142,6 +159,14 @@ export const FeaturedCarousel: React.FC<{
               decelerationRate="fast"
               disableIntervalMomentum
               onScroll={onScroll}
+              onScrollBeginDrag={() => {
+                dragging.current = true;
+              }}
+              onMomentumScrollEnd={(e) => {
+                dragging.current = false;
+                const i = Math.round(e.nativeEvent.contentOffset.x / step);
+                setIndex(Math.max(0, Math.min(restaurants.length - 1, i)));
+              }}
               scrollEventThrottle={16}
               // NGOẠI LỆ style: lề hai bên để thẻ đầu/cuối nằm giữa khung, tính từ chiều rộng đo được.
               contentContainerStyle={{ paddingHorizontal: sidePad, gap: GAP, alignItems: 'center' }}

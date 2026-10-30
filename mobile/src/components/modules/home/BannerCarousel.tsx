@@ -58,7 +58,7 @@ export const BannerCarousel: React.FC<Props> = ({ banners, onPress, canPress }) 
   if (banners.length === 0) return null;
 
   return (
-    <View className="gap-2" accessibilityRole="adjustable" accessibilityLabel="Banner khuyến mãi">
+    <View accessibilityRole="adjustable" accessibilityLabel="Banner khuyến mãi">
       <FlatList
         ref={listRef}
         data={banners}
@@ -87,7 +87,7 @@ export const BannerCarousel: React.FC<Props> = ({ banners, onPress, canPress }) 
             >
               <AppImage uri={item.imageUrl} className="absolute inset-0" fallbackIcon="pricetags-outline" />
               {/* Lớp tối phía dưới để chữ luôn đọc được trên ảnh */}
-              <Gradient preset="imageScrim" className="absolute bottom-0 left-0 right-0 h-3/5 justify-end px-4 pb-4">
+              <Gradient preset="imageScrim" className="absolute bottom-0 left-0 right-0 h-3/5 justify-end px-4 pb-8">
                 <Text variant="headline" weight="bold" tone="inverse" numberOfLines={2}>
                   {item.title}
                 </Text>
@@ -96,14 +96,19 @@ export const BannerCarousel: React.FC<Props> = ({ banners, onPress, canPress }) 
           );
         }}
       />
+      {/* Chấm chỉ trang nằm trong ảnh, ở giữa mép dưới banner đang hiển thị */}
       {banners.length > 1 && (
         <View
-          className="flex-row items-center justify-center gap-1.5"
+          pointerEvents="none"
+          className="absolute bottom-3 left-4 right-4 flex-row items-center justify-center gap-1.5"
           accessibilityElementsHidden
           importantForAccessibility="no-hide-descendants"
         >
           {banners.map((b, i) => (
-            <View key={b.id} className={cn('h-1.5 rounded-full', i === index ? 'w-5 bg-brand-500' : 'w-1.5 bg-line')} />
+            <View
+              key={b.id}
+              className={cn('h-1.5 rounded-full', i === index ? 'w-5 bg-surface' : 'w-1.5 bg-surface opacity-50')}
+            />
           ))}
         </View>
       )}
