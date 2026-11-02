@@ -56,4 +56,4 @@ cp .env.example .env
 npm run start
 ```
 Quét mã QR bằng ứng dụng **Expo Go** trên thiết bị thật hoặc bấm `a` để chạy trên Android Emulator.
-
+docker compose up -d --build backend
