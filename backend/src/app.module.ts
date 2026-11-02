@@ -13,6 +13,8 @@ import { HealthController } from './health.controller';
 import { AdminModule } from './modules/admin/admin.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { BannersModule } from './modules/banners/banners.module';
+import { ContentModule } from './modules/content/content.module';
+import { CuisinesModule } from './modules/cuisines/cuisines.module';
 import { DriversModule } from './modules/drivers/drivers.module';
 import { JobsModule } from './modules/jobs/jobs.module';
 import { MapsModule } from './modules/maps/maps.module';
@@ -23,6 +25,7 @@ import { PaymentsModule } from './modules/payments/payments.module';
 import { PrismaModule } from './modules/prisma/prisma.module';
 import { RealtimeModule } from './modules/realtime/realtime.module';
 import { RestaurantsModule } from './modules/restaurants/restaurants.module';
+import { SearchModule } from './modules/search/search.module';
 import { UsersModule } from './modules/users/users.module';
 
 @Module({
@@ -36,6 +39,9 @@ import { UsersModule } from './modules/users/users.module';
     UsersModule,
     RestaurantsModule,
     BannersModule,
+    CuisinesModule,
+    ContentModule,
+    SearchModule,
     MenusModule,
     DriversModule,
     OrdersModule,

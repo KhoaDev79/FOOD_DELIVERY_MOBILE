@@ -20,6 +20,11 @@ export interface DistanceMatrixResult {
   durationMinutes: number;
 }
 
+/** Đường đi theo đường phố giữa hai điểm, dùng để vẽ lên bản đồ. */
+export interface DirectionResult extends DistanceMatrixResult {
+  coordinates: { latitude: number; longitude: number }[];
+}
+
 export interface IMapProvider {
   readonly name: string;
   reverseGeocode(lat: number, lng: number): Promise<GeocodeResult>;

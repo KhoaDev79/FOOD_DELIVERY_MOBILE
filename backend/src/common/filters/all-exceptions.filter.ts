@@ -34,7 +34,8 @@ export class AllExceptionsFilter implements ExceptionFilter {
       } else {
         const b = body as { message?: string | string[] };
         if (Array.isArray(b.message)) {
-          message = 'Validation failed';
+          // Lỗi kiểm tra dữ liệu: đưa lý do cụ thể (đã viết tiếng Việt trong DTO) lên message để app hiển thị
+          message = b.message.join('. ');
           errors = b.message;
         } else {
           message = b.message ?? exception.message;

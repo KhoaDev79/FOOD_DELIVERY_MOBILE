@@ -1,3 +1,4 @@
+import { estimateDeliveryWindow } from './delivery-time';
 import { parsePeakWindows, PeakWindow } from '../../config/configuration';
 
 const EARTH_RADIUS_KM = 6371;
@@ -142,17 +143,12 @@ export function estimateDelivery(
 ): DeliveryEstimation {
   const breakdown = calcDeliveryFeeBreakdown(distanceKm, opts, date);
 
-  // Thời gian = Thời gian quán chuẩn bị món (~12 phút) + Thời gian di chuyển xe máy
-  const transitTime =
-    roadDurationMinutes && roadDurationMinutes > 0
-      ? Math.max(4, Math.round(roadDurationMinutes))
-      : Math.max(4, Math.round(distanceKm * 2.5));
-  const prepTime = 12;
-  const baseMinutes = prepTime + transitTime;
-  const buffer = breakdown.isPeak ? 10 : 5;
-
-  const minMinutes = Math.max(15, baseMinutes);
-  const maxMinutes = minMinutes + buffer;
+  // Một công thức dùng chung (common/utils/delivery-time.ts): làm món + tài xế tới quán + chạy xe + bàn giao
+  const { min: minMinutes, max: maxMinutes } = estimateDeliveryWindow({
+    distanceKm,
+    roadMinutes: roadDurationMinutes,
+    isPeak: breakdown.isPeak,
+  });
 
   return {
     distanceKm: Math.round(distanceKm * 100) / 100,

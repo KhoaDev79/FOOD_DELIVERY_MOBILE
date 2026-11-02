@@ -86,6 +86,19 @@ export class RestaurantsController {
     return this.restaurants.getManageReviews(id, user, query);
   }
 
+  /** Gợi ý món thêm vào giỏ ("Thường được đặt cùng"). itemIds: các món đang có trong giỏ, cách nhau dấu phẩy. */
+  @Public()
+  @Get(':id/suggestions')
+  suggestions(@Param('id', ParseUUIDPipe) id: string, @Query('itemIds') itemIdsRaw?: string) {
+    const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    const itemIds = (itemIdsRaw ?? '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter((s) => UUID_RE.test(s))
+      .slice(0, 30);
+    return this.restaurants.getSuggestions(id, itemIds);
+  }
+
   @Public()
   @Get(':id')
   findOne(

@@ -1,7 +1,7 @@
 import { ConflictException, ForbiddenException, Injectable, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
-import { User } from '@prisma/client';
+import { DriverVerificationStatus, Prisma, RestaurantStatus, Role, User } from '@prisma/client';
 import { randomUUID } from 'crypto';
 import { hashSecret, verifySecret } from '../../common/utils/password.util';
 import { PrismaService } from '../prisma/prisma.service';
@@ -24,22 +24,32 @@ export class AuthService {
   ) {}
 
   async register(dto: RegisterDto) {
-    const exists = await this.prisma.user.findFirst({
-      where: { OR: [{ email: dto.email }, ...(dto.phone ? [{ phone: dto.phone }] : [])] },
-      select: { id: true },
-    });
-    if (exists) throw new ConflictException('Email hoặc số điện thoại đã được sử dụng');
+    const [emailTaken, phoneTaken] = await Promise.all([
+      this.prisma.user.findUnique({ where: { email: dto.email }, select: { id: true } }),
+      dto.phone ? this.prisma.user.findUnique({ where: { phone: dto.phone }, select: { id: true } }) : null,
+    ]);
+    if (emailTaken) throw new ConflictException('Email này đã được đăng ký. Vui lòng đăng nhập hoặc dùng email khác.');
+    if (phoneTaken) throw new ConflictException('Số điện thoại này đã được đăng ký cho tài khoản khác.');
 
-    const user = await this.prisma.user.create({
-      data: {
-        email: dto.email,
-        username: await generateUniqueUsername(this.prisma, dto.email),
-        phone: dto.phone,
-        fullName: dto.fullName,
-        role: 'CUSTOMER',
-        passwordHash: await hashSecret(dto.password),
-      },
-    });
+    let user: User;
+    try {
+      user = await this.prisma.user.create({
+        data: {
+          email: dto.email,
+          username: await generateUniqueUsername(this.prisma, dto.email),
+          phone: dto.phone,
+          fullName: dto.fullName,
+          role: 'CUSTOMER',
+          passwordHash: await hashSecret(dto.password),
+        },
+      });
+    } catch (err) {
+      // Hai yêu cầu đăng ký cùng lúc cùng email/SĐT/tên đăng nhập: bên chậm hơn nhận 409 rõ nghĩa
+      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+        throw new ConflictException('Email hoặc số điện thoại vừa được đăng ký. Vui lòng thử lại.');
+      }
+      throw err;
+    }
     const tokens = await this.issueTokens(user);
     return { user: toPublicUser(user), ...tokens };
   }
@@ -55,6 +65,19 @@ export class AuthService {
       throw new UnauthorizedException('Tên đăng nhập hoặc mật khẩu không đúng');
     }
     if (!user.isActive) throw new ForbiddenException('Tài khoản đã bị khóa');
+
+    // Mặc định trực tuyến khi đăng nhập:
+    if (user.role === Role.DRIVER) {
+      await this.prisma.driverProfile.updateMany({
+        where: { userId: user.id, verificationStatus: DriverVerificationStatus.APPROVED },
+        data: { isOnline: true },
+      });
+    } else if (user.role === Role.RESTAURANT_OWNER) {
+      await this.prisma.restaurant.updateMany({
+        where: { ownerId: user.id, status: RestaurantStatus.ACTIVE },
+        data: { isOpen: true },
+      });
+    }
 
     const tokens = await this.issueTokens(user);
     return { user: toPublicUser(user), ...tokens };

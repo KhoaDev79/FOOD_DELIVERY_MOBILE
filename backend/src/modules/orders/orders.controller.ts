@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Headers, Param, ParseUUIDPipe, Patch, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, Headers, HttpCode, HttpStatus, Param, ParseUUIDPipe, Patch, Post, Query } from '@nestjs/common';
 import { Role } from '@prisma/client';
 import { AuthUser, CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -9,6 +9,9 @@ import {
   QuoteOrderDto,
   ReleaseOrderDto,
   ReviewOrderDto,
+  SendOrderMessageDto,
+  ChatChannelDto,
+  ConversationsQueryDto,
   UpdateOrderStatusDto,
 } from './dto/orders.dto';
 import { OrderPricingService } from './order-pricing.service';
@@ -72,6 +75,18 @@ export class OrdersController {
     return this.orders.getDriverStats(userId, parsedDays);
   }
 
+  /** GET /orders/messages/conversations – hộp thư: các cuộc trò chuyện kèm thông tin đơn (đặt trước ':id'). */
+  @Get('messages/conversations')
+  conversations(@CurrentUser() user: AuthUser, @Query() q: ConversationsQueryDto) {
+    return this.orders.listConversations(user, q.page, q.limit);
+  }
+
+  /** GET /orders/messages/unread – tin nhắn chưa đọc theo từng đơn (đặt trước ':id'). */
+  @Get('messages/unread')
+  unreadMessages(@CurrentUser() user: AuthUser) {
+    return this.orders.getUnreadMessages(user);
+  }
+
   @Get(':id')
   findOne(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: AuthUser) {
     return this.orders.findOne(id, user);
@@ -127,5 +142,34 @@ export class OrdersController {
   @Post(':id/contact-attempts')
   contactAttempt(@Param('id', ParseUUIDPipe) id: string, @CurrentUser('id') driverId: string) {
     return this.orders.recordContactAttempt(id, driverId);
+  }
+
+  @Get(':id/messages')
+  getMessages(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: AuthUser,
+    @Query() q: ChatChannelDto,
+  ) {
+    return this.orders.getOrderMessages(id, user, q.channel);
+  }
+
+  @Post(':id/messages')
+  sendMessage(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: AuthUser,
+    @Body() dto: SendOrderMessageDto,
+  ) {
+    return this.orders.sendOrderMessage(id, user, dto.channel, dto.content);
+  }
+
+  /** POST /orders/:id/messages/read – đánh dấu đã đọc tin nhắn của đơn. */
+  @Post(':id/messages/read')
+  @HttpCode(HttpStatus.OK)
+  markMessagesRead(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: AuthUser,
+    @Body() dto: ChatChannelDto,
+  ) {
+    return this.orders.markMessagesRead(id, user, dto.channel);
   }
 }

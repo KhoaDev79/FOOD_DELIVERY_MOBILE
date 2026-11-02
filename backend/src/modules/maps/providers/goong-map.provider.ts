@@ -1,11 +1,13 @@
 import { Logger } from '@nestjs/common';
 import { formatAddress } from '../../../common/utils/address.util';
 import {
+  DirectionResult,
   DistanceMatrixResult,
   GeocodeResult,
   IMapProvider,
   PlaceAutocompleteItem,
 } from '../interfaces/map-provider.interface';
+import { decodePolyline } from '../utils/polyline.util';
 import { RateLimiter, SimpleCache } from '../utils/rate-limiter.util';
 
 export class GoongMapProvider implements IMapProvider {
@@ -144,5 +146,38 @@ export class GoongMapProvider implements IMapProvider {
     const durationMinutes = Math.max(1, Math.round(element.duration.value / 60));
 
     return { distanceKm, durationMinutes };
+  }
+
+  /** Goong Direction (xe máy): khoảng cách, thời gian và hình dạng đường đi. */
+  async getDirection(
+    origin: { lat: number; lng: number },
+    destination: { lat: number; lng: number },
+  ): Promise<DirectionResult> {
+    this.checkKey();
+    await this.limiter.throttle();
+
+    const url = `https://rsapi.goong.io/Direction?origin=${origin.lat},${origin.lng}&destination=${destination.lat},${destination.lng}&vehicle=bike&api_key=${this.apiKey}`;
+    const res = await fetch(url, { headers: { Accept: 'application/json' } });
+    if (!res.ok) {
+      throw new Error(`Goong Direction báo lỗi HTTP ${res.status}`);
+    }
+
+    const data = await res.json();
+    const route = data.routes?.[0];
+    const encoded: string | undefined = route?.overview_polyline?.points;
+    if (!route || !encoded) {
+      throw new Error('Goong Direction không tìm thấy tuyến đường phù hợp.');
+    }
+
+    // Tổng các chặng (thường chỉ có 1 chặng khi không có điểm dừng)
+    const legs: any[] = route.legs ?? [];
+    const meters = legs.reduce((s, l) => s + (l?.distance?.value ?? 0), 0);
+    const seconds = legs.reduce((s, l) => s + (l?.duration?.value ?? 0), 0);
+
+    return {
+      distanceKm: Math.round((meters / 1000) * 10) / 10,
+      durationMinutes: Math.max(1, Math.round(seconds / 60)),
+      coordinates: decodePolyline(encoded),
+    };
   }
 }

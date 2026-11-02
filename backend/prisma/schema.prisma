@@ -139,6 +139,8 @@ model User {
   reviewedRoleRequests RoleUpgradeRequest[]     @relation("RoleRequestReviewer")
   auditLogs            AuditLog[]               @relation("AuditActor")
   favorites            Favorite[]
+  sentOrderMessages    OrderMessage[]           @relation("SentOrderMessages")
+  chatReads            OrderChatRead[]
 
   @@map("users")
 }
@@ -286,6 +288,8 @@ model Order {
   review          Review?
   contactAttempts DeliveryContactAttempt[]
   ledgerEntry     DriverLedger?
+  messages        OrderMessage[]
+  chatReads       OrderChatRead[]
 
   @@unique([customerId, idempotencyKey])
   @@index([customerId, createdAt])
@@ -337,15 +341,21 @@ model Voucher {
 }
 
 model Banner {
-  id          String   @id @default(uuid()) @db.Uuid
+  id          String    @id @default(uuid()) @db.Uuid
   title       String
   imageUrl    String
-  actionType  String?  @default("RESTAURANT")
+  /// NONE | RESTAURANT (actionValue = id quán) | CUISINE (= code danh mục) | SEARCH (= từ khoá). Giá trị cũ khác coi như NONE.
+  actionType  String?   @default("RESTAURANT")
   actionValue String?
-  sortOrder   Int      @default(0)
-  isActive    Boolean  @default(true)
-  createdAt   DateTime @default(now())
+  sortOrder   Int       @default(0)
+  isActive    Boolean   @default(true)
+  /// Lịch chạy: null = không giới hạn
+  startAt     DateTime?
+  endAt       DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @default(now()) @updatedAt
 
+  @@index([isActive, sortOrder])
   @@map("banners")
 }
 
@@ -359,9 +369,11 @@ model Review {
   comment        String?
   driverRating   Int?
   driverComment  String?
-  ownerReply     String?
-  ownerRepliedAt DateTime?
-  isHidden       Boolean   @default(false)
+  ownerReply      String?
+  ownerRepliedAt  DateTime?
+  driverReply     String?
+  driverRepliedAt DateTime?
+  isHidden        Boolean   @default(false)
   createdAt      DateTime  @default(now())
 
   restaurant Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
@@ -372,6 +384,47 @@ model Review {
   @@index([restaurantId])
   @@index([driverId])
   @@map("reviews")
+}
+
+/// Mỗi đơn có tối đa 3 cuộc trò chuyện riêng, mỗi cuộc chỉ 2 bên:
+/// khách–tài xế, khách–quán, quán–tài xế.
+enum ChatChannel {
+  CUSTOMER_DRIVER
+  CUSTOMER_RESTAURANT
+  RESTAURANT_DRIVER
+}
+
+model OrderMessage {
+  id         String      @id @default(uuid()) @db.Uuid
+  orderId    String      @db.Uuid
+  channel    ChatChannel
+  /// Tài xế của cuộc trò chuyện (chỉ với kênh có tài xế). Tài xế trả đơn thì tài xế mới không đọc được tin cũ.
+  driverId   String?     @db.Uuid
+  senderId   String   @db.Uuid
+  senderRole Role
+  content    String   @db.VarChar(1000)
+  createdAt  DateTime @default(now())
+
+  order  Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  sender User  @relation("SentOrderMessages", fields: [senderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId, channel, createdAt])
+  @@map("order_messages")
+}
+
+/// Mốc đọc tin nhắn của từng người trong từng đơn: tin của người khác gửi sau mốc này là chưa đọc.
+model OrderChatRead {
+  orderId    String      @db.Uuid
+  userId     String      @db.Uuid
+  channel    ChatChannel
+  lastReadAt DateTime @default(now())
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([orderId, userId, channel])
+  @@index([userId])
+  @@map("order_chat_reads")
 }
 
 model OrderStatusHistory {
@@ -527,3 +580,30 @@ model Favorite {
   @@index([userId, createdAt])
   @@map("favorites")
 }
+
+/// Danh mục ẩm thực hệ thống (lối tắt danh mục trang chủ, lọc nhanh theo thể loại món).
+model CuisineCategory {
+  id        String   @id @default(uuid()) @db.Uuid
+  code      String   @unique
+  name      String
+  imageUrl  String
+  sortOrder Int      @default(0)
+  isActive  Boolean  @default(true)
+  keywords  String[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([sortOrder, isActive])
+  @@map("cuisine_categories")
+}
+
+/// Nhật ký tìm kiếm của khách hàng (phục vụ xu hướng tìm kiếm phổ biến).
+model SearchLog {
+  id        String   @id @default(uuid()) @db.Uuid
+  query     String
+  createdAt DateTime @default(now())
+
+  @@index([query, createdAt])
+  @@map("search_logs")
+}
+

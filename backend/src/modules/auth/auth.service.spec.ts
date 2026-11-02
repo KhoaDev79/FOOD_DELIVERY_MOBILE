@@ -74,6 +74,54 @@ describe('AuthService.login & register', () => {
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 
+  it('email đã đăng ký → 409 với thông báo rõ ràng', async () => {
+    await expect(
+      service.register({ email: 'admin@fooddelivery.com', password: 'Password123!', fullName: 'Trùng Email' }),
+    ).rejects.toThrow('Email này đã được đăng ký');
+    expect(prisma.user.create).not.toHaveBeenCalled();
+  });
+
+  describe('RegisterDto qua ValidationPipe', () => {
+    const pipe = new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true });
+    const run = (body: Record<string, unknown>) => pipe.transform(body, { type: 'body', metatype: RegisterDto });
+    const base = { email: 'a@b.vn', password: 'Password123!', fullName: 'Nguyễn Văn A' };
+    const messagesOf = async (body: Record<string, unknown>) => {
+      try {
+        await run(body);
+        return [];
+      } catch (e) {
+        return ((e as BadRequestException).getResponse() as { message: string[] }).message;
+      }
+    };
+
+    it('chuẩn hoá số điện thoại về dạng 0xxxxxxxxx, chuỗi rỗng coi như không nhập', async () => {
+      await expect(run({ ...base, phone: '+84 912 345 678' })).resolves.toMatchObject({ phone: '0912345678' });
+      await expect(run({ ...base, phone: '0912.345.678' })).resolves.toMatchObject({ phone: '0912345678' });
+      const empty = (await run({ ...base, phone: '' })) as RegisterDto;
+      expect(empty.phone).toBeUndefined();
+    });
+
+    it('từ chối số 11 chữ số và đầu số không tồn tại', async () => {
+      expect(await messagesOf({ ...base, phone: '09123456789' })).toEqual([
+        expect.stringContaining('Số điện thoại di động không hợp lệ'),
+      ]);
+      expect(await messagesOf({ ...base, phone: '0112345678' })).toHaveLength(1);
+    });
+
+    it('họ tên được gộp dấu cách; toàn dấu cách hoặc không có chữ cái thì bị từ chối', async () => {
+      await expect(run({ ...base, fullName: '  Trần   Văn  B ' })).resolves.toMatchObject({ fullName: 'Trần Văn B' });
+      expect(await messagesOf({ ...base, fullName: '     ' })).not.toHaveLength(0);
+      expect(await messagesOf({ ...base, fullName: '1234' })).toEqual([expect.stringContaining('chữ cái')]);
+    });
+
+    it('thông báo lỗi bằng tiếng Việt', async () => {
+      const msgs = await messagesOf({ email: 'sai', password: '123', fullName: 'A' });
+      expect(msgs).toEqual(
+        expect.arrayContaining(['Email không đúng định dạng', 'Mật khẩu phải từ 8 ký tự trở lên', 'Họ tên tối thiểu 2 ký tự']),
+      );
+    });
+  });
+
   it('đăng nhập bằng tên đăng nhập (không phân biệt hoa thường)', async () => {
     const res = await service.login({ username: 'Admin', password: 'Password123!' });
     expect(res.user.id).toBe('u1');

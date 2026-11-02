@@ -1,6 +1,9 @@
 import { Type } from 'class-transformer';
 import { DISCOUNT_PERCENTS } from '../menu-discount';
+import { MAX_LEVELS, MAX_OPTION_PRICE, MAX_SIZES, MAX_TOPPINGS } from '../menu-options';
 import {
+  ArrayMaxSize,
+  IsArray,
   IsBoolean,
   IsIn,
   IsInt,
@@ -11,7 +14,59 @@ import {
   MaxLength,
   Min,
   MinLength,
+  ValidateNested,
 } from 'class-validator';
+
+/** Một lựa chọn có giá (size hoặc topping). id chỉ gửi khi sửa lựa chọn đã có. */
+export class MenuOptionInputDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(40)
+  id?: string;
+
+  @IsString()
+  @MinLength(1, { message: 'Tên lựa chọn không được để trống' })
+  @MaxLength(60, { message: 'Tên lựa chọn tối đa 60 ký tự' })
+  name: string;
+
+  /** Giá cộng thêm (VND), 0 = miễn phí */
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  @Max(MAX_OPTION_PRICE, { message: 'Giá cộng thêm tối đa 500.000 ₫' })
+  price: number;
+}
+
+/** Tuỳ chọn của món: size, topping và một loại mức (cay hoặc đường). Gửi null để xoá hết. */
+export class MenuItemOptionsDto {
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(MAX_SIZES, { message: 'Tối đa 10 size' })
+  @ValidateNested({ each: true })
+  @Type(() => MenuOptionInputDto)
+  sizes?: MenuOptionInputDto[];
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(MAX_TOPPINGS, { message: 'Tối đa 10 topping' })
+  @ValidateNested({ each: true })
+  @Type(() => MenuOptionInputDto)
+  toppings?: MenuOptionInputDto[];
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(MAX_LEVELS, { message: 'Tối đa 6 mức' })
+  @IsString({ each: true })
+  @MaxLength(30, { each: true })
+  spiceLevels?: string[];
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(MAX_LEVELS, { message: 'Tối đa 6 mức' })
+  @IsString({ each: true })
+  @MaxLength(30, { each: true })
+  sugarLevels?: string[];
+}
 
 export class CreateCategoryDto {
   @IsString()
@@ -61,6 +116,12 @@ export class CreateMenuItemDto {
   @Type(() => Number)
   @IsIn(DISCOUNT_PERCENTS)
   discountPercent?: number;
+
+  /** Size / topping / mức cay hoặc mức đường. null = xoá hết tuỳ chọn; bỏ trống = giữ nguyên. */
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => MenuItemOptionsDto)
+  options?: MenuItemOptionsDto | null;
 }
 
 export class UpdateMenuItemDto {
@@ -99,4 +160,10 @@ export class UpdateMenuItemDto {
   @Type(() => Number)
   @IsIn(DISCOUNT_PERCENTS)
   discountPercent?: number;
+
+  /** Size / topping / mức cay hoặc mức đường. null = xoá hết tuỳ chọn; bỏ trống = giữ nguyên. */
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => MenuItemOptionsDto)
+  options?: MenuItemOptionsDto | null;
 }

@@ -16,7 +16,7 @@ import {
   MinLength,
   ValidateNested,
 } from 'class-validator';
-import { CancelReason, FailedDeliveryReason, OrderStatus } from '@prisma/client';
+import { CancelReason, ChatChannel, FailedDeliveryReason, OrderStatus } from '@prisma/client';
 
 /** Client gửi ID, số lượng và mã tuỳ chọn. Giá luôn được tra cứu lại từ DB. */
 export class OrderItemInputDto {
@@ -159,4 +159,33 @@ export class DriverArrivedDto {
   @Type(() => Number)
   @IsLongitude()
   lng: number;
+}
+
+/** Phân trang hộp thư tin nhắn. */
+export class ConversationsQueryDto {
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt({ message: 'Trang phải là số nguyên' })
+  @Min(1, { message: 'Trang bắt đầu từ 1' })
+  page: number = 1;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt({ message: 'Số lượng phải là số nguyên' })
+  @Min(1, { message: 'Số lượng tối thiểu là 1' })
+  @Max(50, { message: 'Mỗi trang tối đa 50 cuộc trò chuyện' })
+  limit: number = 30;
+}
+
+/** Cuộc trò chuyện trong đơn: khách–tài xế, khách–quán hoặc quán–tài xế. */
+export class ChatChannelDto {
+  @IsEnum(ChatChannel, { message: 'Cuộc trò chuyện không hợp lệ' })
+  channel: ChatChannel;
+}
+
+export class SendOrderMessageDto extends ChatChannelDto {
+  @IsString()
+  @MinLength(1)
+  @MaxLength(1000)
+  content: string;
 }

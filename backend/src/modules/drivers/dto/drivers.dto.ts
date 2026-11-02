@@ -158,3 +158,25 @@ export class DriverAdjustmentDto {
   note: string;
 }
 
+export class DriverReviewQueryDto {
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  page?: number = 1;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(50)
+  limit?: number = 20;
+}
+
+export class ReplyReviewDto {
+  @IsString({ message: 'Nội dung phản hồi phải là chuỗi ký tự' })
+  @MinLength(2, { message: 'Nội dung phản hồi tối thiểu 2 ký tự' })
+  @MaxLength(500, { message: 'Nội dung phản hồi tối đa 500 ký tự' })
+  reply: string;
+}
+

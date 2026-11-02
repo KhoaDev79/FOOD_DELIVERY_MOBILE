@@ -18,6 +18,14 @@ export interface RoadDistanceResult {
   source: 'ROAD' | 'ESTIMATED';
 }
 
+export interface RouteResult {
+  distanceKm: number;
+  durationMinutes: number;
+  /** ROAD: theo đường phố thật; ESTIMATED: đoạn thẳng nối 2 điểm khi không lấy được từ Goong. */
+  source: 'ROAD' | 'ESTIMATED';
+  coordinates: { latitude: number; longitude: number }[];
+}
+
 const ROAD_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 giờ cho kết quả ROAD
 const ESTIMATED_CACHE_TTL_MS = 5 * 60 * 1000; // 5 phút cho kết quả ESTIMATED để tự hồi phục khi Goong hoạt động lại
 
@@ -31,6 +39,7 @@ export class MapsService {
   private readonly selectedProviderType: string;
   private readonly fallbackFactor: number;
   private readonly roadDistanceCache = new LruCache<RoadDistanceResult>(ROAD_CACHE_TTL_MS, 10000);
+  private readonly routeCache = new LruCache<RouteResult>(ROAD_CACHE_TTL_MS, 2000);
 
   constructor(private readonly config: ConfigService) {
     const rawType = (this.config.get<string>('MAP_PROVIDER') || '').toLowerCase().trim();
@@ -168,5 +177,49 @@ export class MapsService {
     };
     this.roadDistanceCache.set(cacheKey, estimatedResult, ESTIMATED_CACHE_TTL_MS);
     return estimatedResult;
+  }
+
+  /**
+   * Đường đi để vẽ lên bản đồ:
+   * - Có GOONG_API_KEY: Goong Direction (xe máy) -> source = 'ROAD', cache 24 giờ theo toạ độ làm tròn 3 chữ số.
+   * - Goong lỗi / chưa có key: đoạn thẳng nối 2 điểm, khoảng cách ước tính -> 'ESTIMATED', cache 5 phút.
+   * Không bao giờ ném lỗi vì Goong, để màn hình luôn vẽ được ít nhất một đường.
+   */
+  async getRoute(
+    origin: { lat: number; lng: number },
+    destination: { lat: number; lng: number },
+  ): Promise<RouteResult> {
+    const cacheKey = `${origin.lat.toFixed(3)}_${origin.lng.toFixed(3)}->${destination.lat.toFixed(3)}_${destination.lng.toFixed(3)}`;
+    const cached = this.routeCache.get(cacheKey);
+    if (cached) {
+      return cached;
+    }
+
+    if (this.goongProvider) {
+      try {
+        const res = await this.goongProvider.getDirection(origin, destination);
+        if (res.coordinates.length >= 2) {
+          const roadRoute: RouteResult = { ...res, source: 'ROAD' };
+          this.routeCache.set(cacheKey, roadRoute, ROAD_CACHE_TTL_MS);
+          return roadRoute;
+        }
+      } catch (err: any) {
+        const safeMsg = String(err?.message || 'Lỗi không xác định').replace(/api_key=[^&\s]+/gi, 'api_key=***');
+        this.logger.warn(`Goong Direction lỗi (${safeMsg}), vẽ đoạn thẳng ước tính.`);
+      }
+    }
+
+    const estimate = await this.getRoadDistance(origin, destination);
+    const estimatedRoute: RouteResult = {
+      distanceKm: estimate.distanceKm,
+      durationMinutes: estimate.durationMinutes,
+      source: 'ESTIMATED',
+      coordinates: [
+        { latitude: origin.lat, longitude: origin.lng },
+        { latitude: destination.lat, longitude: destination.lng },
+      ],
+    };
+    this.routeCache.set(cacheKey, estimatedRoute, ESTIMATED_CACHE_TTL_MS);
+    return estimatedRoute;
   }
 }

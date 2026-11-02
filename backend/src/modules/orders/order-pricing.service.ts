@@ -8,6 +8,7 @@ import { ConfigService } from '@nestjs/config';
 import { DistanceSource, Prisma, RestaurantStatus } from '@prisma/client';
 import { createHmac, timingSafeEqual } from 'crypto';
 import { calcDeliveryFeeBreakdown, ceil1000, haversineKm } from '../../common/utils/geo.util';
+import { estimateDeliveryWindow } from '../../common/utils/delivery-time';
 import { isWithinOpeningHours } from '../../common/utils/opening-hours';
 import { MapsService } from '../maps/maps.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -227,8 +228,12 @@ export class OrderPricingService {
     const platformCommission = ceil1000(feeBreakdown.deliveryFee * commissionRate);
     const driverEarning = Math.max(0, feeBreakdown.deliveryFee - platformCommission);
 
-    const minMinutes = Math.max(15, road.durationMinutes + 10);
-    const maxMinutes = Math.max(minMinutes + 10, road.durationMinutes + 20);
+    // Cùng công thức với trang chủ / chi tiết quán; chỉ dùng thời gian chạy xe khi là tuyến đường thật
+    const { min: minMinutes, max: maxMinutes } = estimateDeliveryWindow({
+      distanceKm: road.distanceKm,
+      roadMinutes: road.source === 'ROAD' ? road.durationMinutes : undefined,
+      isPeak: feeBreakdown.isPeak,
+    });
     const estimatedDeliveryAt = new Date(now.getTime() + maxMinutes * 60 * 1000);
 
     const quoteTtlMinutes = Number(businessCfg?.quoteTtlMinutes ?? 10);

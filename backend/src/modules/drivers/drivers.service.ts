@@ -21,6 +21,7 @@ import {
   normalizeLicensePlate,
 } from '../../common/utils/vietnamese-plate.util';
 import { PrismaService } from '../prisma/prisma.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import {
   AdminDriversLedgerQueryDto,
   AdminVerifyDriverDto,
@@ -59,6 +60,7 @@ export class DriversService {
   constructor(
     private readonly prisma: PrismaService,
     @Optional() private readonly config?: ConfigService,
+    @Optional() private readonly notifications?: NotificationsService,
   ) {}
 
   private getDebtLimit(): number {
@@ -589,5 +591,100 @@ export class DriversService {
     });
 
     return sanitizeProfile(updated);
+  }
+
+  /* ------------------------------- Đánh giá tài xế ------------------------------- */
+
+  private maskCustomerName(fullName?: string | null): string {
+    const clean = (fullName ?? '').trim();
+    if (!clean) return 'Khách hàng';
+    const parts = clean.split(/\s+/);
+    if (parts.length === 1) return parts[0];
+    return `${parts[0]} ${parts.slice(1).map((p) => p.charAt(0).toUpperCase() + '.').join(' ')}`;
+  }
+
+  async getMyReviews(userId: string, query?: { page?: number; limit?: number; unrepliedOnly?: boolean }) {
+    const page = query?.page ? Number(query.page) : 1;
+    const limit = query?.limit ? Number(query.limit) : 20;
+    const unrepliedOnly = query?.unrepliedOnly ?? false;
+
+    const where: Prisma.ReviewWhereInput = {
+      driverId: userId,
+      driverRating: { not: null },
+      isHidden: false,
+      ...(unrepliedOnly ? { driverReply: null } : {}),
+    };
+
+    const [items, total] = await Promise.all([
+      this.prisma.review.findMany({
+        where,
+        select: {
+          id: true,
+          orderId: true,
+          driverRating: true,
+          driverComment: true,
+          driverReply: true,
+          driverRepliedAt: true,
+          createdAt: true,
+          customer: { select: { fullName: true } },
+          restaurant: { select: { name: true } },
+        },
+        orderBy: { createdAt: 'desc' },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      this.prisma.review.count({ where }),
+    ]);
+
+    const mapped = items.map((r) => ({
+      ...r,
+      customerName: this.maskCustomerName(r.customer?.fullName),
+    }));
+
+    return {
+      items: mapped,
+      total,
+      page,
+      limit,
+      hasMore: page * limit < total,
+    };
+  }
+
+  async replyReview(driverId: string, reviewId: string, reply: string) {
+    const trimmed = reply.trim();
+    if (trimmed.length < 2 || trimmed.length > 500) {
+      throw new BadRequestException('Nội dung phản hồi từ 2 đến 500 ký tự');
+    }
+
+    const review = await this.prisma.review.findUnique({
+      where: { id: reviewId },
+      include: { driver: true, order: true },
+    });
+    if (!review) throw new NotFoundException('Không tìm thấy đánh giá');
+    if (review.driverId !== driverId) {
+      throw new ForbiddenException('Bạn không phải tài xế được đánh giá trong đơn này');
+    }
+    if (review.driverReply) {
+      throw new ConflictException('Đánh giá này đã được phản hồi trước đó');
+    }
+
+    const updated = await this.prisma.review.update({
+      where: { id: reviewId },
+      data: {
+        driverReply: trimmed,
+        driverRepliedAt: new Date(),
+      },
+    });
+
+    if (review.customerId && review.orderId) {
+      void this.notifications?.notifyReviewReplied({
+        id: review.id,
+        orderId: review.orderId,
+        customerId: review.customerId,
+        restaurantName: review.driver?.fullName || 'Tài xế',
+      });
+    }
+
+    return updated;
   }
 }

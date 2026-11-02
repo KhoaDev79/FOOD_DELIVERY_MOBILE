@@ -1,4 +1,4 @@
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import {
   IsBoolean,
   IsEmail,
@@ -10,6 +10,7 @@ import {
   MaxLength,
   MinLength,
 } from 'class-validator';
+import { transformOptionalPhone, VN_MOBILE_REGEX } from '../../../common/utils/phone.util';
 
 export class UpdateProfileDto {
   @IsOptional()
@@ -18,8 +19,10 @@ export class UpdateProfileDto {
   @MaxLength(100)
   fullName?: string;
 
+  /** Cùng quy tắc với đăng ký: lưu dạng 0xxxxxxxxx để kiểm tra trùng chính xác. */
+  @Transform(({ value }) => transformOptionalPhone(value))
   @IsOptional()
-  @Matches(/^(\+84|0)\d{9,10}$/, { message: 'Số điện thoại không hợp lệ' })
+  @Matches(VN_MOBILE_REGEX, { message: 'Số điện thoại di động không hợp lệ (10 số, vd. 0912345678)' })
   phone?: string;
 
   @IsOptional()

@@ -3,7 +3,9 @@ import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { PrismaService } from '../prisma/prisma.service';
 import { RestaurantsService } from '../restaurants/restaurants.service';
 import { CreateCategoryDto, CreateMenuItemDto, UpdateMenuItemDto } from './dto/menus.dto';
+import { Prisma } from '@prisma/client';
 import { discountPercentOf, discountPriceFor } from './menu-discount';
+import { normalizeMenuOptions } from './menu-options';
 
 @Injectable()
 export class MenusService {
@@ -20,9 +22,15 @@ export class MenusService {
   async createItem(restaurantId: string, user: AuthUser, dto: CreateMenuItemDto) {
     await this.restaurants.assertCanManage(restaurantId, user);
     if (dto.categoryId) await this.assertCategoryBelongs(dto.categoryId, restaurantId);
-    const { discountPercent, ...data } = dto;
+    const { discountPercent, options, ...data } = dto;
+    const normalized = normalizeMenuOptions(options);
     return this.prisma.menuItem.create({
-      data: { ...data, restaurantId, discountPrice: discountPriceFor(data.price, discountPercent ?? 0) },
+      data: {
+        ...data,
+        restaurantId,
+        discountPrice: discountPriceFor(data.price, discountPercent ?? 0),
+        ...(normalized ? { options: normalized as unknown as Prisma.InputJsonValue } : {}),
+      },
     });
   }
 
@@ -30,13 +38,25 @@ export class MenusService {
     const item = await this.findActiveItem(itemId);
     await this.restaurants.assertCanManage(item.restaurantId, user);
     if (dto.categoryId) await this.assertCategoryBelongs(dto.categoryId, item.restaurantId);
-    const { discountPercent, ...data } = dto;
+    const { discountPercent, options, ...data } = dto;
     const price = data.price ?? item.price;
     // Đổi mức giảm, hoặc đổi giá mà giữ nguyên mức giảm cũ: tính lại giá giảm từ giá mới
     const percent = discountPercent ?? (data.price !== undefined ? discountPercentOf(item.price, item.discountPrice) : undefined);
+    // options: bỏ trống = giữ nguyên; null hoặc rỗng = xoá; có dữ liệu = chuẩn hoá, giữ id cũ
+    const optionsPatch =
+      options === undefined
+        ? {}
+        : (() => {
+            const normalized = normalizeMenuOptions(options, item.options);
+            return { options: normalized ? (normalized as unknown as Prisma.InputJsonValue) : Prisma.DbNull };
+          })();
     return this.prisma.menuItem.update({
       where: { id: itemId },
-      data: percent === undefined ? data : { ...data, discountPrice: discountPriceFor(price, percent) },
+      data: {
+        ...data,
+        ...optionsPatch,
+        ...(percent === undefined ? {} : { discountPrice: discountPriceFor(price, percent) }),
+      },
     });
   }
 

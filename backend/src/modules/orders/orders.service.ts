@@ -7,11 +7,13 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
+  ChatChannel,
   FailedDeliveryReason,
   LedgerEntryType,
   OrderStatus,
   PaymentMethod,
   Prisma,
+  Role,
 } from '@prisma/client';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { boundingBox, haversineKm } from '../../common/utils/geo.util';
@@ -28,7 +30,17 @@ import {
   ReviewOrderDto,
   UpdateOrderStatusDto,
 } from './dto/orders.dto';
-import { canViewOrder } from './order-access';
+import { canViewOrder, isPhoneHidden } from './order-access';
+import {
+  canParticipate,
+  canReadChannel,
+  CHANNEL_SIDES,
+  sidesOf,
+  channelHasDriver,
+  channelIsOpen,
+  channelRecipients,
+  senderSideIn,
+} from './order-chat';
 import { OrderPricingService } from './order-pricing.service';
 import {
   actorMayTransition,
@@ -78,14 +90,11 @@ export const ORDER_DETAIL_INCLUDE = {
   review: true,
 } satisfies Prisma.OrderInclude;
 
-export type OrderDetail = Prisma.OrderGetPayload<{ include: typeof ORDER_DETAIL_INCLUDE }>;
+export type OrderDetail = Prisma.OrderGetPayload<{
+  include: typeof ORDER_DETAIL_INCLUDE;
+}>;
 
-const ACTIVE_DELIVERY_STATUSES: OrderStatus[] = [
-  'CONFIRMED',
-  'PREPARING',
-  'READY_FOR_PICKUP',
-  'PICKED_UP',
-];
+const ACTIVE_DELIVERY_STATUSES: OrderStatus[] = ['CONFIRMED', 'PREPARING', 'READY_FOR_PICKUP', 'PICKED_UP'];
 
 @Injectable()
 export class OrdersService {
@@ -120,6 +129,20 @@ export class OrdersService {
       }
     }
 
+    // Yêu cầu tài khoản khách hàng phải có SĐT và Họ tên hợp lệ
+    const customer = await this.prisma.user.findUnique({
+      where: { id: customerId },
+      select: { phone: true, fullName: true },
+    });
+    if (!customer?.phone || customer.phone.trim().length < 9) {
+      throw new BadRequestException(
+        'Tài khoản chưa cập nhật số điện thoại. Vui lòng cập nhật số điện thoại trước khi đặt hàng.',
+      );
+    }
+    if (!customer?.fullName || customer.fullName.trim().length < 2) {
+      throw new BadRequestException('Tài khoản chưa cập nhật họ tên người nhận. Vui lòng cập nhật trước khi đặt hàng.');
+    }
+
     // Kiểm tra số lần giao thất bại trong 30 ngày gần nhất của khách (C5)
     const maxFailed = Number(this.config.get<number>('business.customerMaxFailedDeliveries') ?? 2);
     const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
@@ -131,9 +154,7 @@ export class OrdersService {
       },
     });
     if (recentFailedCount >= maxFailed) {
-      throw new ForbiddenException(
-        'Tài khoản tạm thời không thể đặt đơn tiền mặt, liên hệ hỗ trợ',
-      );
+      throw new ForbiddenException('Tài khoản tạm thời không thể đặt đơn tiền mặt, liên hệ hỗ trợ');
     }
 
     let order: OrderDetail;
@@ -161,7 +182,9 @@ export class OrdersService {
             idempotencyKey: cleanIdemKey,
             note: dto.note,
             items: { create: priced.dbLines },
-            statusHistory: { create: { status: 'PENDING', changedBy: customerId } },
+            statusHistory: {
+              create: { status: 'PENDING', changedBy: customerId },
+            },
           },
           include: ORDER_DETAIL_INCLUDE,
         });
@@ -196,15 +219,12 @@ export class OrdersService {
     userOrSystem: AuthUser | 'SYSTEM',
     dto: UpdateOrderStatusDto | OrderStatus,
   ): Promise<OrderDetail> {
-    const payload: UpdateOrderStatusDto =
-      typeof dto === 'string' ? { status: dto } : dto;
+    const payload: UpdateOrderStatusDto = typeof dto === 'string' ? { status: dto } : dto;
     const to = payload.status;
 
     const order = await this.getOrderOrThrow(orderId);
-    const actor: OrderActor | null =
-      userOrSystem === 'SYSTEM' ? 'SYSTEM' : this.resolveActor(order, userOrSystem);
-    const changedBy: string | null =
-      userOrSystem === 'SYSTEM' ? null : userOrSystem.id;
+    const actor: OrderActor | null = userOrSystem === 'SYSTEM' ? 'SYSTEM' : this.resolveActor(order, userOrSystem);
+    const changedBy: string | null = userOrSystem === 'SYSTEM' ? null : userOrSystem.id;
 
     if (!isValidTransition(order.status, to)) {
       throw new BadRequestException(`Không thể chuyển đơn từ ${order.status} sang ${to}`);
@@ -236,13 +256,9 @@ export class OrdersService {
         throw new BadRequestException('Vui lòng chọn lý do giao hàng thất bại');
       }
       if (!order.arrivedAt) {
-        throw new ConflictException(
-          'Bạn cần xác nhận đã đến điểm giao hàng trước khi báo giao thất bại',
-        );
+        throw new ConflictException('Bạn cần xác nhận đã đến điểm giao hàng trước khi báo giao thất bại');
       }
-      const minWaitMinutes = Number(
-        this.config.get<number>('business.failedDeliveryMinWaitMinutes') ?? 10,
-      );
+      const minWaitMinutes = Number(this.config.get<number>('business.failedDeliveryMinWaitMinutes') ?? 10);
       const elapsedMs = Date.now() - order.arrivedAt.getTime();
       const requiredMs = minWaitMinutes * 60 * 1000;
       if (elapsedMs < requiredMs) {
@@ -251,9 +267,7 @@ export class OrdersService {
       }
 
       if (payload.failedReason === FailedDeliveryReason.CUSTOMER_UNREACHABLE) {
-        const minCalls = Number(
-          this.config.get<number>('business.failedDeliveryMinCalls') ?? 3,
-        );
+        const minCalls = Number(this.config.get<number>('business.failedDeliveryMinCalls') ?? 3);
         const callsAfterArrived = await this.prisma.deliveryContactAttempt.count({
           where: {
             orderId: order.id,
@@ -274,9 +288,7 @@ export class OrdersService {
         where: { id: orderId, status: order.status },
         data: {
           status: to,
-          ...(to === 'DELIVERED' && order.paymentMethod === 'COD'
-            ? { paymentStatus: 'PAID' as const }
-            : {}),
+          ...(to === 'DELIVERED' && order.paymentMethod === 'COD' ? { paymentStatus: 'PAID' as const } : {}),
           ...(to === 'CANCELLED'
             ? {
                 cancelReason: payload.cancelReason,
@@ -367,7 +379,10 @@ export class OrdersService {
         });
       }
 
-      return tx.order.findUniqueOrThrow({ where: { id: orderId }, include: ORDER_DETAIL_INCLUDE });
+      return tx.order.findUniqueOrThrow({
+        where: { id: orderId },
+        include: ORDER_DETAIL_INCLUDE,
+      });
     });
 
     this.gateway.emitOrderUpdated('order:status', updated);
@@ -404,7 +419,11 @@ export class OrdersService {
     }
 
     const { count } = await this.prisma.order.updateMany({
-      where: { id: orderId, driverId: null, status: { in: DRIVER_ACCEPTABLE_STATUSES } },
+      where: {
+        id: orderId,
+        driverId: null,
+        status: { in: DRIVER_ACCEPTABLE_STATUSES },
+      },
       data: { driverId },
     });
     if (count === 0) {
@@ -446,7 +465,11 @@ export class OrdersService {
     const cleanReason = reason.trim();
     const updated = await this.prisma.$transaction(async (tx) => {
       const { count } = await tx.order.updateMany({
-        where: { id: orderId, driverId, status: { in: DRIVER_ACCEPTABLE_STATUSES } },
+        where: {
+          id: orderId,
+          driverId,
+          status: { in: DRIVER_ACCEPTABLE_STATUSES },
+        },
         data: { driverId: null },
       });
       if (count === 0) {
@@ -471,7 +494,10 @@ export class OrdersService {
         },
       });
 
-      return tx.order.findUniqueOrThrow({ where: { id: orderId }, include: ORDER_DETAIL_INCLUDE });
+      return tx.order.findUniqueOrThrow({
+        where: { id: orderId },
+        include: ORDER_DETAIL_INCLUDE,
+      });
     });
 
     this.gateway.emitOrderUpdated('order:status', updated);
@@ -487,15 +513,14 @@ export class OrdersService {
       throw new ForbiddenException('Bạn không phải tài xế của đơn hàng này');
     }
     if (order.status !== 'PICKED_UP') {
-      throw new BadRequestException('Chỉ có thể xác nhận đến điểm giao khi đơn đang ở trạng thái Đang giao (PICKED_UP)');
+      throw new BadRequestException(
+        'Chỉ có thể xác nhận đến điểm giao khi đơn đang ở trạng thái Đang giao (PICKED_UP)',
+      );
     }
 
     const maxDistanceM = Number(this.config.get<number>('business.arrivalMaxDistanceM') ?? 200);
     const distMeters = Math.round(
-      haversineKm(
-        { lat: dto.lat, lng: dto.lng },
-        { lat: order.deliveryLat, lng: order.deliveryLng },
-      ) * 1000,
+      haversineKm({ lat: dto.lat, lng: dto.lng }, { lat: order.deliveryLat, lng: order.deliveryLng }) * 1000,
     );
 
     if (distMeters > maxDistanceM) {
@@ -536,9 +561,7 @@ export class OrdersService {
 
     if (latest && Date.now() - latest.createdAt.getTime() < 30_000) {
       const waitSec = Math.ceil((30_000 - (Date.now() - latest.createdAt.getTime())) / 1000);
-      throw new ConflictException(
-        `Vui lòng chờ ${waitSec} giây trước khi ghi nhận lần liên hệ tiếp theo`,
-      );
+      throw new ConflictException(`Vui lòng chờ ${waitSec} giây trước khi ghi nhận lần liên hệ tiếp theo`);
     }
 
     const attempt = await this.prisma.deliveryContactAttempt.create({
@@ -589,10 +612,7 @@ export class OrdersService {
     }
 
     const debtLimit = Number(this.config.get<number>('business.driverDebtLimit') ?? 2000000);
-    if (
-      profile.codBalance + orderDebtToAdd > debtLimit ||
-      (orderDebtToAdd === 0 && profile.codBalance >= debtLimit)
-    ) {
+    if (profile.codBalance + orderDebtToAdd > debtLimit || (orderDebtToAdd === 0 && profile.codBalance >= debtLimit)) {
       throw new ForbiddenException(
         `Công nợ tiền mặt đã chạm hạn mức ${debtLimit.toLocaleString('vi-VN')}đ. Vui lòng nộp tiền để tiếp tục nhận đơn.`,
       );
@@ -622,40 +642,22 @@ export class OrdersService {
         : null;
 
     // E2: Ẩn số điện thoại khách và tài xế khi đơn đã kết thúc quá 2 giờ (trừ ADMIN)
-    const isFinished =
-      order.status === 'DELIVERED' ||
-      order.status === 'CANCELLED' ||
-      order.status === 'DELIVERY_FAILED';
-    const terminalHistory = [...(order.statusHistory ?? [])]
-      .reverse()
-      .find((h) => h.status === order.status);
+    const terminalHistory = [...(order.statusHistory ?? [])].reverse().find((h) => h.status === order.status);
     const finishedAt = terminalHistory?.createdAt ?? order.updatedAt;
-    const shouldMaskPhone =
-      user.role !== 'ADMIN' &&
-      isFinished &&
-      Date.now() - finishedAt.getTime() > 2 * 60 * 60 * 1000;
+    const shouldMaskPhone = user.role !== 'ADMIN' && isPhoneHidden(order.status, finishedAt);
 
     // E3: Tính canReview cho khách hàng trong thời hạn REVIEW_WINDOW_DAYS kể từ lúc giao
-    const reviewWindowDays = Number(
-      this.config.get<number>('business.reviewWindowDays') ?? 7,
-    );
-    const deliveredHistory = [...(order.statusHistory ?? [])]
-      .reverse()
-      .find((h) => h.status === 'DELIVERED');
+    const reviewWindowDays = Number(this.config.get<number>('business.reviewWindowDays') ?? 7);
+    const deliveredHistory = [...(order.statusHistory ?? [])].reverse().find((h) => h.status === 'DELIVERED');
     const deliveredAt = deliveredHistory?.createdAt ?? order.updatedAt;
-    const withinReviewWindow =
-      Date.now() - deliveredAt.getTime() <= reviewWindowDays * 24 * 60 * 60 * 1000;
+    const withinReviewWindow = Date.now() - deliveredAt.getTime() <= reviewWindowDays * 24 * 60 * 60 * 1000;
     const canReview =
-      order.status === 'DELIVERED' &&
-      !order.review &&
-      withinReviewWindow &&
-      order.customerId === user.id;
+      order.status === 'DELIVERED' && !order.review && withinReviewWindow && order.customerId === user.id;
 
     return {
       ...order,
       customer: shouldMaskPhone ? { ...order.customer, phone: null } : order.customer,
-      driver:
-        order.driver && shouldMaskPhone ? { ...order.driver, phone: null } : order.driver,
+      driver: order.driver && shouldMaskPhone ? { ...order.driver, phone: null } : order.driver,
       driverLocation,
       canReview,
     };
@@ -667,7 +669,7 @@ export class OrdersService {
 
   async findForRestaurant(restaurantId: string, user: AuthUser, q: ListOrdersQueryDto) {
     await this.restaurants.assertCanManage(restaurantId, user);
-    return this.paginate({ restaurantId, ...(q.status ? { status: q.status } : {}) }, q);
+    return this.paginate({ restaurantId, ...(q.status ? { status: q.status } : {}) }, q, 'desc', user.role === 'ADMIN');
   }
 
   findForDriver(driverId: string, q: ListOrdersQueryDto) {
@@ -684,9 +686,7 @@ export class OrdersService {
   async findAvailableForDrivers(driverId: string, q: ListOrdersQueryDto) {
     const profile = await this.assertDriverCanAccept(driverId);
 
-    const staleMinutes = Number(
-      this.config.get<number>('business.driverLocationStaleMinutes') ?? 5,
-    );
+    const staleMinutes = Number(this.config.get<number>('business.driverLocationStaleMinutes') ?? 5);
     if (
       profile.lastLatitude === null ||
       profile.lastLongitude === null ||
@@ -722,7 +722,8 @@ export class OrdersService {
             longitude: true,
           },
         },
-        customer: { select: { id: true, fullName: true, phone: true } },
+        // Đơn chưa nhận: không lộ số điện thoại khách cho mọi tài xế quanh đó (chỉ có sau khi nhận đơn)
+        customer: { select: { id: true, fullName: true } },
       },
       orderBy: { createdAt: 'asc' },
     });
@@ -776,42 +777,41 @@ export class OrdersService {
     try {
       const baseRadiusKm = Number(this.config.get<number>('business.driverSearchRadiusKm') ?? 5);
       const radiusKm = baseRadiusKm * radiusMultiplier;
-      const staleMinutes = Number(
-        this.config.get<number>('business.driverLocationStaleMinutes') ?? 5,
-      );
+      const staleMinutes = Number(this.config.get<number>('business.driverLocationStaleMinutes') ?? 5);
       const debtLimit = Number(this.config.get<number>('business.driverDebtLimit') ?? 2000000);
       const maxActive = Number(this.config.get<number>('business.driverMaxActiveOrders') ?? 2);
 
       const staleCutoff = new Date(Date.now() - staleMinutes * 60 * 1000);
       const orderDebt = order.subtotal + order.platformCommission;
-      const restPos = { lat: order.restaurant.latitude, lng: order.restaurant.longitude };
+      const restPos = {
+        lat: order.restaurant.latitude,
+        lng: order.restaurant.longitude,
+      };
       const box = boundingBox(restPos, radiusKm);
 
-      const candidates = (await this.prisma.driverProfile?.findMany?.({
-        where: {
-          isOnline: true,
-          verificationStatus: 'APPROVED',
-          lastLocationAt: { gte: staleCutoff },
-          lastLatitude: { gte: box.minLat, lte: box.maxLat },
-          lastLongitude: { gte: box.minLng, lte: box.maxLng },
-          codBalance: { lte: debtLimit - orderDebt },
-          user: { isActive: true },
-        },
-        select: {
-          userId: true,
-          lastLatitude: true,
-          lastLongitude: true,
-          codBalance: true,
-        },
-      })) ?? [];
+      const candidates =
+        (await this.prisma.driverProfile?.findMany?.({
+          where: {
+            isOnline: true,
+            verificationStatus: 'APPROVED',
+            lastLocationAt: { gte: staleCutoff },
+            lastLatitude: { gte: box.minLat, lte: box.maxLat },
+            lastLongitude: { gte: box.minLng, lte: box.maxLng },
+            codBalance: { lte: debtLimit - orderDebt },
+            user: { isActive: true },
+          },
+          select: {
+            userId: true,
+            lastLatitude: true,
+            lastLongitude: true,
+            codBalance: true,
+          },
+        })) ?? [];
 
       const inRadius = candidates
         .filter((c) => c.lastLatitude !== null && c.lastLongitude !== null)
         .map((c) => {
-          const distKm = haversineKm(
-            { lat: c.lastLatitude!, lng: c.lastLongitude! },
-            restPos,
-          );
+          const distKm = haversineKm({ lat: c.lastLatitude!, lng: c.lastLongitude! }, restPos);
           return { ...c, distKm };
         })
         .filter((c) => c.distKm <= radiusKm);
@@ -845,6 +845,8 @@ export class OrdersService {
       for (const drv of eligible) {
         const payload = {
           ...order,
+          // Chưa nhận đơn thì chưa được biết số điện thoại khách
+          customer: { ...order.customer, phone: null },
           distanceToRestaurantKm: Math.round(drv.distKm * 100) / 100,
           deliveryDistanceKm: order.distanceKm,
           driverEarning: order.driverEarning,
@@ -876,7 +878,10 @@ export class OrdersService {
           {
             status: OrderStatus.DELIVERED,
             statusHistory: {
-              some: { status: OrderStatus.DELIVERED, createdAt: { gte: start } },
+              some: {
+                status: OrderStatus.DELIVERED,
+                createdAt: { gte: start },
+              },
             },
           },
         ],
@@ -913,16 +918,9 @@ export class OrdersService {
   // =========================================================================
   //  ĐÁNH GIÁ — E3: khách chấm điểm quán + tài xế theo từng đơn trong REVIEW_WINDOW_DAYS
   // =========================================================================
-  async review(
-    orderId: string,
-    customerId: string,
-    dtoOrRating: ReviewOrderDto | number,
-    legacyComment?: string,
-  ) {
+  async review(orderId: string, customerId: string, dtoOrRating: ReviewOrderDto | number, legacyComment?: string) {
     const dto: ReviewOrderDto =
-      typeof dtoOrRating === 'number'
-        ? { rating: dtoOrRating, comment: legacyComment }
-        : dtoOrRating;
+      typeof dtoOrRating === 'number' ? { rating: dtoOrRating, comment: legacyComment } : dtoOrRating;
 
     const order = await this.prisma.order.findUnique({
       where: { id: orderId },
@@ -945,17 +943,10 @@ export class OrdersService {
       throw new ConflictException('Bạn đã đánh giá đơn này');
     }
 
-    const reviewWindowDays = Number(
-      this.config.get<number>('business.reviewWindowDays') ?? 7,
-    );
+    const reviewWindowDays = Number(this.config.get<number>('business.reviewWindowDays') ?? 7);
     const deliveredAt = order.statusHistory?.[0]?.createdAt ?? order.updatedAt;
-    if (
-      deliveredAt &&
-      Date.now() - deliveredAt.getTime() > reviewWindowDays * 24 * 60 * 60 * 1000
-    ) {
-      throw new BadRequestException(
-        `Đã quá thời hạn đánh giá đơn hàng (tối đa ${reviewWindowDays} ngày sau khi giao)`,
-      );
+    if (deliveredAt && Date.now() - deliveredAt.getTime() > reviewWindowDays * 24 * 60 * 60 * 1000) {
+      throw new BadRequestException(`Đã quá thời hạn đánh giá đơn hàng (tối đa ${reviewWindowDays} ngày sau khi giao)`);
     }
 
     const hasDriver = Boolean(order.driverId);
@@ -971,8 +962,7 @@ export class OrdersService {
             comment: dto.comment?.trim() || null,
             driverId: hasDriver ? order.driverId : null,
             driverRating: hasDriver && dto.driverRating ? dto.driverRating : null,
-            driverComment:
-              hasDriver && dto.driverComment ? dto.driverComment.trim() || null : null,
+            driverComment: hasDriver && dto.driverComment ? dto.driverComment.trim() || null : null,
           },
         });
         const { _avg, _count } = await tx.review.aggregate({
@@ -983,10 +973,7 @@ export class OrdersService {
         await tx.restaurant.update({
           where: { id: order.restaurantId },
           data: {
-            rating:
-              (_count.rating ?? 0) > 0
-                ? Math.round((_avg.rating ?? dto.rating) * 10) / 10
-                : 0,
+            rating: (_count.rating ?? 0) > 0 ? Math.round((_avg.rating ?? dto.rating) * 10) / 10 : 0,
             ratingCount: _count.rating ?? 1,
           },
         });
@@ -1001,17 +988,365 @@ export class OrdersService {
   }
 
   // =========================================================================
+  //  CHAT THEO ĐƠN — 3 cuộc trò chuyện riêng 2 bên (xem order-chat.ts)
+  // =========================================================================
+
+  /** Lấy đơn và kiểm tra quyền dùng kênh. Không có quyền -> 404 để không lộ cuộc trò chuyện. */
+  private async getChatOrder(orderId: string, user: AuthUser, channel: ChatChannel, mode: 'read' | 'write') {
+    const order = await this.getOrderOrThrow(orderId);
+    if (!canViewOrder(order, user)) throw new NotFoundException('Không tìm thấy đơn hàng');
+    const allowed = mode === 'read' ? canReadChannel(order, user, channel) : canParticipate(order, user, channel);
+    if (!allowed) {
+      if (!channelIsOpen(order, channel)) {
+        throw new BadRequestException('Đơn chưa có tài xế nên chưa thể nhắn tin với tài xế');
+      }
+      throw new NotFoundException('Không tìm thấy cuộc trò chuyện');
+    }
+    return order;
+  }
+
+  /** Điều kiện lọc tin của một kênh: kênh có tài xế chỉ lấy tin với tài xế hiện tại của đơn. */
+  private channelWhere(orderId: string, channel: ChatChannel, driverId: string | null): Prisma.OrderMessageWhereInput {
+    return {
+      orderId,
+      channel,
+      ...(channelHasDriver(channel) ? { driverId } : {}),
+    };
+  }
+
+  async getOrderMessages(orderId: string, user: AuthUser, channel: ChatChannel) {
+    const order = await this.getChatOrder(orderId, user, channel, 'read');
+    return this.prisma.orderMessage.findMany({
+      where: this.channelWhere(orderId, channel, order.driverId),
+      include: {
+        sender: {
+          select: { id: true, fullName: true, avatarUrl: true, role: true },
+        },
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+  }
+
+  async sendOrderMessage(orderId: string, user: AuthUser, channel: ChatChannel, rawContent: string) {
+    const content = rawContent.trim();
+    if (!content) throw new BadRequestException('Nội dung tin nhắn không được rỗng');
+    if (content.length > 1000) throw new BadRequestException('Nội dung tin nhắn tối đa 1000 ký tự');
+
+    const order = await this.getChatOrder(orderId, user, channel, 'write');
+    const message = await this.prisma.orderMessage.create({
+      data: {
+        orderId,
+        channel,
+        driverId: channelHasDriver(channel) ? order.driverId : null,
+        senderId: user.id,
+        senderRole: user.role,
+        content,
+      },
+      include: {
+        sender: {
+          select: { id: true, fullName: true, avatarUrl: true, role: true },
+        },
+      },
+    });
+
+    // Người gửi đã "đọc" tới tin của chính mình
+    await this.touchChatRead(orderId, user.id, channel, message.createdAt);
+
+    // Chỉ bên còn lại của kênh nhận tin; bên thứ ba của đơn không nhận
+    const recipientIds = channelRecipients(order, channel, user.id);
+    this.gateway.emitOrderMessage(message, user.id, recipientIds);
+
+    const side = senderSideIn(order, channel, user.id);
+    const senderName =
+      side === 'RESTAURANT'
+        ? order.restaurant.name
+        : side === 'DRIVER'
+          ? order.driver?.fullName || 'Tài xế'
+          : order.customer?.fullName || 'Khách hàng';
+    if (recipientIds.length > 0) {
+      void this.notifications.sendToUsers(recipientIds, {
+        title: `Tin nhắn mới từ ${senderName}`,
+        body: content,
+        data: { type: 'order_chat', orderId, channel },
+      });
+    }
+    return message;
+  }
+
+  /** Đánh dấu đã đọc toàn bộ tin của một kênh tới thời điểm hiện tại. */
+  async markMessagesRead(orderId: string, user: AuthUser, channel: ChatChannel) {
+    await this.getChatOrder(orderId, user, channel, 'write');
+    const lastReadAt = await this.touchChatRead(orderId, user.id, channel, new Date());
+    return { orderId, channel, lastReadAt };
+  }
+
+  /**
+   * Tin chưa đọc của người dùng, gom theo (đơn, kênh): chỉ tin do bên còn lại gửi trong kênh
+   * mà người này là một trong hai bên, gửi sau mốc đã đọc của kênh đó. Tối đa 20 cuộc mới nhất.
+   */
+  async getUnreadMessages(user: AuthUser) {
+    if (user.role === 'ADMIN') return { totalUnread: 0, conversations: [] };
+    const uid = user.id;
+
+    const rows = await this.prisma.$queryRaw<
+      {
+        orderId: string;
+        channel: ChatChannel;
+        unread: number;
+        id: string;
+        content: string;
+        createdAt: Date;
+        senderId: string;
+        senderRole: Role;
+      }[]
+    >`
+      SELECT * FROM (
+        SELECT DISTINCT ON (m."orderId", m.channel)
+          m."orderId", m.channel, m.id, m.content, m."createdAt", m."senderId", m."senderRole",
+          COUNT(*) OVER (PARTITION BY m."orderId", m.channel)::int AS unread
+        FROM order_messages m
+        JOIN orders o ON o.id = m."orderId"
+        JOIN restaurants r ON r.id = o."restaurantId"
+        LEFT JOIN order_chat_reads cr
+          ON cr."orderId" = m."orderId" AND cr."userId" = ${uid}::uuid AND cr.channel = m.channel
+        WHERE m."senderId" <> ${uid}::uuid
+          AND (cr."lastReadAt" IS NULL OR m."createdAt" > cr."lastReadAt")
+          AND ${this.chatParticipationSql(uid)}
+        ORDER BY m."orderId", m.channel, m."createdAt" DESC
+      ) t
+      ORDER BY t."createdAt" DESC
+      LIMIT 20
+    `;
+    if (rows.length === 0) return { totalUnread: 0, conversations: [] };
+
+    const [senders, orders] = await Promise.all([
+      this.prisma.user.findMany({
+        where: { id: { in: [...new Set(rows.map((r) => r.senderId))] } },
+        select: { id: true, fullName: true, role: true },
+      }),
+      this.prisma.order.findMany({
+        where: { id: { in: [...new Set(rows.map((r) => r.orderId))] } },
+        select: {
+          id: true,
+          status: true,
+          restaurant: { select: { name: true } },
+        },
+      }),
+    ]);
+    const senderById = new Map(senders.map((s) => [s.id, s]));
+    const orderById = new Map(orders.map((o) => [o.id, o]));
+
+    const conversations = rows.map((r) => {
+      const order = orderById.get(r.orderId);
+      return {
+        orderId: r.orderId,
+        channel: r.channel,
+        orderStatus: order?.status ?? null,
+        restaurantName: order?.restaurant.name ?? null,
+        unreadCount: r.unread,
+        lastMessage: {
+          id: r.id,
+          content: r.content,
+          createdAt: r.createdAt,
+          senderRole: r.senderRole,
+          sender: senderById.get(r.senderId) ?? {
+            id: r.senderId,
+            fullName: '',
+            role: r.senderRole,
+          },
+        },
+      };
+    });
+    return {
+      totalUnread: rows.reduce((s, r) => s + r.unread, 0),
+      conversations,
+    };
+  }
+
+  /**
+   * Điều kiện SQL: tin nhắn `m` (đơn `o`, quán `r`) thuộc cuộc trò chuyện mà người dùng là một
+   * trong hai bên. Kênh có tài xế chỉ tính tin với tài xế hiện tại của đơn (khớp order-chat.ts).
+   */
+  private chatParticipationSql(uid: string): Prisma.Sql {
+    return Prisma.sql`(
+      (m.channel = 'CUSTOMER_DRIVER' AND m."driverId" = o."driverId"
+        AND (o."customerId" = ${uid}::uuid OR o."driverId" = ${uid}::uuid))
+      OR (m.channel = 'CUSTOMER_RESTAURANT'
+        AND (o."customerId" = ${uid}::uuid OR r."ownerId" = ${uid}::uuid))
+      OR (m.channel = 'RESTAURANT_DRIVER' AND m."driverId" = o."driverId"
+        AND (r."ownerId" = ${uid}::uuid OR o."driverId" = ${uid}::uuid))
+    )`;
+  }
+
+  /**
+   * Hộp thư: mọi cuộc trò chuyện người dùng tham gia, mới nhất trước. Mỗi cuộc gồm người bên kia,
+   * tin cuối, số tin chưa đọc và thông tin đơn (mã đơn, trạng thái, món, tổng tiền, khách, địa chỉ)
+   * để chủ quán/tài xế biết rõ đang nói chuyện với khách nào về đơn nào.
+   */
+  async listConversations(user: AuthUser, page = 1, limit = 30) {
+    if (user.role === 'ADMIN') return { items: [], page, limit, hasMore: false };
+    const uid = user.id;
+    const offset = (page - 1) * limit;
+
+    const rows = await this.prisma.$queryRaw<
+      {
+        orderId: string;
+        channel: ChatChannel;
+        unread: number;
+        id: string;
+        content: string;
+        createdAt: Date;
+        senderId: string;
+        senderRole: Role;
+      }[]
+    >`
+      SELECT * FROM (
+        SELECT DISTINCT ON (m."orderId", m.channel)
+          m."orderId", m.channel, m.id, m.content, m."createdAt", m."senderId", m."senderRole",
+          (COUNT(*) FILTER (
+            WHERE m."senderId" <> ${uid}::uuid AND (cr."lastReadAt" IS NULL OR m."createdAt" > cr."lastReadAt")
+          ) OVER (PARTITION BY m."orderId", m.channel))::int AS unread
+        FROM order_messages m
+        JOIN orders o ON o.id = m."orderId"
+        JOIN restaurants r ON r.id = o."restaurantId"
+        LEFT JOIN order_chat_reads cr
+          ON cr."orderId" = m."orderId" AND cr."userId" = ${uid}::uuid AND cr.channel = m.channel
+        WHERE ${this.chatParticipationSql(uid)}
+        ORDER BY m."orderId", m.channel, m."createdAt" DESC
+      ) t
+      ORDER BY t."createdAt" DESC
+      LIMIT ${limit + 1} OFFSET ${offset}
+    `;
+    const hasMore = rows.length > limit;
+    const page_ = rows.slice(0, limit);
+    if (page_.length === 0) return { items: [], page, limit, hasMore: false };
+
+    const orders = await this.prisma.order.findMany({
+      where: { id: { in: [...new Set(page_.map((r) => r.orderId))] } },
+      select: {
+        id: true,
+        status: true,
+        createdAt: true,
+        total: true,
+        paymentMethod: true,
+        deliveryAddress: true,
+        customerId: true,
+        driverId: true,
+        items: { select: { name: true, quantity: true } },
+        restaurant: {
+          select: { id: true, name: true, imageUrl: true, ownerId: true },
+        },
+        customer: { select: { id: true, fullName: true, avatarUrl: true } },
+        driver: { select: { id: true, fullName: true, avatarUrl: true } },
+      },
+    });
+    const orderById = new Map(orders.map((o) => [o.id, o]));
+
+    const items = page_.flatMap((r) => {
+      const order = orderById.get(r.orderId);
+      if (!order) return [];
+      const mySides = sidesOf(order, uid);
+      const otherSide = CHANNEL_SIDES[r.channel].find((side) => !mySides.includes(side)) ?? CHANNEL_SIDES[r.channel][1];
+      const counterpart =
+        otherSide === 'RESTAURANT'
+          ? {
+              side: otherSide,
+              name: order.restaurant.name,
+              avatarUrl: order.restaurant.imageUrl,
+            }
+          : otherSide === 'DRIVER'
+            ? {
+                side: otherSide,
+                name: order.driver?.fullName ?? 'Tài xế',
+                avatarUrl: order.driver?.avatarUrl ?? null,
+              }
+            : {
+                side: otherSide,
+                name: order.customer.fullName,
+                avatarUrl: order.customer.avatarUrl,
+              };
+      return [
+        {
+          orderId: r.orderId,
+          channel: r.channel,
+          unreadCount: r.unread,
+          counterpart,
+          lastMessage: {
+            id: r.id,
+            content: r.content,
+            createdAt: r.createdAt,
+            senderRole: r.senderRole,
+            isMine: r.senderId === uid,
+          },
+          order: {
+            id: order.id,
+            code: order.id.slice(0, 8).toUpperCase(),
+            status: order.status,
+            createdAt: order.createdAt,
+            total: order.total,
+            paymentMethod: order.paymentMethod,
+            deliveryAddress: order.deliveryAddress,
+            itemCount: order.items.reduce((s, i) => s + i.quantity, 0),
+            items: order.items.slice(0, 3),
+            restaurant: {
+              id: order.restaurant.id,
+              name: order.restaurant.name,
+              imageUrl: order.restaurant.imageUrl,
+            },
+            customer: {
+              id: order.customer.id,
+              fullName: order.customer.fullName,
+            },
+            driver: order.driver ? { id: order.driver.id, fullName: order.driver.fullName } : null,
+          },
+        },
+      ];
+    });
+    return { items, page, limit, hasMore };
+  }
+
+  /** Dời mốc đã đọc của kênh lên `at` (không bao giờ lùi lại). */
+  private async touchChatRead(orderId: string, userId: string, channel: ChatChannel, at: Date): Promise<Date> {
+    const key = { orderId_userId_channel: { orderId, userId, channel } };
+    const row = await this.prisma.orderChatRead.upsert({
+      where: key,
+      create: { orderId, userId, channel, lastReadAt: at },
+      update: {},
+    });
+    if (row.lastReadAt < at) {
+      await this.prisma.orderChatRead.update({
+        where: key,
+        data: { lastReadAt: at },
+      });
+      return at;
+    }
+    return row.lastReadAt;
+  }
+
+  // =========================================================================
   //  HELPERS
   // =========================================================================
-  private async paginate(where: Prisma.OrderWhereInput, q: ListOrdersQueryDto, order: 'asc' | 'desc' = 'desc') {
-    const reviewWindowDays = Number(
-      this.config.get<number>('business.reviewWindowDays') ?? 7,
-    );
+  private async paginate(
+    where: Prisma.OrderWhereInput,
+    q: ListOrdersQueryDto,
+    order: 'asc' | 'desc' = 'desc',
+    viewerIsAdmin = false,
+  ) {
+    const reviewWindowDays = Number(this.config.get<number>('business.reviewWindowDays') ?? 7);
     const windowMs = reviewWindowDays * 24 * 60 * 60 * 1000;
     const rows = await this.prisma.order.findMany({
       where,
       include: {
-        items: { select: { name: true, quantity: true, unitPrice: true } },
+        items: {
+          select: {
+            id: true,
+            name: true,
+            quantity: true,
+            unitPrice: true,
+            lineTotal: true,
+            note: true,
+          },
+        },
         restaurant: {
           select: {
             id: true,
@@ -1024,6 +1359,23 @@ export class OrdersService {
           },
         },
         customer: { select: { id: true, fullName: true, phone: true } },
+        driver: {
+          select: {
+            id: true,
+            fullName: true,
+            phone: true,
+            avatarUrl: true,
+            driverProfile: {
+              select: {
+                vehicleType: true,
+                vehicleBrand: true,
+                vehicleModel: true,
+                vehicleColor: true,
+                licensePlate: true,
+              },
+            },
+          },
+        },
         review: true,
       },
       orderBy: { createdAt: order },
@@ -1031,18 +1383,29 @@ export class OrdersService {
       take: q.limit + 1,
     });
     const now = Date.now();
-    const mapped = rows.slice(0, q.limit).map((r) => ({
-      ...r,
-      canReview:
-        r.status === 'DELIVERED' &&
-        !r.review &&
-        now - r.updatedAt.getTime() <= windowMs,
-    }));
-    return { items: mapped, page: q.page, limit: q.limit, hasMore: rows.length > q.limit };
+    const mapped = rows.slice(0, q.limit).map((r) => {
+      // Danh sách không kèm lịch sử trạng thái: lấy updatedAt làm thời điểm kết thúc đơn
+      const maskPhone = !viewerIsAdmin && isPhoneHidden(r.status, r.updatedAt);
+      return {
+        ...r,
+        customer: maskPhone ? { ...r.customer, phone: null } : r.customer,
+        driver: r.driver && maskPhone ? { ...r.driver, phone: null } : r.driver,
+        canReview: r.status === 'DELIVERED' && !r.review && now - r.updatedAt.getTime() <= windowMs,
+      };
+    });
+    return {
+      items: mapped,
+      page: q.page,
+      limit: q.limit,
+      hasMore: rows.length > q.limit,
+    };
   }
 
   private async getOrderOrThrow(orderId: string): Promise<OrderDetail> {
-    const order = await this.prisma.order.findUnique({ where: { id: orderId }, include: ORDER_DETAIL_INCLUDE });
+    const order = await this.prisma.order.findUnique({
+      where: { id: orderId },
+      include: ORDER_DETAIL_INCLUDE,
+    });
     if (!order) throw new NotFoundException('Không tìm thấy đơn hàng');
     return order;
   }

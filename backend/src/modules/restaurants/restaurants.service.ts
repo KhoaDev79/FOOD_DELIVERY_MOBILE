@@ -22,6 +22,8 @@ import {
   UpdateRestaurantDto,
 } from './dto/restaurants.dto';
 import { buildRestaurantStats, StatsRange, statsRangeStart } from './restaurant-stats';
+import { rankSuggestions, SUGGESTION_WINDOW_DAYS } from './restaurant-suggestions';
+import { LruCache } from '../../common/utils/lru-cache.util';
 
 export interface NearbyRestaurant {
   id: string;
@@ -75,6 +77,9 @@ export class RestaurantsService {
   async findNearby(query: NearbyRestaurantsQueryDto) {
     const { lat, lng, radiusKm, q, openOnly, page, limit } = query;
     const term = q?.trim();
+    if (term && term.length >= 2) {
+      this.prisma.searchLog.create({ data: { query: term } }).catch(() => {});
+    }
     const offset = (page - 1) * limit;
     const scopeKm = term ? SEARCH_MAX_KM : radiusKm;
     const box = boundingBox({ lat, lng }, scopeKm);
@@ -307,6 +312,57 @@ export class RestaurantsService {
       uncategorizedItems: uncategorized,
       ...(distanceKm !== undefined ? { distanceKm, estimatedDeliveryFee, estimatedMinutes } : {}),
     };
+  }
+
+  // Gợi ý món: lưu tạm 5 phút theo quán + món trong giỏ để không truy vấn lại mỗi lần mở giỏ
+  private readonly suggestionCache = new LruCache<unknown>(5 * 60 * 1000, 2000);
+
+  /**
+   * Gợi ý món thêm vào giỏ: món hay được mua chung với món trong giỏ (đơn đã giao 90 ngày gần nhất),
+   * thiếu thì bổ sung món bán chạy, rồi món khác của quán. Xem restaurant-suggestions.ts.
+   */
+  async getSuggestions(restaurantId: string, cartItemIds: string[]) {
+    const rest = await this.prisma.restaurant.findUnique({ where: { id: restaurantId }, select: { status: true } });
+    if (!rest || rest.status !== RestaurantStatus.ACTIVE) throw new NotFoundException('Không tìm thấy nhà hàng');
+
+    const ids = [...new Set(cartItemIds)].sort();
+    const cacheKey = `${restaurantId}:${ids.join(',')}`;
+    const cached = this.suggestionCache.get(cacheKey);
+    if (cached) return cached;
+
+    const since = new Date(Date.now() - SUGGESTION_WINDOW_DAYS * 24 * 60 * 60 * 1000);
+    const [menu, coRows, sold] = await Promise.all([
+      this.prisma.menuItem.findMany({ where: { restaurantId, isArchived: false } }),
+      ids.length
+        ? this.prisma.$queryRaw<{ menuItemId: string; cnt: bigint }[]>`
+            SELECT oi2."menuItemId" AS "menuItemId", COUNT(DISTINCT oi2."orderId") AS cnt
+            FROM order_items oi1
+            JOIN order_items oi2 ON oi2."orderId" = oi1."orderId" AND oi2."menuItemId" <> oi1."menuItemId"
+            JOIN orders o ON o.id = oi1."orderId"
+            WHERE o."restaurantId" = ${restaurantId}::uuid
+              AND o.status = 'DELIVERED'
+              AND o."createdAt" >= ${since}
+              AND oi1."menuItemId" IN (${Prisma.join(ids.map((id) => Prisma.sql`${id}::uuid`))})
+            GROUP BY oi2."menuItemId"`
+        : Promise.resolve([]),
+      this.prisma.orderItem.groupBy({
+        by: ['menuItemId'],
+        where: { order: { restaurantId, status: 'DELIVERED', createdAt: { gte: since } } },
+        _sum: { quantity: true },
+        orderBy: { _sum: { quantity: 'desc' } },
+        take: 20,
+      }),
+    ]);
+
+    const ranked = rankSuggestions({
+      menu,
+      boughtTogether: new Map(coRows.map((r) => [r.menuItemId, Number(r.cnt)])),
+      bestSellers: new Map(sold.map((r) => [r.menuItemId, r._sum.quantity ?? 0])),
+      cartItemIds: ids,
+    });
+    const result = { items: ranked.map((r) => ({ ...r.item, reason: r.reason, count: r.count })) };
+    this.suggestionCache.set(cacheKey, result, 5 * 60 * 1000);
+    return result;
   }
 
   /** Quán của chủ quán: giữ nguyên công tắc isOpen, thêm acceptingOrders để biết khách có đặt được không. */

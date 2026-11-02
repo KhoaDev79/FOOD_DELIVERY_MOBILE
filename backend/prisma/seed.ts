@@ -9,6 +9,8 @@ async function main() {
   // Xoá dữ liệu cũ theo thứ tự ràng buộc khoá ngoại (Idempotent Reseed)
   await prisma.auditLog.deleteMany();
   await prisma.favorite.deleteMany();
+  await prisma.searchLog.deleteMany();
+  await prisma.cuisineCategory.deleteMany();
   await prisma.roleUpgradeRequest.deleteMany();
   await prisma.deliveryContactAttempt.deleteMany();
   await prisma.driverLedger.deleteMany();
@@ -247,6 +249,87 @@ async function main() {
         actionValue: 'budget',
         sortOrder: 4,
       },
+    ],
+  });
+
+  // =========================================================================
+  // 2b. DANH MỤC ẨM THỰC HỆ THỐNG & NHẬT KÝ TÌM KIẾM
+  // =========================================================================
+  await prisma.cuisineCategory.createMany({
+    data: [
+      {
+        code: 'bun-pho',
+        name: 'Bún - Phở',
+        imageUrl: '/public/images/food/pho.jpg',
+        keywords: ['bún', 'phở', 'hủ tiếu', 'mì'],
+        sortOrder: 1,
+        isActive: true,
+      },
+      {
+        code: 'com',
+        name: 'Cơm',
+        imageUrl: '/public/images/food/comtam.jpg',
+        keywords: ['cơm'],
+        sortOrder: 2,
+        isActive: true,
+      },
+      {
+        code: 'tra-sua',
+        name: 'Trà sữa - Cà phê',
+        imageUrl: '/public/images/food/trasua.jpg',
+        keywords: ['trà', 'cà phê', 'coffee', 'cafe'],
+        sortOrder: 3,
+        isActive: true,
+      },
+      {
+        code: 'banh-mi',
+        name: 'Bánh mì',
+        imageUrl: '/public/images/food/banhmi.jpg',
+        keywords: ['bánh mì'],
+        sortOrder: 4,
+        isActive: true,
+      },
+      {
+        code: 'ga-ran',
+        name: 'Gà rán',
+        imageUrl: '/public/images/food/garan.jpg',
+        keywords: ['gà rán', 'gà'],
+        sortOrder: 5,
+        isActive: true,
+      },
+      {
+        code: 'lau',
+        name: 'Lẩu',
+        imageUrl: '/public/images/food/lau.jpg',
+        keywords: ['lẩu'],
+        sortOrder: 6,
+        isActive: true,
+      },
+      {
+        code: 'do-ngot',
+        name: 'Chè - Đồ ngọt',
+        imageUrl: '/public/images/food/che.jpg',
+        keywords: ['chè', 'kem', 'bánh', 'trái cây'],
+        sortOrder: 7,
+        isActive: true,
+      },
+    ],
+  });
+
+  await prisma.searchLog.createMany({
+    data: [
+      { query: 'Cơm tấm' },
+      { query: 'Cơm tấm' },
+      { query: 'Cơm tấm' },
+      { query: 'Phở bò' },
+      { query: 'Phở bò' },
+      { query: 'Trà sữa' },
+      { query: 'Trà sữa' },
+      { query: 'Bánh mì' },
+      { query: 'Gà rán' },
+      { query: 'Bún bò' },
+      { query: 'Cà phê muối' },
+      { query: 'Pizza' },
     ],
   });
 

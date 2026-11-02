@@ -24,7 +24,7 @@ export const rooms = {
   admins: 'admins',
 };
 
-type Ack = { ok: true } | { ok: false; error: string };
+type Ack = { ok: true; data?: any } | { ok: false; error: string };
 
 export interface OrderEventPayload {
   id: string;
@@ -127,6 +127,9 @@ export class OrdersGateway implements OnGatewayConnection {
     if (typeof body?.orderId === 'string') await client.leave(rooms.order(body.orderId));
     return { ok: true };
   }
+
+  // Gửi tin nhắn chat chỉ qua REST (POST /orders/:id/messages) để luôn kiểm tra quyền theo từng
+  // cuộc trò chuyện 2 bên. Socket chỉ dùng để phát tin tới đúng hai người (emitOrderMessage).
 
   /**
    * D2: Tài xế gửi vị trí GPS -> phát cho phòng `order_<id>`.
@@ -286,6 +289,20 @@ export class OrdersGateway implements OnGatewayConnection {
   /** Phát cảnh báo đơn ứ đọng tới phòng admins (E1/E4) */
   emitOrderStalled(orderPayload: unknown) {
     this.server?.to(rooms.admins).emit('order:stalled', orderPayload);
+  }
+
+  /**
+   * Phát tin nhắn chat CHỈ tới hai người của cuộc trò chuyện (không phát vào phòng order_<id>,
+   * vì phòng đó có cả bên thứ ba của đơn):
+   * - `order:message` tới người gửi (các thiết bị khác của họ) và người nhận: màn Chat đang mở cập nhật.
+   * - `chat:new` tới người nhận: app hiện thông báo nổi khi họ đang ở màn khác.
+   */
+  emitOrderMessage(message: unknown, senderId: string, recipientIds: string[]) {
+    const participants = [senderId, ...recipientIds];
+    this.server?.to(participants.map((id) => rooms.user(id))).emit('order:message', message);
+    if (recipientIds.length > 0) {
+      this.server?.to(recipientIds.map((id) => rooms.user(id))).emit('chat:new', message);
+    }
   }
 
   private toPayload(o: OrderEventPayload): OrderEventPayload {

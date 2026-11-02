@@ -122,4 +122,24 @@ export class MapsController {
 
     return this.mapsService.getDistance(origin, destination);
   }
+
+  /** Đường đi theo đường phố (danh sách toạ độ) để vẽ lên bản đồ. */
+  @Get('route')
+  async getRoute(
+    @CurrentUser('id') userId: string,
+    @Query('originLat') originLatStr: string,
+    @Query('originLng') originLngStr: string,
+    @Query('destLat') destLatStr: string,
+    @Query('destLng') destLngStr: string,
+  ) {
+    this.rateLimiter.check(userId);
+    const origin = { lat: parseFloat(originLatStr), lng: parseFloat(originLngStr) };
+    const destination = { lat: parseFloat(destLatStr), lng: parseFloat(destLngStr) };
+
+    if (isNaN(origin.lat) || isNaN(origin.lng) || isNaN(destination.lat) || isNaN(destination.lng)) {
+      throw new HttpException('Tọa độ không hợp lệ.', HttpStatus.BAD_REQUEST);
+    }
+
+    return this.mapsService.getRoute(origin, destination);
+  }
 }
