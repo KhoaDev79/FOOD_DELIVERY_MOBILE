@@ -1,12 +1,16 @@
-export function formatVND(amount: number): string {
+export function formatVND(amount?: number | null): string {
+  if (amount === undefined || amount === null || Number.isNaN(Number(amount))) {
+    return '0 ₫';
+  }
+  const numeric = Number(amount);
   try {
     return new Intl.NumberFormat('vi-VN', {
       style: 'currency',
       currency: 'VND',
       maximumFractionDigits: 0,
-    }).format(amount);
+    }).format(numeric);
   } catch {
-    return `${amount.toString().replace(/\B(?=(\d{3})+(?!\d))/g, '.')} ₫`;
+    return `${numeric.toString().replace(/\B(?=(\d{3})+(?!\d))/g, '.')} ₫`;
   }
 }
 

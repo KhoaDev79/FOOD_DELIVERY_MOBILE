@@ -27,6 +27,7 @@ import { palette } from '../../theme';
 import { OrderDetail, OrderStatus } from '../../types/api';
 import { AdminTabParamList } from '../../types/navigation';
 import { formatDateTime, formatVND } from '../../utils/format';
+import { CANCEL_REASON_LABELS, FAILED_DELIVERY_REASON_LABELS } from '../../utils/orderStatus';
 
 type Props = BottomTabScreenProps<AdminTabParamList, 'AdminOrdersTab'>;
 
@@ -49,7 +50,9 @@ export const AdminOrdersScreen: React.FC<Props> = ({ route }) => {
   const queryClient = useQueryClient();
   const toast = useToast();
 
-  const [statusFilter, setStatusFilter] = useState<OrderStatus | 'ALL'>('ALL');
+  const [statusFilter, setStatusFilter] = useState<OrderStatus | 'ALL'>(
+    route.params?.status ? (route.params.status as OrderStatus) : 'ALL',
+  );
   const [stalledOnly, setStalledOnly] = useState(Boolean(route.params?.stalledOnly));
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
@@ -57,11 +60,15 @@ export const AdminOrdersScreen: React.FC<Props> = ({ route }) => {
   const [actionNote, setActionNote] = useState('');
 
   useEffect(() => {
-    if (route.params?.stalledOnly !== undefined) {
-      setStalledOnly(Boolean(route.params.stalledOnly));
-    }
-    if (route.params?.status) {
-      setStatusFilter(route.params.status as OrderStatus);
+    if (route.params?.stalledOnly !== undefined || route.params?.status) {
+      queueMicrotask(() => {
+        if (route.params?.stalledOnly !== undefined) {
+          setStalledOnly(Boolean(route.params.stalledOnly));
+        }
+        if (route.params?.status) {
+          setStatusFilter(route.params.status as OrderStatus);
+        }
+      });
     }
   }, [route.params?.stalledOnly, route.params?.status]);
 
@@ -147,7 +154,7 @@ export const AdminOrdersScreen: React.FC<Props> = ({ route }) => {
             <Badge label="Ứ đọng" tone="danger" size="sm" />
           )}
         </View>
-        <OrderStatusBadge status={item.status} />
+        <OrderStatusBadge status={item.status} role="admin" />
       </View>
 
       <View className="gap-1">
@@ -297,12 +304,12 @@ export const AdminOrdersScreen: React.FC<Props> = ({ route }) => {
               <View className="gap-1 rounded-xl border border-danger/30 bg-danger-soft p-3">
                 {!!detailOrder.cancelReason && (
                   <Text variant="caption" weight="semibold" tone="danger">
-                    Mã lý do huỷ: {detailOrder.cancelReason}
+                    Lý do huỷ: {CANCEL_REASON_LABELS[detailOrder.cancelReason]}
                   </Text>
                 )}
                 {!!detailOrder.failedReason && (
                   <Text variant="caption" weight="semibold" tone="danger">
-                    Mã giao thất bại: {detailOrder.failedReason}
+                    Giao thất bại: {FAILED_DELIVERY_REASON_LABELS[detailOrder.failedReason]}
                   </Text>
                 )}
                 {!!detailOrder.cancelNote && (

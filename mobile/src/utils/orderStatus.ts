@@ -12,15 +12,15 @@ export const ORDER_STATUS_CONFIG: Record<
     step: 0,
   },
   CONFIRMED: {
-    label: 'Đã nhận đơn',
+    label: 'Quán đã nhận',
     color: colors.info,
     bgColor: '#DBEAFE',
     step: 1,
   },
   PREPARING: {
-    label: 'Đang chuẩn bị món',
-    color: colors.info,
-    bgColor: '#DBEAFE',
+    label: 'Đang làm món',
+    color: '#8B5CF6',
+    bgColor: '#EDE9FE',
     step: 2,
   },
   READY_FOR_PICKUP: {
@@ -48,12 +48,26 @@ export const ORDER_STATUS_CONFIG: Record<
     step: -1,
   },
   CANCELLED: {
-    label: 'Đã hủy',
+    label: 'Đã huỷ',
     color: colors.danger,
     bgColor: '#FEE2E2',
     step: -1,
   },
 };
+
+export function getOrderStatusRoleLabel(
+  status: OrderStatus,
+  role?: 'customer' | 'driver' | 'owner' | 'admin',
+): string {
+  if (role === 'owner' && status === 'PENDING') {
+    return 'Đơn mới cần nhận';
+  }
+  if (role === 'driver') {
+    if (status === 'CONFIRMED') return 'Quán đang làm món';
+    if (status === 'READY_FOR_PICKUP') return 'Sẵn sàng lấy món';
+  }
+  return ORDER_STATUS_CONFIG[status]?.label ?? status;
+}
 
 export const ORDER_STEPS = [
   { key: 'PENDING', label: 'Chờ quán nhận' },

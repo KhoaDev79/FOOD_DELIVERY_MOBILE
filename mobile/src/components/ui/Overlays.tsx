@@ -3,7 +3,6 @@ import { KeyboardAvoidingView, Modal, Platform, Pressable, View } from 'react-na
 import Animated, { FadeInDown, FadeOutDown, ReduceMotion } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Button } from './Button';
-import { cn } from './cn';
 import { Icon, IconName, IconTone } from './Icon';
 import { Text } from './Text';
 
@@ -163,10 +162,4 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
 export const useToast = () => useContext(ToastContext);
 
-/* --------------------------- Mảnh dùng chung --------------------------- */
 
-export const SheetHandle: React.FC<{ className?: string }> = ({ className }) => (
-  <View className={cn('items-center py-2', className)}>
-    <View className="h-1 w-10 rounded-full bg-line" />
-  </View>
-);

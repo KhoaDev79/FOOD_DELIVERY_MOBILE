@@ -1,73 +1,91 @@
 import { zodResolver } from '@hookform/resolvers/zod';
-import { Ionicons } from '@expo/vector-icons';
 import { useIsFocused } from '@react-navigation/native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { StatusBar } from 'expo-status-bar';
 import React, { useState } from 'react';
 import { useForm } from 'react-hook-form';
 import {
-  Alert,
   KeyboardAvoidingView,
   Platform,
   Pressable,
   ScrollView,
-  Text as RNText,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import { z } from 'zod';
 import { authApi } from '../../api/auth';
-import { Button, FormInput, Gradient, Text, useToast } from '../../components/ui';
+import { leaveAuthScreens } from '../../navigation/authFlow';
+import { normalizeVnPhone, VN_MOBILE_REGEX } from '../../utils/phone';
+import { AuthHeader, FormErrorBanner } from '../../components/modules/auth/AuthHeader';
+import { Button, FormInput, Text, useToast } from '../../components/ui';
 import { useAuthStore } from '../../store/useAuthStore';
-import { palette } from '../../theme';
 import { AuthStackParamList } from '../../types/navigation';
 
-const registerSchema = z.object({
-  fullName: z.string().min(2, 'Họ tên tối thiểu 2 ký tự'),
-  email: z.string().email('Email không đúng định dạng'),
-  phone: z
-    .string()
-    .regex(/^(\+84|0)\d{9,10}$/, 'Số điện thoại không hợp lệ')
-    .optional()
-    .or(z.literal('')),
-  password: z.string().min(8, 'Mật khẩu phải từ 8 ký tự trở lên'),
-});
+// Cùng quy tắc với backend (auth/dto/auth.dto.ts) để báo lỗi ngay trên form.
+const registerSchema = z
+  .object({
+    fullName: z
+      .string()
+      .trim()
+      .min(2, 'Họ tên tối thiểu 2 ký tự')
+      .max(100, 'Họ tên tối đa 100 ký tự')
+      .regex(/\p{L}/u, 'Họ tên phải có chữ cái'),
+    email: z.string().trim().toLowerCase().email('Email không đúng định dạng'),
+    phone: z
+      .string()
+      .transform(normalizeVnPhone)
+      .refine((v) => v === '' || VN_MOBILE_REGEX.test(v), 'Số điện thoại di động không hợp lệ (10 số, vd. 0912345678)'),
+    password: z
+      .string()
+      .min(8, 'Mật khẩu phải từ 8 ký tự trở lên')
+      .max(72, 'Mật khẩu tối đa 72 ký tự')
+      .regex(/\S/, 'Mật khẩu không được chỉ gồm dấu cách'),
+    confirmPassword: z.string().min(1, 'Vui lòng nhập lại mật khẩu'),
+  })
+  .refine((d) => d.password === d.confirmPassword, {
+    path: ['confirmPassword'],
+    message: 'Mật khẩu nhập lại không khớp',
+  });
 
-type RegisterFormData = z.infer<typeof registerSchema>;
+type RegisterFormInput = z.input<typeof registerSchema>;
+type RegisterFormData = z.output<typeof registerSchema>;
 
 type Props = NativeStackScreenProps<AuthStackParamList, 'Register'>;
 
 export const RegisterScreen: React.FC<Props> = ({ navigation }) => {
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const toast = useToast();
   const setAuth = useAuthStore((s) => s.setAuth);
   // Chỉ để đổi màu chữ thanh trạng thái khi màn này đang hiển thị (giống các màn khác).
   const isFocused = useIsFocused();
 
-  const {
-    control,
-    handleSubmit,
-  } = useForm<RegisterFormData>({
+  const { control, handleSubmit } = useForm<RegisterFormInput, unknown, RegisterFormData>({
     resolver: zodResolver(registerSchema),
-    defaultValues: { fullName: '', email: '', phone: '', password: '' },
+    defaultValues: { fullName: '', email: '', phone: '', password: '', confirmPassword: '' },
   });
 
   const onSubmit = async (data: RegisterFormData) => {
+    if (loading) return;
     try {
       setLoading(true);
+      setError(null);
       const res = await authApi.register({
-        ...data,
+        fullName: data.fullName,
+        email: data.email,
+        password: data.password,
         phone: data.phone || undefined,
       });
       await setAuth(res.user, res.accessToken, res.refreshToken);
       toast(`Đăng ký thành công! Chào mừng ${res.user.fullName} đến với ZomZom.`, 'success');
-      if (navigation.canGoBack()) {
-        navigation.goBack();
-      } else {
-        (navigation as any).navigate('MainTabs', { screen: 'HomeTab' });
-      }
+      leaveAuthScreens(navigation as any);
     } catch (err: any) {
-      Alert.alert('Đăng ký thất bại', err.response?.data?.message || 'Có lỗi xảy ra, vui lòng thử lại');
+      const data = err?.response?.data;
+      const reason =
+        (Array.isArray(data?.errors) && data.errors.length > 0 ? data.errors.join('\n') : data?.message) ||
+        (err?.message === 'Network Error'
+          ? 'Không kết nối được máy chủ. Vui lòng kiểm tra mạng và thử lại.'
+          : 'Có lỗi xảy ra, vui lòng thử lại');
+      setError(reason);
     } finally {
       setLoading(false);
     }
@@ -86,49 +104,17 @@ export const RegisterScreen: React.FC<Props> = ({ navigation }) => {
         keyboardShouldPersistTaps="handled"
         bounces={false}
       >
-        {/* Đầu trang: nền xanh cùng tông màn khởi động, logo và lời chào */}
-        <Gradient preset="splash" className="overflow-hidden bg-brand-800 pb-14">
-          <View aria-hidden pointerEvents="none" className="absolute inset-0 items-center justify-center">
-            <View className="absolute h-[400px] w-[400px] rounded-full border border-white/5" />
-            <View className="absolute h-[280px] w-[280px] rounded-full border border-white/10" />
-            <View className="absolute h-[170px] w-[170px] rounded-full border border-white/15" />
-          </View>
-
-          <SafeAreaView edges={['top']}>
-            <View className="h-touch flex-row items-center px-4">
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Quay lại"
-                onPress={() => navigation.goBack()}
-                className="h-touch w-touch items-center justify-center rounded-full bg-white/15 active:opacity-75"
-              >
-                <Ionicons name="arrow-back" size={22} color={palette.surface} />
-              </Pressable>
-            </View>
-
-            <View className="items-center px-6">
-              {/* Logo chữ Z, giống màn khởi động */}
-              <View
-                aria-hidden
-                className="h-16 w-16 items-center justify-center rounded-[20px] border-4 border-white/20 bg-intro-teal shadow-float"
-              >
-                <RNText className="font-display text-[42px] leading-[67px] text-intro-on-teal">Z</RNText>
-                <View className="absolute right-[11px] top-[12px] h-2.5 w-2.5 rounded-full bg-intro-orange" />
-              </View>
-
-              <RNText accessibilityRole="header" className="mt-3 font-display text-[30px] leading-[48px] text-white">
-                Tạo tài khoản mới
-              </RNText>
-              <Text variant="body" className="text-center text-brand-50">
-                Tham gia ZomZom để đặt món ngon quanh bạn
-              </Text>
-            </View>
-          </SafeAreaView>
-        </Gradient>
+        <AuthHeader
+          title="Tạo tài khoản mới"
+          subtitle="Tham gia ZomZom để đặt món ngon quanh bạn"
+          onBack={() => navigation.goBack()}
+        />
 
         {/* Khung trắng bo góc lớn chứa form */}
-        <View className="-mt-8 flex-1 rounded-t-[32px] bg-surface px-6 pb-8 pt-7">
+        <View className="-mt-7 flex-1 rounded-t-[32px] bg-surface px-6 pb-8 pt-7">
           <View className="gap-4">
+            {!!error && <FormErrorBanner title="Đăng ký thất bại" message={error} />}
+
             <FormInput
               control={control}
               name="fullName"
@@ -165,6 +151,15 @@ export const RegisterScreen: React.FC<Props> = ({ navigation }) => {
               leftIcon="lock-closed-outline"
             />
 
+            <FormInput
+              control={control}
+              name="confirmPassword"
+              label="Nhập lại mật khẩu"
+              placeholder="Nhập lại mật khẩu ở trên"
+              password
+              leftIcon="lock-closed-outline"
+            />
+
             <Button
               label="Tạo tài khoản"
               rightIcon="arrow-forward"
@@ -176,13 +171,14 @@ export const RegisterScreen: React.FC<Props> = ({ navigation }) => {
             />
           </View>
 
-          <View className="mt-8 flex-row items-center justify-center">
+          <View className="mt-auto flex-row items-center justify-center pt-8">
             <Text variant="body" tone="secondary">
               Đã có tài khoản?{' '}
             </Text>
             <Pressable
               accessibilityRole="link"
-              onPress={() => navigation.navigate('Login')}
+              // Thay màn thay vì chồng thêm: qua lại Đăng nhập ↔ Đăng ký không làm dài lịch sử quay lại
+              onPress={() => navigation.replace('Login')}
               hitSlop={12}
               className="min-h-touch justify-center"
             >

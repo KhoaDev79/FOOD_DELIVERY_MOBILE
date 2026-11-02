@@ -5,7 +5,18 @@ import { palette } from '../../theme';
 export type IconName = keyof typeof Ionicons.glyphMap;
 export type IconSize = 'xs' | 'sm' | 'md' | 'lg' | 'xl';
 export type IconTone =
-  'default' | 'secondary' | 'muted' | 'inverse' | 'brand' | 'accent' | 'danger' | 'success' | 'rating';
+  | 'default'
+  | 'secondary'
+  | 'muted'
+  | 'inverse'
+  | 'brand'
+  | 'accent'
+  | 'danger'
+  | 'success'
+  | 'warning'
+  | 'info'
+  | 'violet'
+  | 'rating';
 
 const SIZE: Record<IconSize, number> = { xs: 14, sm: 16, md: 20, lg: 24, xl: 32 };
 
@@ -19,6 +30,9 @@ const TONE: Record<IconTone, string> = {
   accent: palette.accent['500'],
   danger: palette.danger.DEFAULT,
   success: palette.success.DEFAULT,
+  warning: palette.warning.DEFAULT,
+  info: palette.info.DEFAULT,
+  violet: palette.violet.strong,
   rating: palette.rating,
 };
 
@@ -26,14 +40,24 @@ export interface IconProps {
   name: IconName;
   size?: IconSize | number;
   tone?: IconTone;
+  color?: string;
+  style?: any;
   accessibilityLabel?: string;
 }
 
-export const Icon: React.FC<IconProps> = ({ name, size = 'md', tone = 'default', accessibilityLabel }) => (
+export const Icon: React.FC<IconProps> = ({
+  name,
+  size = 'md',
+  tone = 'default',
+  color,
+  style,
+  accessibilityLabel,
+}) => (
   <Ionicons
     name={name}
     size={typeof size === 'number' ? size : SIZE[size]}
-    color={TONE[tone]}
+    color={color ?? TONE[tone]}
+    style={style}
     accessibilityLabel={accessibilityLabel}
     accessibilityElementsHidden={!accessibilityLabel}
     importantForAccessibility={accessibilityLabel ? 'yes' : 'no-hide-descendants'}

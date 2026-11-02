@@ -31,6 +31,11 @@ function getConnectedSnapshot(): boolean {
   return isConnectedState;
 }
 
+/** Đọc trạng thái kết nối ngoài React (vd. trong bộ xử lý push notification). */
+export function isSocketConnected(): boolean {
+  return isConnectedState;
+}
+
 /**
  * D4: Hook kiểm tra trạng thái kết nối Socket.IO thời gian thực
  * dùng để tắt hoặc giảm tần suất polling khi socket đang hoạt động ổn định.

@@ -32,7 +32,7 @@
       [
         "expo-notifications",
         {
-          "color": "#EE4D2D"
+          "color": "#FF7A30"
         }
       ],
       "expo-secure-store"

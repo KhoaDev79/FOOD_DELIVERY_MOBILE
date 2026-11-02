@@ -161,6 +161,8 @@ export interface Restaurant {
   ratingCount?: number;
   distanceKm?: number;
   estimatedDeliveryFee?: number;
+  /** Thời gian giao dự kiến do backend tính (phút). */
+  estimatedMinutes?: { min: number; max: number };
   /** Giờ mở/đóng cửa "HH:mm" (trả về từ /restaurants/nearby). */
   openTime?: string;
   closeTime?: string;
@@ -186,6 +188,14 @@ export interface MenuItemOptions {
   sugarLevels?: string[];
 }
 
+/** Tuỳ chọn chủ quán gửi lên khi tạo/sửa món (id chỉ có với lựa chọn đã lưu trước đó). */
+export interface MenuItemOptionsInput {
+  sizes?: { id?: string; name: string; price: number }[];
+  toppings?: { id?: string; name: string; price: number }[];
+  spiceLevels?: string[];
+  sugarLevels?: string[];
+}
+
 export interface MenuItem {
   id: string;
   restaurantId: string;
@@ -199,6 +209,12 @@ export interface MenuItem {
   imageUrl?: string | null;
   isAvailable: boolean;
   isArchived: boolean;
+}
+
+/** Món gợi ý thêm vào giỏ. BOUGHT_TOGETHER: hay được mua chung; BEST_SELLER: bán chạy; MENU: món khác của quán. */
+export interface MenuSuggestion extends MenuItem {
+  reason: 'BOUGHT_TOGETHER' | 'BEST_SELLER' | 'MENU';
+  count: number;
 }
 
 /** Món ăn quanh người dùng (GET /restaurants/nearby/dishes). */
@@ -225,6 +241,16 @@ export interface Banner {
   sortOrder: number;
 }
 
+/** Danh mục ẩm thực hệ thống (GET /cuisines). */
+export interface CuisineCategory {
+  id: string;
+  code: string;
+  name: string;
+  imageUrl: string;
+  sortOrder: number;
+  keywords: string[];
+}
+
 export interface Category {
   id: string;
   restaurantId: string;
@@ -247,6 +273,12 @@ export interface OrderItem {
   quantity: number;
   lineTotal: number;
   note?: string | null;
+  /** Tuỳ chọn khách đã chọn (snapshot lúc đặt). */
+  options?: {
+    size?: { id: string; name: string; price: number };
+    toppings?: { id: string; name: string; price: number }[];
+    level?: string;
+  } | null;
 }
 
 export interface OrderStatusHistory {
@@ -515,3 +547,82 @@ export interface CreateRoleRequestPayload {
   licensePlate?: string;
   note?: string;
 }
+
+/** Cuộc trò chuyện 2 bên trong một đơn. */
+export type ChatChannel = 'CUSTOMER_DRIVER' | 'CUSTOMER_RESTAURANT' | 'RESTAURANT_DRIVER';
+
+export interface OrderMessage {
+  id: string;
+  orderId: string;
+  channel: ChatChannel;
+  driverId?: string | null;
+  senderId: string;
+  senderRole: 'CUSTOMER' | 'DRIVER' | 'RESTAURANT_OWNER' | 'ADMIN';
+  content: string;
+  createdAt: string;
+  sender?: {
+    id: string;
+    fullName: string;
+    avatarUrl?: string | null;
+    role: string;
+  };
+}
+
+export interface UnreadConversation {
+  orderId: string;
+  channel: ChatChannel;
+  orderStatus: OrderStatus | null;
+  restaurantName: string | null;
+  unreadCount: number;
+  lastMessage: {
+    id: string;
+    content: string;
+    createdAt: string;
+    senderRole: OrderMessage['senderRole'];
+    sender: { id: string; fullName: string; role: string };
+  };
+}
+
+export interface UnreadMessagesSummary {
+  totalUnread: number;
+  conversations: UnreadConversation[];
+}
+
+/** Một cuộc trò chuyện trong hộp thư (GET /orders/messages/conversations). */
+export interface ChatConversation {
+  orderId: string;
+  channel: ChatChannel;
+  unreadCount: number;
+  /** Người bên kia: khách, quán hoặc tài xế. */
+  counterpart: { side: 'CUSTOMER' | 'RESTAURANT' | 'DRIVER'; name: string; avatarUrl: string | null };
+  lastMessage: { id: string; content: string; createdAt: string; senderRole: Role; isMine: boolean };
+  order: {
+    id: string;
+    code: string;
+    status: OrderStatus;
+    createdAt: string;
+    total: number;
+    paymentMethod: PaymentMethod;
+    deliveryAddress: string;
+    itemCount: number;
+    items: { name: string; quantity: number }[];
+    restaurant: { id: string; name: string; imageUrl: string | null };
+    customer: { id: string; fullName: string };
+    driver: { id: string; fullName: string } | null;
+  };
+}
+
+export interface DriverReviewItem {
+  id: string;
+  orderId: string;
+  driverRating?: number | null;
+  driverComment?: string | null;
+  driverReply?: string | null;
+  driverRepliedAt?: string | null;
+  createdAt: string;
+  customerName: string;
+  restaurant?: {
+    name: string;
+  };
+}
+

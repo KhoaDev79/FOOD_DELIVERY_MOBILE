@@ -2,7 +2,7 @@ import { useIsFocused, useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import * as Location from 'expo-location';
 import { StatusBar } from 'expo-status-bar';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   FlatList,
   NativeScrollEvent,
@@ -17,6 +17,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { BannerCarousel, BannerSkeleton } from '../../components/modules/home/BannerCarousel';
 import { DishCard, DishTile } from '../../components/modules/home/DishCard';
 import { FeaturedCarousel } from '../../components/modules/home/FeaturedCarousel';
+import { HomePromoModal } from '../../components/modules/home/HomePromoModal';
 import { RestaurantRow } from '../../components/modules/restaurant/RestaurantCards';
 import {
   AppImage,
@@ -36,13 +37,19 @@ import {
   TileSkeleton,
   useToast,
 } from '../../components/ui';
-import { HOME_CATEGORIES, HomeCategory } from '../../constants/homeCategories';
+import { HomeCategory, mapCuisinesToHomeCategories } from '../../constants/homeCategories';
 import { useLocation } from '../../hooks/useLocation';
-import { useBanners, useNearbyDishes, useNearbyRestaurants } from '../../services/useRestaurants';
+import {
+  useBanners,
+  useCuisines,
+  useNearbyDishes,
+  useNearbyRestaurants,
+} from '../../services/useRestaurants';
 import { useAddresses } from '../../services/useUser';
 import { palette } from '../../theme';
 import { useCartStore } from '../../store/useCartStore';
 import { resolveActiveDeliveryAddress, useDeliveryAddressStore } from '../../store/useDeliveryAddressStore';
+import { useTabBarStore } from '../../store/useTabBarStore';
 import { Banner, MenuItem, NearbyDish, Restaurant } from '../../types/api';
 import { RootStackParamList } from '../../types/navigation';
 import { filterRestaurants, pickFeatured, sortByDistance } from '../../utils/homeSections';
@@ -120,6 +127,7 @@ const toCartPayload = (d: NearbyDish) => {
 export const HomeScreen: React.FC = () => {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const isFocused = useIsFocused();
+  const flatListRef = useRef<FlatList>(null);
   const { coords, isLoading: locationLoading } = useLocation();
   const { data: addresses } = useAddresses();
   const selectedAddressId = useDeliveryAddressStore((s) => s.selectedAddressId);
@@ -130,6 +138,26 @@ export const HomeScreen: React.FC = () => {
   const [categoryId, setCategoryId] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [compact, setCompact] = useState(false);
+
+  // Modal quảng cáo tự động
+  const [promoVisible, setPromoVisible] = useState(false);
+  const hasTriggeredPromo = useRef(false);
+
+  // Điều khiển thanh tab ẩn/hiện theo thao tác cuộn
+  const lastScrollY = useRef(0);
+  const scrollStopTimer = useRef<NodeJS.Timeout | null>(null);
+  const setTabBarVisible = useTabBarStore((s) => s.setVisible);
+
+  // Khôi phục hiển thị thanh tab khi rời màn hình hoặc unmount
+  useEffect(() => {
+    if (!isFocused) {
+      setTabBarVisible(true);
+    }
+    return () => {
+      setTabBarVisible(true);
+      if (scrollStopTimer.current) clearTimeout(scrollStopTimer.current);
+    };
+  }, [isFocused, setTabBarVisible]);
 
   useEffect(() => {
     if (!isAddrInitialized) {
@@ -188,16 +216,23 @@ export const HomeScreen: React.FC = () => {
     limit: 20,
   });
 
+  const cuisinesQuery = useCuisines();
   const { refetch: refetchBanners } = bannersQuery;
   const { refetch: refetchDishes } = dishesQuery;
+  const { refetch: refetchCuisines } = cuisinesQuery;
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    await Promise.all([refetch(), refetchBanners(), refetchDishes()]);
+    await Promise.all([refetch(), refetchBanners(), refetchDishes(), refetchCuisines()]);
     setRefreshing(false);
-  }, [refetch, refetchBanners, refetchDishes]);
+  }, [refetch, refetchBanners, refetchDishes, refetchCuisines]);
 
-  const category = HOME_CATEGORIES.find((c) => c.id === categoryId) ?? null;
+  const categories = useMemo(
+    () => mapCuisinesToHomeCategories(cuisinesQuery.data),
+    [cuisinesQuery.data],
+  );
+
+  const category = categories.find((c) => c.id === categoryId) ?? null;
   const isFiltering = !!searchFilter.trim() || !!category;
   const allRestaurants = useMemo(() => data?.items ?? [], [data]);
   const filtered = useMemo(
@@ -255,9 +290,15 @@ export const HomeScreen: React.FC = () => {
       }),
     [navigation],
   );
+  // Hành động khi bấm banner (quản trị viên cấu hình): mở quán, chọn danh mục, hoặc mở tìm kiếm
   const openBanner = (b: Banner) => {
-    if (b.actionType === 'RESTAURANT' && b.actionValue) {
+    if (!b.actionValue) return;
+    if (b.actionType === 'RESTAURANT') {
       navigation.navigate('RestaurantDetail', { restaurantId: b.actionValue });
+    } else if (b.actionType === 'CUISINE') {
+      setCategoryId(b.actionValue);
+    } else if (b.actionType === 'SEARCH') {
+      navigation.navigate('Search', { initialQuery: b.actionValue });
     }
   };
   const expanded = data as (typeof data & { isExpandedRadius?: boolean; notice?: string }) | undefined;
@@ -272,19 +313,62 @@ export const HomeScreen: React.FC = () => {
     setCategoryId(null);
   };
 
+  const loading = isLoading || locationLoading;
+
+  // Khi màn hình khởi động xong, các món ăn load xong 2.8s -> hiển thị modal quảng cáo
+  useEffect(() => {
+    if (isFocused && !loading && dishes.length > 0 && !hasTriggeredPromo.current) {
+      hasTriggeredPromo.current = true;
+      const timer = setTimeout(() => {
+        setPromoVisible(true);
+      }, 2800);
+      return () => clearTimeout(timer);
+    }
+  }, [isFocused, loading, dishes.length]);
+
   const onScroll = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
-    const next = e.nativeEvent.contentOffset.y > COMPACT_THRESHOLD;
+    const currentY = e.nativeEvent.contentOffset.y;
+    const diff = currentY - lastScrollY.current;
+    lastScrollY.current = currentY;
+
+    // 1. Cập nhật compact search bar
+    const next = currentY > COMPACT_THRESHOLD;
     if (next !== compact) setCompact(next);
+
+    // 2. Kéo xuống thì tạm ẩn thanh tab; kéo lên thì hiện lại
+    if (currentY <= 15) {
+      setTabBarVisible(true);
+    } else if (diff > 6 && currentY > 40) {
+      setTabBarVisible(false);
+    } else if (diff < -6) {
+      setTabBarVisible(true);
+    }
+
+    // 3. Khi màn hình dừng lại thì tự động hiện lại thanh tab
+    if (scrollStopTimer.current) clearTimeout(scrollStopTimer.current);
+    scrollStopTimer.current = setTimeout(() => {
+      setTabBarVisible(true);
+    }, 250);
   };
 
-  const loading = isLoading || locationLoading;
+  const onScrollEnd = () => {
+    if (scrollStopTimer.current) clearTimeout(scrollStopTimer.current);
+    setTabBarVisible(true);
+  };
+
+  const handlePromoAction = () => {
+    setPromoVisible(false);
+    toast('Ưu đãi Combo Bánh Su Kem 25K! Khám phá ngay các món ngon gần bạn');
+    // Cuộn mượt đến các khối món ngon ưu đãi
+    flatListRef.current?.scrollToOffset({ offset: 340, animated: true });
+  };
 
   const header = (
     <View>
       {/* Đầu trang gradient: dòng Giao đến + thanh tìm kiếm lớn (ảnh mẫu 1) */}
       <Gradient preset="header">
         <SafeAreaView edges={['top']}>
-          <View className="gap-4 px-4 pb-6 pt-3">
+          <View className="gap-3 px-4 pb-4 pt-2">
             <Pressable
               accessibilityRole="button"
               accessibilityLabel={`Giao đến ${displayAddress}. Đổi địa chỉ`}
@@ -316,7 +400,7 @@ export const HomeScreen: React.FC = () => {
 
         {/* Lối tắt danh mục nằm ở phần gradient đã nhạt (ảnh mẫu 1, 7) */}
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerClassName="gap-2 px-3 pb-2">
-          {HOME_CATEGORIES.map((c) => (
+          {categories.map((c) => (
             <CategoryTile
               key={c.id}
               item={c}
@@ -364,7 +448,7 @@ export const HomeScreen: React.FC = () => {
               <BannerCarousel
                 banners={banners}
                 onPress={openBanner}
-                canPress={(b) => b.actionType === 'RESTAURANT' && !!b.actionValue}
+                canPress={(b) => !!b.actionValue && ['RESTAURANT', 'CUISINE', 'SEARCH'].includes(b.actionType ?? '')}
               />
             </View>
           ) : null}
@@ -442,6 +526,7 @@ export const HomeScreen: React.FC = () => {
     <View className="flex-1 bg-canvas">
       {isFocused && <StatusBar style={compact ? 'dark' : 'light'} />}
       <FlatList
+        ref={flatListRef}
         data={loading || isError ? [] : listData}
         keyExtractor={(item) => item.id}
         className="flex-1 bg-brand-50"
@@ -481,7 +566,9 @@ export const HomeScreen: React.FC = () => {
           )
         }
         onScroll={onScroll}
-        scrollEventThrottle={32}
+        onScrollEndDrag={onScrollEnd}
+        onMomentumScrollEnd={onScrollEnd}
+        scrollEventThrottle={16}
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="on-drag"
         refreshControl={
@@ -525,6 +612,13 @@ export const HomeScreen: React.FC = () => {
           </SafeAreaView>
         </Animated.View>
       )}
+
+      {/* Modal quảng cáo ưu đãi (tự động hiện sau khi tải món xong 2-5s) */}
+      <HomePromoModal
+        visible={promoVisible}
+        onClose={() => setPromoVisible(false)}
+        onAction={handlePromoAction}
+      />
     </View>
   );
 };

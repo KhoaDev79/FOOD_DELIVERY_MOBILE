@@ -16,6 +16,8 @@ import {
   TopBar,
   useToast,
 } from '../../components/ui';
+import { OwnerRestaurantSelector } from '../../components/modules/owner/OwnerRestaurantSelector';
+import { useOwnerRestaurantStore } from '../../store/useOwnerRestaurantStore';
 import { palette } from '../../theme';
 import { ManageRestaurantReview } from '../../types/api';
 import { OwnerStackParamList } from '../../types/navigation';
@@ -34,7 +36,8 @@ export const OwnerReviewsScreen: React.FC<Props> = ({ navigation }) => {
     queryKey: ['owner', 'restaurants'],
     queryFn: () => restaurantsApi.getMine(),
   });
-  const restaurant = restaurants?.[0];
+  const getActiveRestaurant = useOwnerRestaurantStore((s) => s.getActiveRestaurant);
+  const restaurant = getActiveRestaurant(restaurants);
 
   const {
     data: reviewsRes,
@@ -185,6 +188,15 @@ export const OwnerReviewsScreen: React.FC<Props> = ({ navigation }) => {
     <View className="flex-1 bg-canvas-subtle">
       <StatusBar style="dark" />
       <TopBar title="Đánh giá của thực khách" onLeadingPress={() => navigation.goBack()} />
+
+      {restaurant && (
+        <View className="px-4 pt-2">
+          <OwnerRestaurantSelector
+            restaurants={restaurants}
+            currentRestaurant={restaurant}
+          />
+        </View>
+      )}
 
       <View className="flex-row items-center gap-2 px-4 py-3">
         <FilterChip

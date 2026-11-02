@@ -1,10 +1,11 @@
-import { Ionicons } from '@expo/vector-icons';
 import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { colors } from '../../constants/colors';
 import { OrderStatusHistory } from '../../types/api';
 import { formatDateTime } from '../../utils/format';
 import { ORDER_STATUS_CONFIG, ORDER_STEPS } from '../../utils/orderStatus';
+import { palette } from '../../theme';
+import { Icon } from '../ui/Icon';
 
 interface OrderTimelineProps {
   currentStatus: string;
@@ -14,10 +15,10 @@ interface OrderTimelineProps {
 
 export const OrderTimeline: React.FC<OrderTimelineProps> = ({ currentStatus, statusHistory, reasonText }) => {
   if (currentStatus === 'CANCELLED' || currentStatus === 'DELIVERY_FAILED') {
-    const title = currentStatus === 'DELIVERY_FAILED' ? 'Giao hàng không thành công' : 'Đơn hàng đã bị hủy';
+    const title = currentStatus === 'DELIVERY_FAILED' ? 'Giao hàng không thành công' : 'Đơn hàng đã bị huỷ';
     return (
       <View style={styles.cancelledBox}>
-        <Ionicons name="close-circle" size={32} color={colors.danger} />
+        <Icon name="close-circle" size={32} tone="danger" />
         <View style={{ flex: 1 }}>
           <Text style={styles.cancelledText}>{title}</Text>
           {!!reasonText && <Text style={styles.timeText}>{reasonText}</Text>}
@@ -46,7 +47,7 @@ export const OrderTimeline: React.FC<OrderTimelineProps> = ({ currentStatus, sta
                 ]}
               >
                 {isCompleted ? (
-                  <Ionicons name="checkmark" size={14} color={colors.white} />
+                  <Icon name="checkmark" size={14} tone="inverse" />
                 ) : (
                   <View style={styles.circleInner} />
                 )}
@@ -148,7 +149,7 @@ const styles = StyleSheet.create({
   cancelledBox: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#FEE2E2',
+    backgroundColor: palette.danger.soft,
     padding: 16,
     borderRadius: 8,
     gap: 12,

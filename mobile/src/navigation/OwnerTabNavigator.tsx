@@ -9,6 +9,9 @@ import { OwnerReviewsScreen } from '../screens/owner/OwnerReviewsScreen';
 import { OwnerStatsScreen } from '../screens/owner/OwnerStatsScreen';
 import { AddressPickerScreen } from '../screens/profile/AddressPickerScreen';
 import { EditProfileScreen } from '../screens/profile/EditProfileScreen';
+import { ChatScreen } from '../screens/chat/ChatScreen';
+import { InboxScreen } from '../screens/chat/InboxScreen';
+import { useUnreadChatCount } from '../hooks/useUnreadChatCount';
 import { OwnerStackParamList, OwnerTabParamList } from '../types/navigation';
 
 const Tab = createBottomTabNavigator<OwnerTabParamList>();
@@ -17,21 +20,29 @@ const Stack = createNativeStackNavigator<OwnerStackParamList>();
 const TAB_META: Record<keyof OwnerTabParamList, TabMeta> = {
   OwnerOrdersTab: { label: 'Đơn hàng', icon: 'receipt-outline', iconActive: 'receipt' },
   OwnerMenuTab: { label: 'Thực đơn', icon: 'restaurant-outline', iconActive: 'restaurant' },
+  OwnerInboxTab: { label: 'Tin nhắn', icon: 'chatbubbles-outline', iconActive: 'chatbubbles' },
   OwnerRestaurantTab: { label: 'Cửa hàng', icon: 'storefront-outline', iconActive: 'storefront' },
 };
 
 /** Các tab của chủ quán, dùng chung thanh tab nổi với khách hàng (không có nút giỏ hàng). */
-const OwnerTabs: React.FC = () => (
-  <Tab.Navigator screenOptions={{ headerShown: false }} tabBar={(props) => <FloatingTabBar {...props} meta={TAB_META} />}>
-    <Tab.Screen name="OwnerOrdersTab" component={OwnerOrdersScreen} options={{ title: TAB_META.OwnerOrdersTab.label }} />
-    <Tab.Screen name="OwnerMenuTab" component={OwnerMenuScreen} options={{ title: TAB_META.OwnerMenuTab.label }} />
-    <Tab.Screen
-      name="OwnerRestaurantTab"
-      component={OwnerRestaurantScreen}
-      options={{ title: TAB_META.OwnerRestaurantTab.label }}
-    />
-  </Tab.Navigator>
-);
+const OwnerTabs: React.FC = () => {
+  const unreadChats = useUnreadChatCount();
+  return (
+    <Tab.Navigator
+      screenOptions={{ headerShown: false }}
+      tabBar={(props) => <FloatingTabBar {...props} meta={TAB_META} badges={{ OwnerInboxTab: unreadChats }} />}
+    >
+      <Tab.Screen name="OwnerOrdersTab" component={OwnerOrdersScreen} options={{ title: TAB_META.OwnerOrdersTab.label }} />
+      <Tab.Screen name="OwnerMenuTab" component={OwnerMenuScreen} options={{ title: TAB_META.OwnerMenuTab.label }} />
+      <Tab.Screen name="OwnerInboxTab" component={InboxScreen} options={{ title: TAB_META.OwnerInboxTab.label }} />
+      <Tab.Screen
+        name="OwnerRestaurantTab"
+        component={OwnerRestaurantScreen}
+        options={{ title: TAB_META.OwnerRestaurantTab.label }}
+      />
+    </Tab.Navigator>
+  );
+};
 
 /**
  * Điều hướng của chủ quán: các tab + Thống kê + "Tài khoản cá nhân & mật khẩu" + chọn địa chỉ quán.
@@ -45,5 +56,6 @@ export const OwnerTabNavigator: React.FC = () => (
     <Stack.Screen name="OwnerReviews" component={OwnerReviewsScreen} />
     <Stack.Screen name="EditProfile" component={EditProfileScreen as React.ComponentType<any>} />
     <Stack.Screen name="AddressPicker" component={AddressPickerScreen as React.ComponentType<any>} />
+    <Stack.Screen name="Chat" component={ChatScreen as React.ComponentType<any>} />
   </Stack.Navigator>
 );

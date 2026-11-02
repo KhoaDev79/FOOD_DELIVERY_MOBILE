@@ -6,9 +6,12 @@ describe('Delivery Estimation & Freeship Rules', () => {
     const farEst = estimateDeliveryTime(6.5);
     const veryFarEst = estimateDeliveryTime(12);
 
-    expect(nearEst).toBe('15 - 20 phút');
+    // Cùng mốc với backend (delivery-time.spec.ts)
+    expect(nearEst).toBe('20 - 25 phút');
     expect(farEst).toBe('35 - 45 phút');
-    expect(veryFarEst).toContain('51 - 68 phút');
+    expect(veryFarEst).toBe('55 - 70 phút');
+    // Đường chim bay được quy đổi ra đường bộ nên lâu hơn một chút
+    expect(estimateDeliveryTime(5, true)).toBe('35 - 45 phút');
 
     expect(nearEst).not.toBe(farEst);
     expect(farEst).not.toBe(veryFarEst);

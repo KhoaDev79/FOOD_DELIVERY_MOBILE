@@ -1,36 +1,46 @@
-import { Ionicons } from '@expo/vector-icons';
-import { useNavigation } from '@react-navigation/native';
+import { useIsFocused, useNavigation } from '@react-navigation/native';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   FlatList,
-  Pressable,
   RefreshControl,
   Switch,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { StatusBar } from 'expo-status-bar';
 import { driversApi } from '../../api/drivers';
 import { ordersApi } from '../../api/orders';
+import {
+  MetricChip,
+  Money,
+  NoticeCard,
+  orderCode,
+  RouteStops,
+  SegmentedTabs,
+  timeAgo,
+} from '../../components/modules/partner/PartnerKit';
 import {
   Button,
   cn,
   ConfirmDialog,
   EmptyState,
+  Icon,
+  IconName,
   LoadingSpinner,
   TabHeader,
   Text,
   useToast,
 } from '../../components/ui';
-import { FilterChip } from '../../components/ui/Chip';
 import { useLocation } from '../../hooks/useLocation';
+import { palette } from '../../theme';
 import { useSocket, useSocketConnected } from '../../hooks/useSocket';
 import { useAuthStore } from '../../store/useAuthStore';
 import { OrderDetail } from '../../types/api';
-import { formatDateTime, formatVND } from '../../utils/format';
+import { formatVND } from '../../utils/format';
 
 export const DriverAvailableOrdersScreen: React.FC = () => {
   const navigation = useNavigation<any>();
+  const isFocused = useIsFocused();
   const queryClient = useQueryClient();
   const { user } = useAuthStore();
   const { socket } = useSocket();
@@ -90,16 +100,17 @@ export const DriverAvailableOrdersScreen: React.FC = () => {
     refetchInterval: socketConnected ? false : 10000,
   });
 
-  const activeDeliveriesCount = useMemo(() => {
-    return (
+  const activeOrders = useMemo(
+    () =>
       activeDeliveriesData?.items?.filter(
         (o) =>
           o.status !== 'DELIVERED' &&
           o.status !== 'CANCELLED' &&
           o.status !== 'DELIVERY_FAILED',
-      ).length || 0
-    );
-  }, [activeDeliveriesData]);
+      ) ?? [],
+    [activeDeliveriesData],
+  );
+  const activeDeliveriesCount = activeOrders.length;
 
   // Xử lý bật/tắt trực tuyến qua API server (D1: Bắt buộc vị trí thật khi bật trực tuyến)
   const handleToggleOnline = async (nextValue: boolean) => {
@@ -280,6 +291,9 @@ export const DriverAvailableOrdersScreen: React.FC = () => {
 
   const isMaxDeliveries = activeDeliveriesCount >= 2;
 
+  const allCount = ordersData?.items?.length ?? 0;
+  const readyCount = ordersData?.items?.filter((o) => o.status === 'READY_FOR_PICKUP').length ?? 0;
+
   const renderOrderItem = ({
     item,
   }: {
@@ -295,156 +309,130 @@ export const DriverAvailableOrdersScreen: React.FC = () => {
     const exceedsDebtForOrder = isOverDebtLimit || codBalance + orderDebt > debtLimit;
 
     return (
-      <View className="mb-4 overflow-hidden rounded-2xl border border-line bg-surface p-4 shadow-card">
-        {/* Header đơn: Mã đơn, thời gian, trạng thái chuẩn bị */}
-        <View className="flex-row items-center justify-between border-b border-line-subtle pb-3">
+      <View className="mb-3 gap-3 rounded-2xl bg-surface p-4 shadow-card">
+        {/* Thu nhập chuyến (thứ tài xế nhìn đầu tiên) + trạng thái món */}
+        <View className="flex-row items-start justify-between gap-3">
           <View>
-            <Text variant="headline" weight="bold">
-              Đơn #{order.id.slice(0, 8).toUpperCase()}
+            <Text variant="micro" tone="muted">
+              Thu nhập chuyến
             </Text>
-            <Text variant="caption" tone="secondary">
-              {formatDateTime(order.createdAt)} • {itemCount} món
-            </Text>
-          </View>
-
-          <View
-            className={cn(
-              'rounded-full px-2.5 py-1',
-              isReady ? 'bg-success-soft' : 'bg-warning-soft/30',
-            )}
-          >
-            <Text
-              variant="caption"
-              weight="bold"
-              tone={isReady ? 'success' : 'warning'}
-            >
-              {isReady ? 'Món đã sẵn sàng' : 'Quán đang làm món'}
-            </Text>
-          </View>
-        </View>
-
-        {/* Lộ trình hai chặng: Quán và Khách */}
-        <View className="my-3 gap-2.5 rounded-xl bg-surface-subtle p-3">
-          {/* Điểm lấy */}
-          <View className="flex-row items-center gap-2.5">
-            <View className="h-6 w-6 items-center justify-center rounded-full bg-danger-soft">
-              <Ionicons name="storefront" size={13} color="#EF4444" />
-            </View>
-            <View className="flex-1">
-              <View className="flex-row items-center justify-between">
-                <Text variant="caption" tone="secondary">
-                  Lấy tại quán
-                </Text>
-                {driverToRestKm !== null && (
-                  <Text variant="caption" weight="medium" tone="brand">
-                    Cách bạn {driverToRestKm} km
-                  </Text>
-                )}
-              </View>
-              <Text variant="body" weight="bold" numberOfLines={1}>
-                {order.restaurant?.name || 'Nhà hàng'}
-              </Text>
-              <Text variant="caption" tone="secondary" numberOfLines={1}>
-                {order.restaurant?.address || 'Địa chỉ quán'}
-              </Text>
-            </View>
-          </View>
-
-          <View className="ml-3 h-3 w-0.5 border-l border-dashed border-line" />
-
-          {/* Điểm giao */}
-          <View className="flex-row items-center gap-2.5">
-            <View className="h-6 w-6 items-center justify-center rounded-full bg-brand-50">
-              <Ionicons name="location" size={13} color="#1EB9CE" />
-            </View>
-            <View className="flex-1">
-              <View className="flex-row items-center justify-between">
-                <Text variant="caption" tone="secondary">
-                  Giao đến khách
-                </Text>
-                <Text variant="caption" tone="secondary">
-                  Quán → Khách: {order.distanceKm} km
-                </Text>
-              </View>
-              <Text variant="body" weight="bold" numberOfLines={1}>
-                {order.customer?.fullName || 'Khách hàng'}
-              </Text>
-              <Text variant="caption" tone="secondary" numberOfLines={1}>
-                {order.deliveryAddress}
-              </Text>
-            </View>
-          </View>
-        </View>
-
-        {/* Tài chính đơn: Thu nhập chuyến & Tiền cần thu */}
-        <View className="flex-row items-center justify-between border-t border-line-subtle pt-3">
-          <View>
-            <Text variant="caption" tone="secondary">
-              Thu nhập thực nhận
-            </Text>
-            <Text variant="headline" weight="bold" tone="brand">
+            <Text variant="title" weight="bold" tone="brand">
               +{formatVND(tripEarning)}
             </Text>
           </View>
-
-          <View className="items-end">
-            <Text variant="caption" tone="secondary">
-              Tiền thu của khách
+          <View className="items-end gap-1">
+            <View
+              className={cn(
+                'flex-row items-center gap-1 rounded-full px-2.5 py-1',
+                isReady ? 'bg-success-soft' : 'bg-warning-soft',
+              )}
+            >
+              <Icon name={isReady ? 'checkmark-circle' : 'flame'} size={13} tone={isReady ? 'success' : 'warning'} />
+              <Text variant="micro" weight="bold" tone={isReady ? 'success' : 'warning'}>
+                {isReady ? 'Món đã sẵn sàng' : 'Quán đang làm món'}
+              </Text>
+            </View>
+            <Text variant="micro" weight="medium" tone="muted">
+              #{orderCode(order.id)} • {timeAgo(order.createdAt)}
             </Text>
-            {isCod ? (
-              <Text variant="body" weight="bold" tone="danger">
-                Thu COD: {formatVND(order.total)}
-              </Text>
-            ) : (
-              <Text variant="body" weight="bold" tone="success">
-                Khách đã trả qua thẻ (0 ₫)
-              </Text>
-            )}
           </View>
         </View>
 
-        {/* Nút bấm nhận chuyến */}
-        <View className="mt-3">
-          {isMaxDeliveries ? (
-            <View className="items-center rounded-xl bg-surface-subtle py-2.5">
-              <Text variant="caption" weight="bold" tone="secondary">
-                Đang giao tối đa ({activeDeliveriesCount}/2 đơn)
-              </Text>
-            </View>
-          ) : exceedsDebtForOrder ? (
-            <View className="items-center rounded-xl bg-danger-soft/40 py-2.5">
-              <Text variant="caption" weight="bold" tone="danger">
-                Vượt hạn mức công nợ COD ({formatVND(codBalance + orderDebt)} / {formatVND(debtLimit)})
-              </Text>
-            </View>
-          ) : (
-            <Button
-              label="Nhận chuyến này"
-              variant="primary"
-              size="md"
-              loading={acceptMutation.isPending}
-              onPress={() => handleOpenConfirm(order)}
-            />
+        {/* Số liệu nhanh để quyết định nhận đơn */}
+        <View className="flex-row flex-wrap gap-1.5">
+          {driverToRestKm !== null && (
+            <MetricChip icon="navigate" tone="brand" label={`Cách bạn ${driverToRestKm} km`} />
           )}
+          <MetricChip icon="swap-horizontal" label={`Quãng giao ${order.distanceKm} km`} />
+          <MetricChip icon="fast-food-outline" label={`${itemCount} món`} />
         </View>
+
+        {/* Lộ trình hai chặng */}
+        <View className="rounded-xl bg-canvas-subtle p-3">
+          <RouteStops
+            compact
+            pickup={{
+              label: 'Lấy món',
+              title: order.restaurant?.name || 'Nhà hàng',
+              address: order.restaurant?.address || 'Địa chỉ quán',
+              addressLines: 1,
+            }}
+            dropoff={{
+              label: 'Giao đến',
+              title: order.customer?.fullName || 'Khách hàng',
+              address: order.deliveryAddress,
+              addressLines: 2,
+            }}
+          />
+        </View>
+
+        {/* Tiền cần thu của khách */}
+        <View
+          className={cn(
+            'flex-row items-center justify-between rounded-xl px-3 py-2.5',
+            isCod ? 'bg-danger-soft' : 'bg-success-soft',
+          )}
+        >
+          <View className="flex-row items-center gap-2">
+            <Icon name={isCod ? 'cash' : 'card'} size="sm" tone={isCod ? 'danger' : 'success'} />
+            <Text variant="caption" weight="semibold" tone={isCod ? 'danger' : 'success'}>
+              {isCod ? 'Thu tiền mặt' : 'Khách đã thanh toán'}
+            </Text>
+          </View>
+          <Text variant="body-lg" weight="bold" tone={isCod ? 'danger' : 'success'}>
+            {isCod ? formatVND(order.total) : '0 ₫'}
+          </Text>
+        </View>
+
+        {/* Nút nhận chuyến */}
+        {isMaxDeliveries ? (
+          <View className="h-button-md flex-row items-center justify-center gap-2 rounded-xl bg-canvas-subtle">
+            <Icon name="bicycle" size="sm" tone="secondary" />
+            <Text variant="caption" weight="bold" tone="secondary">
+              Đang giao tối đa ({activeDeliveriesCount}/2 đơn)
+            </Text>
+          </View>
+        ) : exceedsDebtForOrder ? (
+          <View className="min-h-button-md flex-row items-center justify-center gap-2 rounded-xl border border-danger-soft px-3 py-2">
+            <Icon name="lock-closed" size="sm" tone="danger" />
+            <Text variant="caption" weight="bold" tone="danger" className="flex-shrink text-center">
+              Vượt hạn mức công nợ COD ({formatVND(codBalance + orderDebt)} / {formatVND(debtLimit)})
+            </Text>
+          </View>
+        ) : (
+          <Button
+            label="Nhận chuyến này"
+            variant="primary"
+            size="lg"
+            rightIcon="arrow-forward"
+            loading={acceptMutation.isPending}
+            onPress={() => handleOpenConfirm(order)}
+          />
+        )}
       </View>
     );
   };
 
+  const verificationNotice: { title: string; icon: IconName } | null =
+    driverProfile && driverProfile.verificationStatus !== 'APPROVED'
+      ? driverProfile.verificationStatus === 'PENDING'
+        ? { title: 'Hồ sơ phương tiện đang chờ duyệt', icon: 'hourglass' }
+        : driverProfile.verificationStatus === 'SUSPENDED'
+          ? { title: 'Tài khoản đối tác bị tạm khoá', icon: 'lock-closed' }
+          : { title: 'Hồ sơ phương tiện bị từ chối', icon: 'close-circle' }
+      : null;
+
   return (
-    <SafeAreaView edges={['top']} className="flex-1 bg-surface-subtle">
-      {/* Header gradient với công tắc Trực tuyến / Ngoại tuyến */}
+    <View className="flex-1 bg-canvas-subtle">
+      {isFocused && <StatusBar style="light" />}
+      {/* Header gradient với công tắc Trực tuyến / Ngoại tuyến (tên dài được xuống 2 dòng) */}
       <TabHeader
         title={`Chào ${user?.fullName || 'Tài xế'}!`}
-        subtitle="Sẵn sàng nhận những cuốc xe giao đồ ăn mới"
+        titleLines={2}
+        subtitle={isOnline ? 'Đang tìm đơn quanh bạn' : 'Bạn đang tạm nghỉ'}
         trailing={
-          <View className="flex-row items-center gap-2 rounded-2xl bg-surface/20 px-3 py-1.5 backdrop-blur-md">
-            <View
-              className={cn(
-                'h-2.5 w-2.5 rounded-full',
-                isOnline ? 'bg-success' : 'bg-line',
-              )}
-            />
+          <View className="flex-row items-center gap-2 rounded-full bg-surface/20 py-1 pl-3 pr-1.5">
+            <View className={cn('h-2.5 w-2.5 rounded-full', isOnline ? 'bg-success' : 'bg-line')} />
             <Text variant="caption" weight="bold" tone="inverse">
               {isOnline ? 'Trực tuyến' : 'Ngoại tuyến'}
             </Text>
@@ -452,122 +440,94 @@ export const DriverAvailableOrdersScreen: React.FC = () => {
               value={isOnline}
               onValueChange={handleToggleOnline}
               disabled={isTogglingStatus}
-              trackColor={{ false: '#94A3B8', true: '#10B981' }}
-              thumbColor="#FFFFFF"
-              style={{ transform: [{ scaleX: 0.8 }, { scaleY: 0.8 }] }}
+              trackColor={{ false: palette.ink.muted, true: palette.success.DEFAULT }}
+              thumbColor={palette.ink.inverse}
             />
           </View>
         }
       />
 
-      {/* Cảnh báo hồ sơ chưa được duyệt */}
-      {driverProfile && driverProfile.verificationStatus !== 'APPROVED' && (
-        <View className="flex-row items-center justify-between border-b border-warning-soft bg-warning-soft/20 px-4 py-3">
-          <View className="flex-1 pr-2">
-            <Text variant="caption" weight="bold" tone="warning">
-              {driverProfile.verificationStatus === 'PENDING'
-                ? 'Hồ sơ phương tiện đang chờ duyệt'
-                : driverProfile.verificationStatus === 'SUSPENDED'
-                ? 'Tài khoản đối tác bị tạm khoá'
-                : 'Hồ sơ phương tiện bị từ chối'}
-            </Text>
-            <Text variant="caption" tone="secondary" numberOfLines={2}>
-              {driverProfile.rejectionReason || 'Vui lòng hoàn tất thông tin xe để ban quản trị xác nhận.'}
-            </Text>
-          </View>
-          <Pressable
-            accessibilityRole="button"
+      <View className="gap-3 px-4 pt-3">
+        {/* Cảnh báo hồ sơ chưa được duyệt */}
+        {verificationNotice && (
+          <NoticeCard
+            tone="warning"
+            icon={verificationNotice.icon}
+            title={verificationNotice.title}
+            message={driverProfile?.rejectionReason || 'Vui lòng hoàn tất thông tin xe để ban quản trị xác nhận.'}
+            actionLabel="Hồ sơ"
             onPress={() => navigation.navigate('DriverProfileTab')}
-            className="rounded-lg bg-surface px-2.5 py-1.5 shadow-card active:bg-canvas-subtle"
-          >
-            <Text variant="caption" weight="bold" tone="brand">
-              Hồ sơ
-            </Text>
-          </Pressable>
-        </View>
-      )}
+          />
+        )}
 
-      {/* Cảnh báo công nợ COD sắp chạm hoặc đã chạm hạn mức (C4) */}
-      {(isOverDebtLimit || isNearDebtLimit) && (
-        <Pressable
-          accessibilityRole="button"
-          onPress={() => navigation.navigate('DriverWallet')}
-          className={cn(
-            'flex-row items-center justify-between border-b px-4 py-3',
-            isOverDebtLimit
-              ? 'border-danger-soft bg-danger-soft/30'
-              : 'border-warning-soft bg-warning-soft/20',
-          )}
-        >
-          <View className="flex-1 pr-2">
-            <Text variant="caption" weight="bold" tone={isOverDebtLimit ? 'danger' : 'warning'}>
-              {isOverDebtLimit
-                ? `Công nợ COD đã chạm hạn mức (${formatVND(codBalance)} / ${formatVND(debtLimit)})`
-                : `Công nợ COD sắp chạm hạn mức (${formatVND(codBalance)} / ${formatVND(debtLimit)})`}
-            </Text>
-            <Text variant="caption" tone="secondary">
-              {isOverDebtLimit
+        {/* Cảnh báo công nợ COD sắp chạm hoặc đã chạm hạn mức (C4) */}
+        {(isOverDebtLimit || isNearDebtLimit) && (
+          <NoticeCard
+            tone={isOverDebtLimit ? 'danger' : 'warning'}
+            icon="wallet"
+            title={`${isOverDebtLimit ? 'Công nợ COD đã chạm hạn mức' : 'Công nợ COD sắp chạm hạn mức'} (${formatVND(codBalance)} / ${formatVND(debtLimit)})`}
+            message={
+              isOverDebtLimit
                 ? 'Vui lòng nộp tiền mặt về công ty để mở khoá nhận đơn mới.'
-                : 'Chạm để xem chi tiết sổ quỹ COD và hạn mức.'}
-            </Text>
-          </View>
-          <View className="rounded-lg bg-surface px-2.5 py-1.5 shadow-card">
-            <Text variant="caption" weight="bold" tone="brand">
-              Ví COD
-            </Text>
-          </View>
-        </Pressable>
-      )}
+                : 'Chạm để xem chi tiết sổ quỹ COD và hạn mức.'
+            }
+            actionLabel="Ví COD"
+            onPress={() => navigation.navigate('DriverWallet')}
+          />
+        )}
 
-      {/* Thẻ tóm tắt nhanh hôm nay */}
-      <View className="border-b border-line bg-surface px-4 py-3 shadow-card">
-        <View className="flex-row items-center justify-between">
-          <View className="flex-1 items-center border-r border-line-subtle pr-2">
-            <Text variant="caption" tone="secondary">
-              Thu nhập hôm nay
-            </Text>
-            <Text variant="body-lg" weight="bold" tone="brand">
-              {formatVND(todayStats?.earnings || 0)}
-            </Text>
-          </View>
-
-          <View className="flex-1 items-center border-r border-line-subtle px-2">
-            <Text variant="caption" tone="secondary">
-              Chuyến hôm nay
-            </Text>
+        {/* Tóm tắt nhanh hôm nay */}
+        <View className="flex-row rounded-2xl bg-surface p-3 shadow-card">
+          <TodayStat icon="wallet" box="bg-brand-50" iconTone="brand" label="Thu nhập hôm nay">
+            <Money amount={todayStats?.earnings || 0} tone="brand" />
+          </TodayStat>
+          <View className="mx-1 w-px bg-line-subtle" />
+          <TodayStat icon="checkmark-done" box="bg-success-soft" iconTone="success" label="Chuyến hôm nay">
             <Text variant="body-lg" weight="bold">
               {todayStats?.deliveredTrips || 0}
             </Text>
-          </View>
-
-          <View className="flex-1 items-center pl-2">
-            <Text variant="caption" tone="secondary">
-              Đang giao
-            </Text>
-            <Text
-              variant="body-lg"
-              weight="bold"
-              tone={isMaxDeliveries ? 'danger' : 'default'}
-            >
+          </TodayStat>
+          <View className="mx-1 w-px bg-line-subtle" />
+          <TodayStat
+            icon="bicycle"
+            box={isMaxDeliveries ? 'bg-danger-soft' : 'bg-accent-50'}
+            iconTone={isMaxDeliveries ? 'danger' : 'accent'}
+            label="Đang giao"
+          >
+            <Text variant="body-lg" weight="bold" tone={isMaxDeliveries ? 'danger' : 'default'}>
               {activeDeliveriesCount}/2
             </Text>
-          </View>
+          </TodayStat>
         </View>
+
+        {/* Nhắc chuyến đang giao dở: tài xế mở lại nhanh, khỏi phải đổi tab */}
+        {activeDeliveriesCount > 0 && (
+          <NoticeCard
+            tone="brand"
+            icon="bicycle"
+            title={`Bạn có ${activeDeliveriesCount} chuyến đang giao`}
+            message="Chạm để tiếp tục giao hàng"
+            actionLabel="Mở"
+            onPress={() =>
+              activeDeliveriesCount === 1 && activeOrders[0]
+                ? navigation.navigate('DriverDeliveryDetail', { orderId: activeOrders[0].id })
+                : navigation.navigate('DriverDeliveriesTab')
+            }
+          />
+        )}
 
         {/* Lọc danh sách: Tất cả / Món đã sẵn sàng */}
         {isOnline && (
-          <View className="mt-3 flex-row items-center gap-2 border-t border-line-subtle pt-2.5">
-            <FilterChip
-              label="Tất cả đơn chờ"
-              selected={!filterReadyOnly}
-              onPress={() => setFilterReadyOnly(false)}
-            />
-            <FilterChip
-              label="Món đã sẵn sàng"
-              selected={filterReadyOnly}
-              onPress={() => setFilterReadyOnly(true)}
-            />
-          </View>
+          <SegmentedTabs
+            value={filterReadyOnly ? 'READY' : 'ALL'}
+            onChange={(k) => setFilterReadyOnly(k === 'READY')}
+            items={[
+              // Không hiện số 0 cho đỡ rối
+              { key: 'ALL', label: 'Tất cả đơn', count: allCount || undefined },
+              { key: 'READY', label: 'Món đã sẵn sàng', count: readyCount || undefined },
+            ]}
+            trackClassName="bg-line"
+          />
         )}
       </View>
 
@@ -576,9 +536,9 @@ export const DriverAvailableOrdersScreen: React.FC = () => {
         <EmptyState
           icon="moon-outline"
           title="Bạn đang ngoại tuyến"
-          message="Hãy gạt công tắc phía trên để chuyển sang Trực tuyến và bắt đầu nhận các đơn hàng xung quanh bạn."
+          message="Bật Trực tuyến để bắt đầu nhận các đơn hàng xung quanh bạn."
           actionLabel="Bật trực tuyến ngay"
-          onAction={() => setIsOnline(true)}
+          onAction={() => handleToggleOnline(true)}
         />
       ) : isLoading && !refreshing ? (
         <View className="flex-1 items-center justify-center p-6">
@@ -589,25 +549,43 @@ export const DriverAvailableOrdersScreen: React.FC = () => {
           data={sortedAndFilteredOrders}
           keyExtractor={(item) => item.order.id}
           renderItem={renderOrderItem}
+          showsVerticalScrollIndicator={false}
           contentContainerStyle={{
             padding: 16,
-            paddingBottom: 100,
+            paddingBottom: 112, // khớp TAB_BAR_CLEARANCE (pb-28) của thanh tab nổi
             flexGrow: sortedAndFilteredOrders.length === 0 ? 1 : undefined,
           }}
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
               onRefresh={onRefresh}
-              tintColor="#1EB9CE"
-              colors={['#1EB9CE']}
+              tintColor={palette.brand['500']}
+              colors={[palette.brand['500']]}
             />
           }
           ListEmptyComponent={
-            <EmptyState
-              icon="search-outline"
-              title="Hiện chưa có đơn hàng chờ"
-              message="Các đơn hàng mới từ quán ăn sẽ tự động hiển thị ngay khi có khách đặt. Bạn có thể kéo xuống để làm mới."
-            />
+            <View className="flex-1 justify-center gap-4">
+              <EmptyState
+                icon="search-outline"
+                title="Đang tìm đơn quanh bạn"
+                message="Đơn mới sẽ tự hiện ngay khi có khách đặt. Kéo xuống để làm mới."
+              />
+              <View className="gap-2.5 rounded-2xl bg-surface p-4 shadow-card">
+                <Text variant="caption" weight="bold" tone="secondary" className="uppercase">
+                  Mẹo nhận đơn nhanh
+                </Text>
+                {EMPTY_TIPS.map((tip) => (
+                  <View key={tip.text} className="flex-row items-center gap-2.5">
+                    <View className={cn('h-8 w-8 items-center justify-center rounded-full', tip.box)}>
+                      <Icon name={tip.icon} size="sm" tone={tip.tone} />
+                    </View>
+                    <Text variant="caption" weight="regular" tone="secondary" className="flex-1">
+                      {tip.text}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+            </View>
           }
         />
       )}
@@ -618,8 +596,8 @@ export const DriverAvailableOrdersScreen: React.FC = () => {
         title="Xác nhận nhận chuyến giao"
         message={
           confirmDialog.order
-            ? `Điểm lấy: ${confirmDialog.order.restaurant?.name}\nĐiểm giao: ${confirmDialog.order.deliveryAddress}\n\nThu nhập chuyến: +${formatVND(
-                confirmDialog.order.deliveryFee,
+            ? `Điểm lấy: ${confirmDialog.order.restaurant?.name}\nĐiểm giao: ${confirmDialog.order.deliveryAddress}\n\nCông giao của bạn: ${formatVND(
+                confirmDialog.order.driverEarning ?? confirmDialog.order.deliveryFee,
               )}`
             : ''
         }
@@ -628,6 +606,31 @@ export const DriverAvailableOrdersScreen: React.FC = () => {
         onConfirm={handleConfirmAccept}
         onCancel={() => setConfirmDialog({ visible: false, order: null })}
       />
-    </SafeAreaView>
+    </View>
   );
 };
+
+const EMPTY_TIPS: { icon: IconName; box: string; tone: 'brand' | 'accent' | 'success'; text: string }[] = [
+  { icon: 'restaurant', box: 'bg-accent-50', tone: 'accent', text: 'Đứng gần khu có nhiều quán ăn để được ưu tiên đơn gần.' },
+  { icon: 'time', box: 'bg-brand-50', tone: 'brand', text: 'Giờ cao điểm 11h–13h và 17h–20h có nhiều đơn nhất.' },
+  { icon: 'location', box: 'bg-success-soft', tone: 'success', text: 'Giữ GPS luôn bật để hệ thống tìm thấy bạn.' },
+];
+
+/** Ô số liệu trong thẻ "hôm nay". */
+const TodayStat: React.FC<{
+  icon: IconName;
+  box: string;
+  iconTone: 'brand' | 'success' | 'accent' | 'danger';
+  label: string;
+  children: React.ReactNode;
+}> = ({ icon, box, iconTone, label, children }) => (
+  <View className="flex-1 items-center gap-1 py-1">
+    <View className={cn('h-10 w-10 items-center justify-center rounded-full', box)}>
+      <Icon name={icon} size="md" tone={iconTone} />
+    </View>
+    {children}
+    <Text variant="caption" weight="medium" tone="muted" numberOfLines={1} adjustsFontSizeToFit>
+      {label}
+    </Text>
+  </View>
+);

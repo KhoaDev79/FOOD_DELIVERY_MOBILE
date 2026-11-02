@@ -54,3 +54,19 @@ export function useBanners() {
     staleTime: 1000 * 60 * 10,
   });
 }
+
+export function useCuisines() {
+  return useQuery({
+    queryKey: queryKeys.cuisines,
+    queryFn: () => restaurantsApi.getCuisines(),
+    staleTime: 1000 * 60 * 60 * 12, // 12 tiếng
+  });
+}
+
+export function usePopularSearches() {
+  return useQuery({
+    queryKey: queryKeys.search.popular,
+    queryFn: () => restaurantsApi.getPopularSearches(),
+    staleTime: 1000 * 60 * 15, // 15 phút
+  });
+}

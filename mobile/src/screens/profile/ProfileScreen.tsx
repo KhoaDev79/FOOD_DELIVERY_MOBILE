@@ -1,20 +1,22 @@
-import { Ionicons } from '@expo/vector-icons';
 import { useIsFocused, useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { StatusBar } from 'expo-status-bar';
-import React, { useState } from 'react';
+import React from 'react';
 import { Pressable, ScrollView, View } from 'react-native';
 import {
   Avatar,
   cn,
-  ConfirmDialog,
+  CountBadge,
   Divider,
+  Icon,
+  LogoutButton,
   ListRow,
   Skeleton,
   TabHeader,
   TAB_BAR_CLEARANCE,
   Text,
 } from '../../components/ui';
+import { useUnreadChatCount } from '../../hooks/useUnreadChatCount';
 import { useMyOrders } from '../../services/useOrders';
 import { useAddresses, useMe } from '../../services/useUser';
 import { useAuthStore } from '../../store/useAuthStore';
@@ -60,7 +62,6 @@ export const ProfileScreen: React.FC = () => {
   const { data: addresses } = useAddresses();
   const favoriteCount = useFavoritesStore((s) => s.restaurants.length);
   const logout = useAuthStore((s) => s.logout);
-  const [confirmLogout, setConfirmLogout] = useState(false);
 
   const requireAuth = (callback: () => void) => {
     if (!isAuthenticated) {
@@ -73,6 +74,8 @@ export const ProfileScreen: React.FC = () => {
   const goOrders = () => requireAuth(() => navigation.navigate('MainTabs', { screen: 'OrdersTab' }));
   const goFavorites = () => navigation.navigate('MainTabs', { screen: 'FavoritesTab' });
   const goAddresses = () => requireAuth(() => navigation.navigate('AddressManagement'));
+  const goInbox = () => requireAuth(() => navigation.navigate('Inbox'));
+  const unreadChats = useUnreadChatCount();
 
   return (
     <View className="flex-1 bg-canvas-subtle">
@@ -109,17 +112,12 @@ export const ProfileScreen: React.FC = () => {
                   </>
                 )}
               </View>
-              <View className="rounded-full bg-surface/20 px-3 py-1.5">
-                <Text variant="caption" weight="semibold" tone="inverse">
-                  Sửa
-                </Text>
-              </View>
             </Pressable>
           ) : (
             <View className="gap-3">
               <View className="flex-row items-center gap-3">
                 <View className="h-14 w-14 items-center justify-center rounded-full bg-surface/20 border-2 border-surface/40">
-                  <Ionicons name="person" size={28} color="#FFFFFF" />
+                  <Icon name="person" size={28} tone="inverse" />
                 </View>
                 <View className="flex-1">
                   <View className="flex-row items-center gap-1">
@@ -139,7 +137,7 @@ export const ProfileScreen: React.FC = () => {
                 onPress={() => navigation.navigate('Login')}
                 className="mt-1 flex-row items-center justify-center gap-2 rounded-xl bg-surface py-2.5 px-4 shadow-card active:opacity-85"
               >
-                <Ionicons name="log-in-outline" size={18} color="#0B7F90" />
+                <Icon name="log-in-outline" size={18} tone="brand" />
                 <Text variant="body" weight="bold" tone="brand">
                   Đăng nhập / Đăng ký ngay
                 </Text>
@@ -169,6 +167,21 @@ export const ProfileScreen: React.FC = () => {
           </Group>
 
           <Group title="Hoạt động">
+            <ListRow
+              icon="chatbubbles-outline"
+              iconTone="brand"
+              title="Tin nhắn"
+              subtitle={unreadChats > 0 ? `${unreadChats} tin nhắn chưa đọc` : 'Trao đổi với quán và tài xế theo từng đơn'}
+              accessibilityLabel={unreadChats > 0 ? `Tin nhắn, ${unreadChats} tin chưa đọc` : 'Tin nhắn'}
+              trailing={
+                <View className="flex-row items-center gap-1">
+                  <CountBadge count={unreadChats} />
+                  <Icon name="chevron-forward" size="md" tone="muted" />
+                </View>
+              }
+              onPress={goInbox}
+            />
+            <Divider inset />
             <ListRow icon="receipt-outline" iconTone="brand" title="Lịch sử đơn hàng" onPress={goOrders} />
             <Divider inset />
             <ListRow icon="heart-outline" iconTone="danger" title="Quán yêu thích" onPress={goFavorites} />
@@ -186,40 +199,21 @@ export const ProfileScreen: React.FC = () => {
             </Group>
           )}
 
-          <View className="rounded-lg bg-surface px-3 shadow-card">
-            {isAuthenticated ? (
-              <ListRow
-                icon="log-out-outline"
-                title="Đăng xuất"
-                destructive
-                showChevron={false}
-                onPress={() => setConfirmLogout(true)}
-              />
-            ) : (
+          {isAuthenticated ? (
+            <LogoutButton onLogout={logout} />
+          ) : (
+            <View className="rounded-lg bg-surface px-3 shadow-card">
               <ListRow
                 icon="log-in-outline"
                 iconTone="brand"
                 title="Đăng nhập"
                 onPress={() => navigation.navigate('Login')}
               />
-            )}
-          </View>
+            </View>
+          )}
         </View>
       </ScrollView>
 
-      <ConfirmDialog
-        visible={confirmLogout}
-        title="Đăng xuất?"
-        message="Bạn có chắc chắn muốn đăng xuất khỏi tài khoản?"
-        confirmLabel="Đăng xuất"
-        cancelLabel="Hủy"
-        destructive
-        onCancel={() => setConfirmLogout(false)}
-        onConfirm={() => {
-          setConfirmLogout(false);
-          logout();
-        }}
-      />
     </View>
   );
 };

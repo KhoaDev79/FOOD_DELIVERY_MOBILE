@@ -42,7 +42,7 @@ const TONE: Record<TextTone, string> = {
   secondary: 'text-ink-secondary',
   muted: 'text-ink-muted',
   inverse: 'text-ink-inverse',
-  brand: 'text-brand-600',
+  brand: 'text-brand-contrast',
   accent: 'text-accent-700',
   danger: 'text-danger',
   success: 'text-success-strong',

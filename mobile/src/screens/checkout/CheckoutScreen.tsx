@@ -12,6 +12,7 @@ import {
   ConfirmDialog,
   EmptyState,
   Icon,
+  IconName,
   Input,
   QuantityStepper,
   Skeleton,
@@ -19,9 +20,12 @@ import {
   TopBar,
   useToast,
 } from '../../components/ui';
+import { CartSuggestions } from '../../components/modules/cart/CartSuggestions';
+import { MetricChip, Money } from '../../components/modules/partner/PartnerKit';
 import { useCreateOrder } from '../../services/useOrders';
 import { useAddresses } from '../../services/useUser';
 import { CartLineItem, useCartStore } from '../../store/useCartStore';
+import { useAuthStore } from '../../store/useAuthStore';
 import { useDeliveryAddressStore } from '../../store/useDeliveryAddressStore';
 import { OrderQuoteResponse } from '../../types/api';
 import { RootStackParamList } from '../../types/navigation';
@@ -38,16 +42,20 @@ function generateIdempotencyKey(): string {
   });
 }
 
-const Section: React.FC<{ title: string; action?: React.ReactNode; children: React.ReactNode }> = ({
-  title,
-  action,
-  children,
-}) => (
-  <View className="gap-3 rounded-lg bg-surface p-4 shadow-card">
+const Section: React.FC<{
+  title: string;
+  icon?: IconName;
+  action?: React.ReactNode;
+  children: React.ReactNode;
+}> = ({ title, icon, action, children }) => (
+  <View className="gap-3 rounded-2xl bg-surface p-4 shadow-card">
     <View className="flex-row items-center justify-between gap-2">
-      <Text variant="headline" accessibilityRole="header">
-        {title}
-      </Text>
+      <View className="flex-1 flex-row items-center gap-2">
+        {icon && <Icon name={icon} size="sm" tone="brand" />}
+        <Text variant="body-lg" weight="bold" accessibilityRole="header" numberOfLines={1} className="flex-1">
+          {title}
+        </Text>
+      </View>
       {action}
     </View>
     {children}
@@ -71,7 +79,12 @@ const SummaryRow: React.FC<{ label: string; value: string; hint?: string; strong
         </Text>
       )}
     </View>
-    <Text variant={strong ? 'title' : 'body'} weight={strong ? 'bold' : 'medium'} tone={strong ? 'brand' : 'default'}>
+    <Text
+      variant={strong ? 'title' : 'body'}
+      weight={strong ? 'bold' : 'medium'}
+      tone={strong ? 'brand' : 'default'}
+      className="text-right"
+    >
       {value}
     </Text>
   </View>
@@ -88,6 +101,7 @@ export const CheckoutScreen: React.FC<Props> = ({ navigation }) => {
   const updateQuantity = useCartStore((s) => s.updateQuantity);
   const removeItem = useCartStore((s) => s.removeItem);
   const clearCart = useCartStore((s) => s.clearCart);
+  const user = useAuthStore((s) => s.user);
 
   const { data: addresses, isLoading: addressLoading } = useAddresses();
   const selectedAddressId = useDeliveryAddressStore((s) => s.selectedAddressId);
@@ -233,6 +247,16 @@ export const CheckoutScreen: React.FC<Props> = ({ navigation }) => {
 
   const handlePlaceOrder = () => {
     if (!restaurant) return;
+    if (!user?.phone || user.phone.trim().length < 9) {
+      toast('Tài khoản cần có số điện thoại (tối thiểu 9 số) để đặt hàng.', 'error');
+      navigation.navigate('EditProfile');
+      return;
+    }
+    if (!user?.fullName || user.fullName.trim().length < 2) {
+      toast('Tài khoản cần có họ và tên đầy đủ để đặt hàng.', 'error');
+      navigation.navigate('EditProfile');
+      return;
+    }
     if (!activeAddressId) {
       toast('Vui lòng thêm địa chỉ nhận hàng trước khi đặt đơn', 'error');
       navigation.navigate('AddAddress');
@@ -290,6 +314,7 @@ export const CheckoutScreen: React.FC<Props> = ({ navigation }) => {
           {/* Giao đến */}
           <Section
             title="Giao đến"
+            icon="location"
             action={
               <Button
                 label={activeAddr ? 'Đổi' : 'Thêm địa chỉ'}
@@ -308,35 +333,55 @@ export const CheckoutScreen: React.FC<Props> = ({ navigation }) => {
             {addressLoading ? (
               <Skeleton className="h-12 w-full" />
             ) : activeAddr ? (
-              <View className="flex-row items-start gap-3">
-                <View className="h-10 w-10 items-center justify-center rounded-full bg-brand-50">
-                  <Icon name="location" size="md" tone="brand" />
-                </View>
-                <View className="flex-1 gap-1">
-                  <Text variant="caption" weight="semibold" tone="brand">
-                    {activeAddr.label}
-                  </Text>
-                  <Text variant="body" numberOfLines={2}>
-                    {activeAddr.addressLine}
-                  </Text>
-                  {quote && (
-                    <View className="flex-row flex-wrap items-center gap-x-3 gap-y-1">
-                      <View className="flex-row items-center gap-1">
-                        <Icon name="navigate-outline" size={12} tone="brand" />
-                        <Text variant="caption" weight="regular" tone="secondary">
-                          {formatDistance(quote.distanceKm)}
-                          {quote.distanceSource === 'ESTIMATED' ? ' (ước tính)' : ''}
-                        </Text>
-                      </View>
-                      <View className="flex-row items-center gap-1">
-                        <Icon name="bicycle-outline" size={12} tone="brand" />
-                        <Text variant="caption" weight="regular" tone="secondary">
-                          Dự kiến {quote.estimatedMinutes.min}–{quote.estimatedMinutes.max} phút
-                        </Text>
-                      </View>
+              <View className="gap-2.5">
+                <View className="flex-row items-start gap-3">
+                  <View className="flex-1 gap-1">
+                    <View className="self-start rounded-full bg-brand-50 px-2.5 py-0.5">
+                      <Text variant="micro" weight="bold" tone="brand">
+                        {activeAddr.label}
+                      </Text>
                     </View>
-                  )}
+                    <Text variant="body" weight="medium" numberOfLines={2}>
+                      {activeAddr.addressLine}
+                    </Text>
+                    <Text variant="caption" weight="regular" tone="secondary">
+                      {user?.fullName || 'Chưa có tên'} · {user?.phone || 'Chưa cập nhật SĐT'}
+                    </Text>
+                  </View>
                 </View>
+
+                {quote && (
+                  <View className="flex-row flex-wrap gap-1.5">
+                    <MetricChip
+                      icon="navigate"
+                      tone="brand"
+                      label={`${formatDistance(quote.distanceKm)}${quote.distanceSource === 'ESTIMATED' ? ' (ước tính)' : ''}`}
+                    />
+                    <MetricChip
+                      icon="time-outline"
+                      tone="brand"
+                      label={`Giao trong ${quote.estimatedMinutes.min}–${quote.estimatedMinutes.max} phút`}
+                    />
+                    {quote.isPeak && <MetricChip icon="flash" tone="warning" label="Giờ cao điểm" />}
+                  </View>
+                )}
+
+                {(!user?.phone || user.phone.trim().length < 9) && (
+                  <Pressable
+                    onPress={() => navigation.navigate('EditProfile')}
+                    className="flex-row items-center justify-between rounded-md bg-warning-soft px-3 py-2"
+                  >
+                    <View className="flex-1 flex-row items-center gap-1.5">
+                      <Icon name="call-outline" size="sm" tone="accent" />
+                      <Text variant="caption" tone="warning" className="flex-1">
+                        Chưa có SĐT người nhận. Chạm để bổ sung ngay.
+                      </Text>
+                    </View>
+                    <Text variant="caption" weight="bold" tone="brand">
+                      Cập nhật
+                    </Text>
+                  </Pressable>
+                )}
               </View>
             ) : (
               <Pressable
@@ -375,6 +420,7 @@ export const CheckoutScreen: React.FC<Props> = ({ navigation }) => {
           {/* Món đã chọn */}
           <Section
             title={`Món đã chọn · ${itemCount}`}
+            icon="fast-food"
             action={
               <Button
                 label="Thêm món"
@@ -385,11 +431,18 @@ export const CheckoutScreen: React.FC<Props> = ({ navigation }) => {
               />
             }
           >
-            <View className="flex-row items-center gap-2 border-b border-line-subtle pb-3">
-              <AppImage uri={restaurant.imageUrl} className="h-8 w-8 rounded-sm" fallbackIcon="storefront-outline" />
-              <Text variant="body" weight="semibold" numberOfLines={1} className="flex-1">
-                {restaurant.name}
-              </Text>
+            <View className="flex-row items-center gap-2.5 rounded-xl bg-canvas-subtle p-2.5">
+              <AppImage uri={restaurant.imageUrl} className="h-9 w-9 rounded-lg" fallbackIcon="storefront-outline" />
+              <View className="flex-1">
+                <Text variant="body" weight="semibold" numberOfLines={1}>
+                  {restaurant.name}
+                </Text>
+                {!!restaurant.address && (
+                  <Text variant="micro" weight="regular" tone="muted" numberOfLines={1}>
+                    {restaurant.address}
+                  </Text>
+                )}
+              </View>
             </View>
             {items.map((item) => {
               const unit = item.unitPrice ?? linePrice(item.menuItem, item);
@@ -399,13 +452,13 @@ export const CheckoutScreen: React.FC<Props> = ({ navigation }) => {
                 <View
                   key={item.id ?? item.menuItem.id}
                   className={cn(
-                    'flex-row items-center gap-3 rounded-md p-1',
-                    isUnavailable && 'bg-danger-soft/20',
+                    'flex-row items-center gap-3 rounded-xl p-1',
+                    isUnavailable ? 'bg-danger-soft' : '',
                   )}
                 >
                   <AppImage
                     uri={item.menuItem.imageUrl}
-                    className="h-14 w-14 rounded-md"
+                    className={cn('h-14 w-14 rounded-xl', isUnavailable ? 'opacity-50' : '')}
                     fallbackIcon="fast-food-outline"
                   />
                   <View className="flex-1 gap-0.5">
@@ -425,9 +478,7 @@ export const CheckoutScreen: React.FC<Props> = ({ navigation }) => {
                         Ghi chú: {item.note}
                       </Text>
                     )}
-                    <Text variant="body" weight="semibold" tone="brand">
-                      {formatVND(unit * item.quantity)}
-                    </Text>
+                    <Money amount={unit * item.quantity} variant="body" tone="brand" />
                   </View>
                   <QuantityStepper
                     value={item.quantity}
@@ -438,10 +489,12 @@ export const CheckoutScreen: React.FC<Props> = ({ navigation }) => {
                 </View>
               );
             })}
+            {/* Gợi ý món mua kèm: thêm xong báo giá tự tính lại */}
+            <CartSuggestions restaurant={restaurant} embedded />
           </Section>
 
           {/* Ghi chú */}
-          <Section title="Ghi chú cho đơn">
+          <Section title="Ghi chú cho tài xế & quán" icon="document-text">
             <Input
               placeholder="Ví dụ: giao lên lầu 3, gọi trước khi tới…"
               value={note}
@@ -452,17 +505,17 @@ export const CheckoutScreen: React.FC<Props> = ({ navigation }) => {
           </Section>
 
           {/* Phương thức thanh toán cố định COD */}
-          <Section title="Phương thức thanh toán">
-            <View className="flex-row items-center gap-3 rounded-md border border-brand-500 bg-brand-50 p-3">
+          <Section title="Thanh toán" icon="wallet">
+            <View className="flex-row items-center gap-3 rounded-xl border-2 border-brand-500 bg-brand-50 p-3">
               <View className="h-10 w-10 items-center justify-center rounded-full bg-surface">
                 <Icon name="cash-outline" size="md" tone="brand" />
               </View>
               <View className="flex-1">
-                <Text variant="body-lg" weight="medium">
-                  Thanh toán tiền mặt khi nhận hàng
+                <Text variant="body" weight="bold">
+                  Tiền mặt khi nhận hàng
                 </Text>
                 <Text variant="caption" weight="regular" tone="secondary">
-                  Thanh toán trực tiếp cho tài xế khi nhận món (COD)
+                  Trả trực tiếp cho tài xế khi nhận món
                 </Text>
               </View>
               <Icon name="checkmark-circle" size="md" tone="brand" />
@@ -470,7 +523,7 @@ export const CheckoutScreen: React.FC<Props> = ({ navigation }) => {
           </Section>
 
           {/* Tóm tắt hoá đơn từ server quote */}
-          <Section title="Chi tiết thanh toán">
+          <Section title="Chi tiết thanh toán" icon="receipt">
             {quoteLoading && !quote ? (
               <View className="gap-2">
                 <Skeleton className="h-5 w-full" />
@@ -496,8 +549,7 @@ export const CheckoutScreen: React.FC<Props> = ({ navigation }) => {
                     hint="Khung giờ cao điểm trưa / tối"
                   />
                 )}
-                {quote.isPeak && <Badge label="Đang giờ cao điểm" tone="warning" icon="flash" />}
-                <View className="border-t border-line-subtle pt-3">
+                <View className="mt-1 rounded-xl bg-brand-50 px-3 py-3">
                   <SummaryRow label="Tổng cộng" value={formatVND(quote.total)} strong />
                 </View>
               </>
@@ -522,13 +574,18 @@ export const CheckoutScreen: React.FC<Props> = ({ navigation }) => {
             <Text variant="caption" weight="regular" tone="secondary">
               Tổng cộng
             </Text>
-            <Text variant="title" weight="bold" tone="brand">
-              {quoteLoading && !quote ? 'Đang tính...' : formatVND(displayTotal)}
-            </Text>
+            {quoteLoading && !quote ? (
+              <Text variant="body-lg" weight="bold" tone="muted">
+                Đang tính...
+              </Text>
+            ) : (
+              <Money amount={displayTotal} variant="title" tone="brand" />
+            )}
           </View>
           <Button
             label="Đặt hàng"
             rightIcon="arrow-forward"
+            size="lg"
             loading={isSubmitting || quoteLoading}
             disabled={!canSubmit}
             onPress={handlePlaceOrder}

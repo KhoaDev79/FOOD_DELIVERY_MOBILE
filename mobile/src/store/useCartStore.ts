@@ -25,6 +25,8 @@ export interface CartRestaurant {
   imageUrl?: string | null;
   latitude?: number;
   longitude?: number;
+  address?: string;
+  phone?: string | null;
 }
 
 interface CartState {

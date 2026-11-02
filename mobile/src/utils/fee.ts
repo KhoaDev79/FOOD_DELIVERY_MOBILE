@@ -15,18 +15,30 @@ export const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2
 };
 
 /**
- * Ước tính thời gian giao hàng hiển thị trên danh sách quán dựa trên khoảng cách (km).
- * Khi đặt đơn và theo dõi đơn, thời gian thực tế lấy từ báo giá (POST /orders/quote) và Order.estimatedDeliveryAt.
+ * Thời gian giao dự kiến (phút): CÙNG công thức với backend (backend/src/common/utils/delivery-time.ts).
+ *   Tổng = quán làm món (10') + tài xế tới quán (5') + chạy xe (3'/km) + bàn giao (2')
+ * Khoảng rộng dần theo quãng đường, làm tròn 5 phút. Màn đặt đơn / theo dõi đơn dùng số từ báo giá
+ * (POST /orders/quote) và Order.estimatedDeliveryAt, vốn cũng tính bằng công thức này.
  */
-export const estimateDeliveryTime = (distanceKm?: number): string => {
-  if (distanceKm === undefined || distanceKm <= 0) return '15 - 20 phút';
-  if (distanceKm <= 1.5) return '15 - 20 phút';
-  if (distanceKm <= 3) return '20 - 25 phút';
-  if (distanceKm <= 5) return '25 - 35 phút';
-  if (distanceKm <= 8) return '35 - 45 phút';
-  const minTime = Math.round(15 + distanceKm * 3);
-  const maxTime = Math.round(20 + distanceKm * 4);
-  return `${minTime} - ${maxTime} phút`;
+const ROAD_FACTOR = 1.3; // quy đổi đường chim bay -> đường bộ, giống ROAD_DISTANCE_FALLBACK_FACTOR ở backend
+const roundTo5 = (n: number) => Math.round(n / 5) * 5;
+
+export function estimateDeliveryWindow(distanceKm: number, isPeak = false): { min: number; max: number } {
+  const travel = Math.max(2, Math.max(0, distanceKm) * 3 * (isPeak ? 1.25 : 1));
+  const total = 10 + (isPeak ? 5 : 0) + 5 + travel + 2;
+  const spread = travel <= 10 ? 5 : travel <= 25 ? 10 : 15;
+  const min = Math.max(15, roundTo5(total));
+  return { min, max: Math.max(min + 5, roundTo5(total + spread)) };
+}
+
+/**
+ * Nhãn "25 - 30 phút".
+ * @param straightLine true khi distanceKm là đường chim bay (danh sách quán, chi tiết quán) để quy đổi ra đường bộ.
+ */
+export const estimateDeliveryTime = (distanceKm?: number, straightLine = false): string => {
+  const d = distanceKm === undefined || distanceKm < 0 ? 0 : distanceKm;
+  const { min, max } = estimateDeliveryWindow(straightLine ? d * ROAD_FACTOR : d);
+  return `${min} - ${max} phút`;
 };
 
 /**

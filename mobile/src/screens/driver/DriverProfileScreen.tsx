@@ -11,9 +11,9 @@ import {
   BadgeTone,
   Button,
   cn,
-  ConfirmDialog,
   Divider,
   Icon,
+  LogoutButton,
   IconName,
   IconTone,
   ListRow,
@@ -117,7 +117,6 @@ export const DriverProfileScreen: React.FC = () => {
   const logout = useAuthStore((s) => s.logout);
 
   const [statsDays, setStatsDays] = useState<1 | 7 | 30>(7);
-  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
 
   const { data: stats, isLoading: loadingStats, refetch: refetchStats } = useQuery({
@@ -137,7 +136,6 @@ export const DriverProfileScreen: React.FC = () => {
   };
 
   const handleLogout = async () => {
-    setShowLogoutConfirm(false);
     try {
       await driversApi.updateStatus({ isOnline: false });
     } catch {
@@ -263,7 +261,8 @@ export const DriverProfileScreen: React.FC = () => {
                     onPress={() => setStatsDays(p.days)}
                     className={cn(
                       'h-9 flex-1 items-center justify-center rounded-full',
-                      selected && 'bg-surface shadow-card',
+                      // Luôn có một lớp shadow từ lần render đầu, tránh NativeWind phải remount khi đổi lựa chọn
+                      selected ? 'bg-surface shadow-card' : 'shadow-none',
                     )}
                   >
                     <Text variant="caption" weight={selected ? 'semibold' : 'medium'} tone={selected ? 'brand' : 'secondary'}>
@@ -274,12 +273,12 @@ export const DriverProfileScreen: React.FC = () => {
               })}
             </View>
 
-            {/* Tổng phí ship */}
+            {/* Công giao thực nhận (phí giao sau hoa hồng nền tảng) */}
             <View className="gap-1 rounded-xl bg-brand-50 p-4">
               <View className="flex-row items-center gap-2">
                 <Icon name="wallet" size="sm" tone="brand" />
                 <Text variant="caption" tone="secondary">
-                  Tổng phí ship
+                  Công giao thực nhận
                 </Text>
               </View>
               {loadingStats ? (
@@ -418,6 +417,14 @@ export const DriverProfileScreen: React.FC = () => {
             />
             <Divider inset />
             <ListRow
+              icon="star-outline"
+              iconTone="accent"
+              title="Đánh giá từ khách hàng"
+              subtitle="Xem nhận xét và phản hồi đánh giá các chuyến giao"
+              onPress={() => navigation.navigate('DriverReviews')}
+            />
+            <Divider inset />
+            <ListRow
               icon="time-outline"
               iconTone="brand"
               title="Lịch sử chuyến giao"
@@ -425,26 +432,13 @@ export const DriverProfileScreen: React.FC = () => {
             />
           </View>
 
-          <Button
-            label="Đăng xuất"
-            leftIcon="log-out-outline"
-            variant="dangerSoft"
-            size="lg"
-            onPress={() => setShowLogoutConfirm(true)}
+          <LogoutButton
+            onLogout={handleLogout}
+            message="Bạn sẽ được chuyển sang ngoại tuyến và cần đăng nhập lại để nhận chuyến."
           />
         </View>
       </ScrollView>
 
-      <ConfirmDialog
-        visible={showLogoutConfirm}
-        title="Đăng xuất?"
-        message="Bạn sẽ được chuyển sang ngoại tuyến và cần đăng nhập lại để nhận chuyến."
-        confirmLabel="Đăng xuất"
-        cancelLabel="Ở lại"
-        destructive
-        onConfirm={handleLogout}
-        onCancel={() => setShowLogoutConfirm(false)}
-      />
     </View>
   );
 };

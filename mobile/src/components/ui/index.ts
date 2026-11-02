@@ -22,3 +22,4 @@ export * from './States';
 export * from './TabHeader';
 export * from './Text';
 export * from './TopBar';
+export * from './LogoutButton';

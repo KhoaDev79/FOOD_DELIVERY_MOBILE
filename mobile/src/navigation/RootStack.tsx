@@ -14,6 +14,8 @@ import { RoleUpgradeRequestScreen } from '../screens/profile/RoleUpgradeRequestS
 import { RatingScreen } from '../screens/rating/RatingScreen';
 import { RestaurantDetailScreen } from '../screens/restaurant/RestaurantDetailScreen';
 import { SearchScreen } from '../screens/search/SearchScreen';
+import { ChatScreen } from '../screens/chat/ChatScreen';
+import { InboxScreen } from '../screens/chat/InboxScreen';
 import { RootStackParamList } from '../types/navigation';
 import { BottomTabNavigator } from './BottomTabNavigator';
 
@@ -97,6 +99,16 @@ export const RootStack: React.FC = () => {
       <Stack.Screen
         name="Rating"
         component={RatingScreen}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="Chat"
+        component={ChatScreen}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="Inbox"
+        component={InboxScreen}
         options={{ headerShown: false }}
       />
     </Stack.Navigator>

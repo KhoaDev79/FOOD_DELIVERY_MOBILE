@@ -1,7 +1,24 @@
-import { Ionicons } from '@expo/vector-icons';
-import React, { useEffect, useMemo, useRef } from 'react';
+import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef } from 'react';
 import { StyleSheet, View, ViewStyle } from 'react-native';
-import MapView, { Marker, Region } from 'react-native-maps';
+import MapView, { EdgePadding, Marker, Polyline, Region } from 'react-native-maps';
+import { Icon } from '../ui/Icon';
+
+/** Một đường vẽ trên bản đồ (vd: quán → khách). */
+export interface MapRoute {
+  id: string;
+  coordinates: { latitude: number; longitude: number }[];
+  color: string;
+  /** Màu viền ngoài, giúp đường nổi trên nền bản đồ (kiểu Google Maps). */
+  outlineColor?: string;
+  width?: number;
+  /** Nét đứt: dùng cho đường ước tính (đoạn thẳng), không phải đường phố thật. */
+  dashed?: boolean;
+}
+
+export interface AppMapViewHandle {
+  /** Canh lại khung nhìn cho vừa mọi điểm và đường. */
+  fitAll: () => void;
+}
 
 export interface MapMarkerItem {
   id: string;
@@ -13,14 +30,40 @@ export interface MapMarkerItem {
   type?: 'restaurant' | 'delivery' | 'driver';
 }
 
-interface AppMapViewProps {
+export interface AppMapViewProps {
   initialRegion: Region;
   markers?: MapMarkerItem[];
+  routes?: MapRoute[];
+  /**
+   * always (mặc định): canh lại khung mỗi khi điểm thay đổi.
+   * once: chỉ canh khi mở và khi đường đi vừa tải xong, để người dùng tự zoom/kéo mà không bị nhảy lại.
+   */
+  autoFit?: 'always' | 'once';
+  edgePadding?: EdgePadding;
   style?: ViewStyle;
 }
 
-export const AppMapView: React.FC<AppMapViewProps> = ({ initialRegion, markers = [], style }) => {
+const DEFAULT_PADDING: EdgePadding = { top: 60, right: 60, bottom: 60, left: 60 };
+
+export const AppMapView = forwardRef<AppMapViewHandle, AppMapViewProps>(function AppMapView(
+  { initialRegion, markers = [], routes = [], autoFit = 'always', edgePadding = DEFAULT_PADDING, style },
+  ref,
+) {
   const mapRef = useRef<MapView>(null);
+  const fittedMarkers = useRef(false);
+  const fittedRoutes = useRef(false);
+
+  const fitAll = useCallback(() => {
+    const coords = [
+      ...markers.map((m) => ({ latitude: m.latitude, longitude: m.longitude })),
+      ...routes.flatMap((r) => r.coordinates),
+    ];
+    if (coords.length >= 2) {
+      mapRef.current?.fitToCoordinates(coords, { edgePadding, animated: true });
+    }
+  }, [markers, routes, edgePadding]);
+
+  useImperativeHandle(ref, () => ({ fitAll }), [fitAll]);
 
   const region = useMemo(() => {
     if (markers.length >= 2) {
@@ -52,19 +95,48 @@ export const AppMapView: React.FC<AppMapViewProps> = ({ initialRegion, markers =
   }, [markers, initialRegion]);
 
   useEffect(() => {
-    if (markers.length >= 2 && mapRef.current) {
-      mapRef.current.fitToCoordinates(
-        markers.map((m) => ({ latitude: m.latitude, longitude: m.longitude })),
-        {
-          edgePadding: { top: 60, right: 60, bottom: 60, left: 60 },
-          animated: true,
-        },
-      );
+    if (markers.length < 2 || !mapRef.current) return;
+    if (autoFit === 'always') {
+      fitAll();
+      return;
     }
-  }, [markers]);
+    // once: canh khi có đủ điểm lần đầu, và một lần nữa khi đường đi vừa tải về
+    const hasRoutes = routes.some((r) => r.coordinates.length >= 2);
+    if (!fittedMarkers.current || (hasRoutes && !fittedRoutes.current)) {
+      fittedMarkers.current = true;
+      if (hasRoutes) fittedRoutes.current = true;
+      fitAll();
+    }
+  }, [markers, routes, autoFit, fitAll]);
 
   return (
     <MapView ref={mapRef} style={[styles.map, style]} initialRegion={region}>
+      {/* Đường đi vẽ dưới các ghim: viền đậm bên dưới, màu chính bên trên */}
+      {routes.map((r) =>
+        r.coordinates.length >= 2 ? (
+          <React.Fragment key={r.id}>
+            {!!r.outlineColor && !r.dashed && (
+              <Polyline
+                coordinates={r.coordinates}
+                strokeColor={r.outlineColor}
+                strokeWidth={(r.width ?? 5) + 3}
+                lineCap="round"
+                lineJoin="round"
+                zIndex={1}
+              />
+            )}
+            <Polyline
+              coordinates={r.coordinates}
+              strokeColor={r.color}
+              strokeWidth={r.width ?? 5}
+              lineCap="round"
+              lineJoin="round"
+              lineDashPattern={r.dashed ? [12, 10] : undefined}
+              zIndex={2}
+            />
+          </React.Fragment>
+        ) : null,
+      )}
       {markers.map((m) => (
         <Marker
           key={m.id}
@@ -75,28 +147,28 @@ export const AppMapView: React.FC<AppMapViewProps> = ({ initialRegion, markers =
           {m.type === 'restaurant' ? (
             <View style={styles.customPin}>
               <View style={[styles.pinCircle, { backgroundColor: '#EF4444' }]}>
-                <Ionicons name="storefront" size={16} color="#FFFFFF" />
+                <Icon name="storefront" size={16} tone="inverse" />
               </View>
               <View style={[styles.pinArrow, { borderTopColor: '#EF4444' }]} />
             </View>
           ) : m.type === 'delivery' ? (
             <View style={styles.customPin}>
               <View style={[styles.pinCircle, { backgroundColor: '#1EB9CE' }]}>
-                <Ionicons name="home" size={16} color="#FFFFFF" />
+                <Icon name="home" size={16} tone="inverse" />
               </View>
               <View style={[styles.pinArrow, { borderTopColor: '#1EB9CE' }]} />
             </View>
           ) : m.type === 'driver' ? (
             <View style={styles.customPin}>
               <View style={[styles.pinCircle, { backgroundColor: '#10B981' }]}>
-                <Ionicons name="bicycle" size={16} color="#FFFFFF" />
+                <Icon name="bicycle" size={16} tone="inverse" />
               </View>
               <View style={[styles.pinArrow, { borderTopColor: '#10B981' }]} />
             </View>
           ) : (
             <View style={styles.customPin}>
               <View style={[styles.pinCircle, { backgroundColor: m.pinColor || '#1EB9CE' }]}>
-                <Ionicons name="location" size={16} color="#FFFFFF" />
+                <Icon name="location" size={16} tone="inverse" />
               </View>
               <View style={[styles.pinArrow, { borderTopColor: m.pinColor || '#1EB9CE' }]} />
             </View>
@@ -105,7 +177,7 @@ export const AppMapView: React.FC<AppMapViewProps> = ({ initialRegion, markers =
       ))}
     </MapView>
   );
-};
+});
 
 const styles = StyleSheet.create({
   map: { width: '100%', height: '100%' },

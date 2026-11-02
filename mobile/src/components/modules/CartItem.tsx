@@ -2,7 +2,8 @@ import { memo } from 'react';
 import { Pressable, View } from 'react-native';
 import { CartLineItem } from '../../store/useCartStore';
 import { formatVND } from '../../utils/format';
-import { hasChoices } from '../../utils/menuPricing';
+import { hasChoices, linePrice, originalLinePrice } from '../../utils/menuPricing';
+import { Money } from './partner/PartnerKit';
 import { AppImage, Icon, QuantityStepper, Text } from '../ui';
 
 interface CartItemProps {
@@ -13,18 +14,19 @@ interface CartItemProps {
   onEditOptions?: (item: CartLineItem) => void;
 }
 
-/** Một dòng món trong giỏ: ảnh, tên, tuỳ chọn đã chọn, ghi chú, đơn giá và bộ chọn số lượng. */
+/** Một dòng món trong giỏ: ảnh, tên, tuỳ chọn đã chọn, ghi chú, thành tiền và bộ chọn số lượng. */
 export const CartItem = memo<CartItemProps>(({ item, onChangeQuantity, onEditOptions }) => {
-  const unit = item.unitPrice || item.menuItem.price;
-  const options = [item.size && `Size ${item.size}`, ...(item.toppings ?? []), item.spiciness].filter(Boolean);
+  const unit = item.unitPrice || linePrice(item.menuItem, item);
+  const original = originalLinePrice(item.menuItem, item);
+  const options = [item.size, ...(item.toppings ?? []), item.spiciness].filter(Boolean);
   const customizable = hasChoices(item.menuItem);
 
   return (
-    <View className="flex-row gap-3 rounded-lg bg-surface p-3 shadow-card">
-      <AppImage uri={item.menuItem.imageUrl} className="h-20 w-20 rounded-md" fallbackIcon="fast-food-outline" />
-      <View className="flex-1 justify-between gap-1">
+    <View className="flex-row gap-3 rounded-2xl bg-surface p-3 shadow-card">
+      <AppImage uri={item.menuItem.imageUrl} className="h-20 w-20 rounded-xl" fallbackIcon="fast-food-outline" />
+      <View className="flex-1 justify-between gap-1.5">
         <View className="gap-0.5">
-          <Text variant="body-lg" weight="semibold" numberOfLines={2}>
+          <Text variant="body" weight="bold" numberOfLines={2}>
             {item.menuItem.name}
           </Text>
           {options.length > 0 && (
@@ -33,7 +35,7 @@ export const CartItem = memo<CartItemProps>(({ item, onChangeQuantity, onEditOpt
             </Text>
           )}
           {!!item.note && (
-            <Text variant="caption" weight="regular" tone="muted" numberOfLines={2}>
+            <Text variant="caption" weight="regular" tone="muted" numberOfLines={1}>
               Ghi chú: {item.note}
             </Text>
           )}
@@ -43,19 +45,24 @@ export const CartItem = memo<CartItemProps>(({ item, onChangeQuantity, onEditOpt
               accessibilityLabel={`Đổi tuỳ chọn cho ${item.menuItem.name}`}
               onPress={() => onEditOptions(item)}
               hitSlop={8}
-              className="mt-1 flex-row items-center gap-1 self-start rounded-full bg-brand-50 px-2.5 py-1 active:opacity-70"
+              className="mt-0.5 flex-row items-center gap-0.5 self-start active:opacity-70"
             >
-              <Icon name="options-outline" size="xs" tone="brand" />
-              <Text variant="caption" weight="medium" tone="brand">
-                {options.length > 0 ? 'Đổi tuỳ chọn' : '+ Thêm topping, size'}
+              <Text variant="caption" weight="semibold" tone="brand">
+                {options.length > 0 ? 'Đổi tuỳ chọn' : 'Thêm size, topping'}
               </Text>
+              <Icon name="chevron-forward" size={13} tone="brand" />
             </Pressable>
           )}
         </View>
         <View className="flex-row items-center justify-between gap-2">
-          <Text variant="body-lg" weight="bold" tone="brand">
-            {formatVND(unit * item.quantity)}
-          </Text>
+          <View>
+            <Money amount={unit * item.quantity} variant="body-lg" tone="brand" />
+            {original > unit && (
+              <Text variant="micro" weight="regular" tone="muted" className="line-through">
+                {formatVND(original * item.quantity)}
+              </Text>
+            )}
+          </View>
           <QuantityStepper value={item.quantity} onChange={onChangeQuantity} size="sm" max={50} />
         </View>
       </View>

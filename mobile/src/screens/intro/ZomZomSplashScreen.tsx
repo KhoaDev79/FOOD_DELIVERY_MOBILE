@@ -1,4 +1,3 @@
-import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { StatusBar } from 'expo-status-bar';
 import React, { useEffect, useState } from 'react';
 import {
@@ -18,7 +17,7 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Gradient } from '../../components/ui';
+import { Gradient, Icon } from '../../components/ui';
 import { palette } from '../../theme';
 import { SplashLogo } from './SplashLogo';
 
@@ -161,7 +160,7 @@ export const ZomZomSplashScreen: React.FC<ZomZomSplashScreenProps> = ({ onFinish
             {/* Hàng riêng cho xe, nằm ngay trên thanh */}
             <View className="h-[26px]">
               <Animated.View style={animatedRiderStyle}>
-                <MaterialCommunityIcons name="moped" size={28} color={palette.intro.orange} />
+                <Icon name="bicycle" size={28} color={palette.intro.orange} />
               </Animated.View>
             </View>
             <View className="h-1.5 overflow-hidden rounded-full bg-white/25">

@@ -3,6 +3,7 @@ import {
   DriverLedgerEntry,
   DriverLedgerResponse,
   DriverProfile,
+  DriverReviewItem,
   DriverVerificationStatus,
   PaginatedResult,
   VehicleType,
@@ -52,6 +53,12 @@ export const driversApi = {
 
   updateLocation: (payload: UpdateDriverLocationPayload) =>
     apiClient.patch<any, { success: boolean }>('/drivers/me/location', payload),
+
+  getMyReviews: (params?: { page?: number; limit?: number }) =>
+    apiClient.get<any, PaginatedResult<DriverReviewItem>>('/drivers/me/reviews', { params }),
+
+  replyReview: (reviewId: string, reply: string) =>
+    apiClient.post<any, unknown>(`/drivers/me/reviews/${reviewId}/reply`, { reply }),
 
   // ===================== ADMIN ENDPOINTS =====================
   adminListDrivers: (params?: {

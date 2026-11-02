@@ -18,7 +18,18 @@ export interface DistanceMatrixResult {
   durationMinutes: number;
 }
 
+/** Đường đi để vẽ lên bản đồ. ESTIMATED: chỉ là đoạn thẳng nối 2 điểm. */
+export interface RouteResult extends DistanceMatrixResult {
+  source: 'ROAD' | 'ESTIMATED';
+  coordinates: { latitude: number; longitude: number }[];
+}
+
 export const mapsApi = {
+  getRoute: (originLat: number, originLng: number, destLat: number, destLng: number): Promise<RouteResult> =>
+    apiClient.get('/maps/route', {
+      params: { originLat, originLng, destLat, destLng },
+    }),
+
   reverseGeocode: (lat: number, lng: number): Promise<GeocodeResult> =>
     apiClient.get('/maps/reverse-geocode', { params: { lat, lng } }),
 

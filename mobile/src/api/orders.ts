@@ -1,10 +1,14 @@
 import { apiClient } from './client';
 import {
   CancelReason,
+  ChatChannel,
+  ChatConversation,
   DeliveryContactAttempt,
   DriverStats,
   FailedDeliveryReason,
   OrderDetail,
+  OrderMessage,
+  UnreadMessagesSummary,
   OrderQuoteResponse,
   OrderSummary,
   PaginatedResult,
@@ -93,4 +97,24 @@ export const ordersApi = {
     id: string,
     data: { rating: number; comment?: string; driverRating?: number; driverComment?: string },
   ) => apiClient.post<any, unknown>(`/orders/${id}/review`, data),
+
+  /** Tin nhắn chat theo đơn hàng (Khách - Tài xế - Quán) */
+  getMessages: (orderId: string, channel: ChatChannel) =>
+    apiClient.get<any, OrderMessage[]>(`/orders/${orderId}/messages`, { params: { channel } }),
+
+  sendMessage: (orderId: string, channel: ChatChannel, content: string) =>
+    apiClient.post<any, OrderMessage>(`/orders/${orderId}/messages`, { channel, content }),
+
+  /** Hộp thư: các cuộc trò chuyện kèm thông tin đơn, mới nhất trước. */
+  getConversations: (params: { page?: number; limit?: number } = {}) =>
+    apiClient.get<any, PaginatedResult<ChatConversation>>('/orders/messages/conversations', { params }),
+
+  /** Tin nhắn chưa đọc theo từng đơn của người đang đăng nhập. */
+  getUnreadMessages: () => apiClient.get<any, UnreadMessagesSummary>('/orders/messages/unread'),
+
+  markMessagesRead: (orderId: string, channel: ChatChannel) =>
+    apiClient.post<any, { orderId: string; channel: ChatChannel; lastReadAt: string }>(
+      `/orders/${orderId}/messages/read`,
+      { channel },
+    ),
 };

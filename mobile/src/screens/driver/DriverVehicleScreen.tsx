@@ -1,25 +1,28 @@
-import { Ionicons } from '@expo/vector-icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import React, { useState } from 'react';
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
+  Pressable,
   ScrollView,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { driversApi } from '../../api/drivers';
+import { NoticeCard, SectionCard } from '../../components/modules/partner/PartnerKit';
 import {
   Button,
+  cn,
   ConfirmDialog,
+  Icon,
   Input,
   Text,
   TopBar,
   useToast,
 } from '../../components/ui';
-import { FilterChip } from '../../components/ui/Chip';
 import { VehicleType } from '../../types/api';
+import { palette } from '../../theme';
 
 interface Props {
   navigation: any;
@@ -36,6 +39,7 @@ const VN_PLATE_REGEX = /^[0-9]{2}[- ]?[A-ZĐ]{1,2}[0-9]?[- ](?:[0-9]{4,5}|[0-9]{
 export const DriverVehicleScreen: React.FC<Props> = ({ navigation }) => {
   const queryClient = useQueryClient();
   const toast = useToast();
+  const insets = useSafeAreaInsets();
 
   const { data: profile, isLoading } = useQuery({
     queryKey: ['driver', 'me'],
@@ -67,6 +71,13 @@ export const DriverVehicleScreen: React.FC<Props> = ({ navigation }) => {
   const bankName = form.bankName ?? profile?.bankName ?? '';
   const bankAccountNumber = form.bankAccountNumber ?? profile?.bankAccountNumber ?? '';
   const bankAccountName = form.bankAccountName ?? profile?.bankAccountName ?? '';
+
+  // Chỉ để hiển thị cảnh báo: cùng điều kiện với hộp xác nhận khi lưu
+  const willNeedReview = Boolean(
+    profile &&
+      (vehicleType !== profile.vehicleType ||
+        licensePlate.trim().toUpperCase() !== (profile.licensePlate || '').toUpperCase()),
+  );
 
   const [plateError, setPlateError] = useState<string | null>(null);
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
@@ -147,7 +158,7 @@ export const DriverVehicleScreen: React.FC<Props> = ({ navigation }) => {
       <SafeAreaView edges={['top']} className="flex-1 bg-surface">
         <TopBar title="Thông tin phương tiện" onLeadingPress={() => navigation.goBack()} />
         <View className="flex-1 items-center justify-center p-6">
-          <ActivityIndicator size="large" color="#1EB9CE" />
+          <ActivityIndicator size="large" color={palette.brand['500']} />
           <Text variant="body" tone="secondary" className="mt-3">
             Đang tải dữ liệu hồ sơ...
           </Text>
@@ -157,50 +168,67 @@ export const DriverVehicleScreen: React.FC<Props> = ({ navigation }) => {
   }
 
   return (
-    <SafeAreaView edges={['top']} className="flex-1 bg-surface-subtle">
-      <TopBar title="Cập nhật phương tiện" onLeadingPress={() => navigation.goBack()} />
+    <View className="flex-1 bg-canvas-subtle">
+      <SafeAreaView edges={['top']} className="bg-canvas">
+        <TopBar title="Cập nhật phương tiện" onLeadingPress={() => navigation.goBack()} />
+      </SafeAreaView>
 
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         className="flex-1"
       >
-        <ScrollView className="flex-1" contentContainerStyle={{ padding: 16, paddingBottom: 120 }}>
-          {/* CẢNH BÁO QUY ĐỊNH DUYỆT */}
-          <View className="mb-4 flex-row items-start gap-3 rounded-2xl border border-warning-soft bg-warning-soft/20 p-4">
-            <Ionicons name="information-circle" size={22} color="#EAB308" />
-            <View className="flex-1">
-              <Text variant="caption" weight="bold" tone="warning">
-                Lưu ý quan trọng khi thay đổi thông tin:
-              </Text>
-              <Text variant="caption" tone="secondary" className="mt-1">
-                Nếu bạn thay đổi Loại xe hoặc Biển số xe, hệ thống sẽ tự động chuyển hồ sơ về trạng
-                thái CHỜ DUYỆT và chuyển ngoại tuyến để ban quản trị xác minh lại.
-              </Text>
-            </View>
-          </View>
+        <ScrollView
+          className="flex-1"
+          contentContainerStyle={{ padding: 16, paddingBottom: 24 }}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
+          {/* CẢNH BÁO DUYỆT LẠI: chỉ hiện khi đang đổi loại xe hoặc biển số */}
+          {willNeedReview && (
+            <NoticeCard
+              tone="warning"
+              icon="information-circle"
+              title="Hồ sơ sẽ cần duyệt lại"
+              message="Bạn đang đổi Loại xe hoặc Biển số. Sau khi lưu, hồ sơ chuyển về CHỜ DUYỆT và bạn tạm ngoại tuyến cho đến khi được xác minh."
+              className="mb-3"
+            />
+          )}
 
           {/* CHỌN LOẠI PHƯƠNG TIỆN */}
-          <View className="mb-4 rounded-2xl border border-line bg-surface p-4 shadow-card">
-            <Text variant="headline" weight="bold" className="mb-3">
-              Loại phương tiện
-            </Text>
-            <View className="flex-row items-center gap-2">
-              {VEHICLE_OPTIONS.map((opt) => (
-                <FilterChip
-                  key={opt.type}
-                  label={opt.label}
-                  selected={vehicleType === opt.type}
-                  onPress={() => setForm((prev) => ({ ...prev, vehicleType: opt.type }))}
-                />
-              ))}
+          <SectionCard title="Loại phương tiện" icon="bicycle" className="mb-3">
+            <View className="flex-row gap-2">
+              {VEHICLE_OPTIONS.map((opt) => {
+                const selected = vehicleType === opt.type;
+                return (
+                  <Pressable
+                    key={opt.type}
+                    accessibilityRole="radio"
+                    accessibilityState={{ selected }}
+                    onPress={() => setForm((prev) => ({ ...prev, vehicleType: opt.type }))}
+                    className={cn(
+                      'flex-1 items-center gap-1.5 rounded-xl border-2 py-3',
+                      selected ? 'border-brand-500 bg-brand-50' : 'border-line bg-surface',
+                    )}
+                  >
+                    <View
+                      className={cn(
+                        'h-10 w-10 items-center justify-center rounded-full',
+                        selected ? 'bg-brand-500' : 'bg-canvas-subtle',
+                      )}
+                    >
+                      <Icon name={opt.icon} size="md" tone={selected ? 'inverse' : 'secondary'} />
+                    </View>
+                    <Text variant="caption" weight={selected ? 'bold' : 'medium'} tone={selected ? 'brand' : 'secondary'}>
+                      {opt.label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
             </View>
-          </View>
+          </SectionCard>
 
           {/* THÔNG TIN CHI TIẾT XE */}
-          <View className="mb-4 gap-3.5 rounded-2xl border border-line bg-surface p-4 shadow-card">
-            <Text variant="headline" weight="bold">
-              Chi tiết phương tiện
-            </Text>
+          <SectionCard title="Chi tiết phương tiện" icon="car-sport" iconTone="accent" iconBox="bg-accent-50" className="mb-3">
 
             {vehicleType !== 'BICYCLE' && (
               <View>
@@ -254,13 +282,10 @@ export const DriverVehicleScreen: React.FC<Props> = ({ navigation }) => {
                 </View>
               )}
             </View>
-          </View>
+          </SectionCard>
 
           {/* LIÊN HỆ KHẨN CẤP */}
-          <View className="mb-4 gap-3.5 rounded-2xl border border-line bg-surface p-4 shadow-card">
-            <Text variant="headline" weight="bold">
-              Người liên hệ khẩn cấp
-            </Text>
+          <SectionCard title="Người liên hệ khẩn cấp" icon="call" iconTone="danger" iconBox="bg-danger-soft" className="mb-3">
 
             <Input
               label="Họ tên người thân"
@@ -276,13 +301,10 @@ export const DriverVehicleScreen: React.FC<Props> = ({ navigation }) => {
               value={emergencyContactPhone}
               onChangeText={(v) => setForm((prev) => ({ ...prev, emergencyContactPhone: v }))}
             />
-          </View>
+          </SectionCard>
 
           {/* TÀI KHOẢN NGÂN HÀNG (NHẬN DOANH THU) */}
-          <View className="mb-4 gap-3.5 rounded-2xl border border-line bg-surface p-4 shadow-card">
-            <Text variant="headline" weight="bold">
-              Tài khoản nhận doanh thu
-            </Text>
+          <SectionCard title="Tài khoản nhận doanh thu" icon="card" iconTone="success" iconBox="bg-success-soft">
 
             <Input
               label="Ngân hàng"
@@ -306,21 +328,24 @@ export const DriverVehicleScreen: React.FC<Props> = ({ navigation }) => {
               value={bankAccountName}
               onChangeText={(t) => setForm((prev) => ({ ...prev, bankAccountName: t.toUpperCase() }))}
             />
-          </View>
-
-          {/* NÚT LƯU */}
-          <View className="mt-2">
-            <Button
-              label="Lưu thông tin phương tiện"
-              variant="primary"
-              size="lg"
-              loading={updateMutation.isPending}
-              onPress={handleSave}
-            />
-          </View>
+          </SectionCard>
         </ScrollView>
-      </KeyboardAvoidingView>
 
+        {/* NÚT LƯU cố định ở đáy */}
+        <View
+          className="rounded-t-3xl bg-surface px-4 pt-3 shadow-float"
+          style={{ paddingBottom: Math.max(insets.bottom, 16) }}
+        >
+          <Button
+            label="Lưu thông tin phương tiện"
+            variant="primary"
+            size="lg"
+            leftIcon="save-outline"
+            loading={updateMutation.isPending}
+            onPress={handleSave}
+          />
+        </View>
+      </KeyboardAvoidingView>
       {/* HỘP XÁC NHẬN NẾU ĐỔI THÔNG TIN QUAN TRỌNG */}
       <ConfirmDialog
         visible={showConfirmDialog}
@@ -332,6 +357,6 @@ export const DriverVehicleScreen: React.FC<Props> = ({ navigation }) => {
         onConfirm={submitUpdate}
         onCancel={() => setShowConfirmDialog(false)}
       />
-    </SafeAreaView>
+    </View>
   );
 };

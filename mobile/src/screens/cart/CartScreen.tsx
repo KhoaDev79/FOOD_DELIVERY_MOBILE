@@ -1,14 +1,15 @@
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import React, { useState } from 'react';
-import { FlatList, View } from 'react-native';
+import { FlatList, Pressable, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { CartItem } from '../../components/modules/CartItem';
+import { CartSuggestions } from '../../components/modules/cart/CartSuggestions';
+import { Money } from '../../components/modules/partner/PartnerKit';
 import { DishOptionSheet } from '../../components/modules/restaurant/DishOptionSheet';
 import { AppImage, Button, ConfirmDialog, EmptyState, Icon, Text, TopBar } from '../../components/ui';
 import { CartLineItem, useCartStore } from '../../store/useCartStore';
 import { useAuthStore } from '../../store/useAuthStore';
 import { RootStackParamList } from '../../types/navigation';
-import { formatVND } from '../../utils/format';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Cart'>;
 
@@ -67,29 +68,40 @@ export const CartScreen: React.FC<Props> = ({ navigation }) => {
             data={items}
             // Dòng có tuỳ chọn được store nhận diện bằng id riêng; dòng thường dùng id món.
             keyExtractor={(i) => i.id ?? i.menuItem.id}
-            contentContainerClassName="gap-3 px-4 pb-6 pt-1"
+            contentContainerClassName="gap-3 px-4 pt-1"
+            contentContainerStyle={{ paddingBottom: 24 }}
             ListHeaderComponent={
-              <View className="mb-1 flex-row items-center gap-3 rounded-lg border border-brand-100 bg-surface p-3">
-                <AppImage
-                  uri={restaurant.imageUrl}
-                  className="h-12 w-12 rounded-md"
-                  fallbackIcon="storefront-outline"
-                />
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={`Xem thực đơn ${restaurant.name}`}
+                onPress={() => navigation.navigate('RestaurantDetail', { restaurantId: restaurant.id })}
+                className="mb-1 flex-row items-center gap-3 rounded-2xl bg-surface p-3 shadow-card active:opacity-90"
+              >
+                <AppImage uri={restaurant.imageUrl} className="h-12 w-12 rounded-xl" fallbackIcon="storefront-outline" />
                 <View className="flex-1">
-                  <Text variant="caption" weight="regular" tone="secondary">
-                    Đơn hàng từ
+                  <Text variant="micro" weight="medium" tone="muted">
+                    Đặt từ quán
                   </Text>
-                  <Text variant="body-lg" weight="semibold" numberOfLines={1}>
+                  <Text variant="body-lg" weight="bold" numberOfLines={1}>
                     {restaurant.name}
                   </Text>
                 </View>
-                <Button
-                  label="Thêm món"
-                  variant="secondary"
-                  size="sm"
-                  leftIcon="add"
-                  onPress={() => navigation.navigate('RestaurantDetail', { restaurantId: restaurant.id })}
-                />
+                <Icon name="chevron-forward" size="sm" tone="muted" />
+              </Pressable>
+            }
+            ListFooterComponent={
+              <View className="gap-3">
+              <CartSuggestions restaurant={restaurant} />
+              <Pressable
+                accessibilityRole="button"
+                onPress={() => navigation.navigate('RestaurantDetail', { restaurantId: restaurant.id })}
+                className="h-12 flex-row items-center justify-center gap-1.5 rounded-2xl border border-dashed border-brand-300 bg-brand-50/50 active:bg-brand-50"
+              >
+                <Icon name="add-circle" size="md" tone="brand" />
+                <Text variant="body" weight="semibold" tone="brand">
+                  Thêm món khác
+                </Text>
+              </Pressable>
               </View>
             }
             renderItem={({ item }) => (
@@ -105,26 +117,20 @@ export const CartScreen: React.FC<Props> = ({ navigation }) => {
           <SafeAreaView edges={['bottom']} className="border-t border-line-subtle bg-surface shadow-float">
             <View className="gap-3 px-4 pb-3 pt-3">
               <View className="flex-row items-end justify-between">
-                <View>
-                  <Text variant="body" tone="secondary">
+                <View className="gap-0.5">
+                  <Text variant="body" weight="semibold">
                     Tạm tính · {totalItems} món
                   </Text>
                   <View className="flex-row items-center gap-1">
-                    <Icon name="information-circle-outline" size={12} tone="muted" />
+                    <Icon name="bicycle-outline" size={13} tone="muted" />
                     <Text variant="caption" weight="regular" tone="muted">
-                      Phí giao hàng tính ở bước thanh toán
+                      Phí giao tính ở bước tiếp theo
                     </Text>
                   </View>
                 </View>
-                <Text variant="title" weight="bold" tone="brand">
-                  {formatVND(subtotal)}
-                </Text>
+                <Money amount={subtotal} variant="title" tone="brand" />
               </View>
-              <Button
-                label="Tiến hành đặt hàng"
-                rightIcon="arrow-forward"
-                onPress={handleCheckout}
-              />
+              <Button label="Tiến hành đặt hàng" rightIcon="arrow-forward" size="lg" onPress={handleCheckout} />
             </View>
           </SafeAreaView>
         </>

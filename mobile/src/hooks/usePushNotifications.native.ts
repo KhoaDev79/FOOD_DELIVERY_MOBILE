@@ -4,17 +4,37 @@ import { AndroidImportance } from 'expo-notifications';
 import { useEffect } from 'react';
 import { Platform } from 'react-native';
 import { usersApi } from '../api/users';
+import { openChat } from '../navigation/navigationRef';
 import { useAuthStore } from '../store/useAuthStore';
+import type { ChatChannel } from '../types/api';
+import { isSocketConnected } from './useSocket';
+
+const handledResponseIds = new Set<string>();
+
+const CHAT_CHANNELS: readonly ChatChannel[] = ['CUSTOMER_DRIVER', 'CUSTOMER_RESTAURANT', 'RESTAURANT_DRIVER'];
+
+/** Push tin nhắn chat hợp lệ phải có đơn và cuộc trò chuyện; push cũ không có kênh thì bỏ qua. */
+const isChatPush = (data: unknown): data is { type: 'order_chat'; orderId: string; channel: ChatChannel } =>
+  !!data &&
+  typeof data === 'object' &&
+  (data as { type?: unknown }).type === 'order_chat' &&
+  typeof (data as { orderId?: unknown }).orderId === 'string' &&
+  CHAT_CHANNELS.includes((data as { channel?: ChatChannel }).channel as ChatChannel);
 
 try {
   Notifications.setNotificationHandler({
-    handleNotification: async () => ({
-      shouldShowAlert: true,
-      shouldPlaySound: true,
-      shouldSetBadge: false,
-      shouldShowBanner: true,
-      shouldShowList: true,
-    }),
+    handleNotification: async (notification) => {
+      // App đang mở và socket đang nối: tin nhắn đã hiện bằng thông báo nổi trong app (ChatNotifier),
+      // không hiện thêm banner hệ thống để tránh báo trùng.
+      const inAppHandled = isChatPush(notification.request.content.data) && isSocketConnected();
+      return {
+        shouldShowAlert: !inAppHandled,
+        shouldPlaySound: !inAppHandled,
+        shouldSetBadge: false,
+        shouldShowBanner: !inAppHandled,
+        shouldShowList: true,
+      };
+    },
   });
 } catch {
   // Bỏ qua lỗi cấu hình notification handler nếu chạy trên môi trường không hỗ trợ
@@ -33,7 +53,7 @@ export function usePushNotifications() {
             name: 'Thông báo đơn hàng',
             importance: AndroidImportance.MAX,
             vibrationPattern: [0, 250, 250, 250],
-            lightColor: '#EE4D2D',
+            lightColor: '#FF7A30',
           });
         }
 
@@ -58,5 +78,25 @@ export function usePushNotifications() {
     }
 
     registerForPushNotificationsAsync();
+  }, [isAuthenticated]);
+
+  // Chạm vào push tin nhắn (app đang chạy nền hoặc vừa được mở từ push) -> mở đúng cuộc trò chuyện
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    const openFromResponse = (response: Notifications.NotificationResponse | null) => {
+      if (!response) return;
+      const id = response.notification.request.identifier;
+      // Mỗi lần chạm chỉ xử lý một lần; bỏ qua lần chạm cũ (getLastNotificationResponseAsync có thể trả lại nó)
+      const tooOld = Date.now() - response.notification.date > 2 * 60 * 1000;
+      if (handledResponseIds.has(id) || tooOld) return;
+      handledResponseIds.add(id);
+      const data = response.notification.request.content.data;
+      if (isChatPush(data)) openChat({ orderId: data.orderId, channel: data.channel });
+    };
+    Notifications.getLastNotificationResponseAsync()
+      .then(openFromResponse)
+      .catch(() => {});
+    const sub = Notifications.addNotificationResponseReceivedListener(openFromResponse);
+    return () => sub.remove();
   }, [isAuthenticated]);
 }

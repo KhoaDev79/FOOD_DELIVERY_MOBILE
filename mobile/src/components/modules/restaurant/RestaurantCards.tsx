@@ -11,7 +11,12 @@ import { formatDistance, formatVND } from '../../../utils/format';
 const useMeta = (r: Restaurant) => {
   const rawDist = formatDistance(r.distanceKm);
   const distance = rawDist ? `khoảng ${rawDist}` : null;
-  const time = r.distanceKm !== undefined ? estimateDeliveryTime(r.distanceKm) : null;
+  // Ưu tiên số backend tính (cùng công thức); không có thì tự tính từ khoảng cách chim bay
+  const time = r.estimatedMinutes
+    ? `${r.estimatedMinutes.min} - ${r.estimatedMinutes.max} phút`
+    : r.distanceKm !== undefined
+      ? estimateDeliveryTime(r.distanceKm, true)
+      : null;
   const fee = r.estimatedDeliveryFee !== undefined ? r.estimatedDeliveryFee : null;
   const rating =
     r.rating > 0 ? r.rating.toLocaleString('vi-VN', { minimumFractionDigits: 1, maximumFractionDigits: 1 }) : null;

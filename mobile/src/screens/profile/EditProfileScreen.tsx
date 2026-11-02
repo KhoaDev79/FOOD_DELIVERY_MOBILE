@@ -1,4 +1,3 @@
-import { Ionicons } from '@expo/vector-icons';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import * as ImagePicker from 'expo-image-picker';
 import React, { useState } from 'react';
@@ -12,7 +11,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { usersApi } from '../../api/users';
-import { Button, Input, Text, TopBar, useToast } from '../../components/ui';
+import { Button, Icon, Input, Text, TopBar, useToast } from '../../components/ui';
 import { useUpdateProfile, useUploadAvatar } from '../../services/useUser';
 import { useAuthStore } from '../../store/useAuthStore';
 import { RootStackParamList } from '../../types/navigation';
@@ -159,11 +158,11 @@ export const EditProfileScreen: React.FC<Props> = ({ navigation }) => {
                 />
               ) : (
                 <View className="h-24 w-24 items-center justify-center rounded-full bg-canvas-subtle border border-line">
-                  <Ionicons name="person" size={48} color="#9A9EA5" />
+                  <Icon name="person" size={48} tone="muted" />
                 </View>
               )}
               <View className="absolute bottom-0 right-0 h-8 w-8 items-center justify-center rounded-full bg-brand-500 shadow-card">
-                <Ionicons name="camera" size={16} color="#FFFFFF" />
+                <Icon name="camera" size={16} tone="inverse" />
               </View>
             </Pressable>
             <Text variant="caption" tone="secondary" className="mt-2">

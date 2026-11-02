@@ -6,20 +6,33 @@ import React, { useMemo, useState } from 'react';
 import { Pressable, RefreshControl, ScrollView, Switch, View } from 'react-native';
 import { restaurantsApi } from '../../api/restaurants';
 import {
+  draftFromOptions,
+  draftToInput,
+  EMPTY_OPTIONS_DRAFT,
+  MenuOptionsEditor,
+  MoneyInput,
+  optionsSummary,
+  OptionsDraft,
+  validateDraft,
+} from '../../components/modules/owner/MenuOptionsEditor';
+import { OwnerRestaurantSelector } from '../../components/modules/owner/OwnerRestaurantSelector';
+import {
   AppImage,
   BottomSheet,
   Button,
+  cn,
   ConfirmDialog,
   EmptyState,
   Icon,
-  IconButton,
   Input,
   LoadingSpinner,
+  SearchBar,
   TAB_BAR_CLEARANCE,
   TabHeader,
   Text,
   useToast,
 } from '../../components/ui';
+import { useOwnerRestaurants } from '../../hooks/useOwnerRestaurants';
 import { palette } from '../../theme';
 import { MenuItem } from '../../types/api';
 import { formatVND } from '../../utils/format';
@@ -30,19 +43,30 @@ const MAX_PRICE = 10_000_000; // giới hạn của backend (CreateMenuItemDto)
 
 type SheetMode = { kind: 'create' } | { kind: 'edit'; item: MenuItem } | null;
 
+const normalize = (s: string) =>
+  s
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/đ/g, 'd')
+    .replace(/Đ/g, 'D')
+    .toLowerCase();
+
 export const OwnerMenuScreen: React.FC = () => {
   const queryClient = useQueryClient();
   const isFocused = useIsFocused();
   const toast = useToast();
 
-  // Bảng thêm/sửa món (gộp hai trạng thái hiển thị cũ thành một)
+  // Bảng thêm/sửa món
   const [sheet, setSheet] = useState<SheetMode>(null);
   const [name, setName] = useState('');
-  const [price, setPrice] = useState('');
+  const [price, setPrice] = useState(''); // chỉ chữ số
   const [description, setDescription] = useState('');
   const [selectedCatId, setSelectedCatId] = useState<string | undefined>(undefined);
   const [imageUrl, setImageUrl] = useState('');
+  const [showImageUrl, setShowImageUrl] = useState(false);
   const [discount, setDiscount] = useState(0); // % giảm giá: 0, 5, 7, 10, 15, 20
+  const [available, setAvailable] = useState(true);
+  const [optionsDraft, setOptionsDraft] = useState<OptionsDraft>(EMPTY_OPTIONS_DRAFT);
   const [formError, setFormError] = useState<{ name?: string; price?: string; submit?: string }>({});
 
   // Bảng thêm nhóm
@@ -50,16 +74,16 @@ export const OwnerMenuScreen: React.FC = () => {
   const [catName, setCatName] = useState('');
   const [catError, setCatError] = useState<string | undefined>();
 
+  // Tìm kiếm & lọc theo nhóm
+  const [search, setSearch] = useState('');
+  const [catFilter, setCatFilter] = useState<string>('ALL');
+
   // Xác nhận xoá món (ConfirmDialog chạy được cả trên web)
   const [deleting, setDeleting] = useState<MenuItem | null>(null);
   const [refreshing, setRefreshing] = useState(false);
 
   // 1. Quán
-  const { data: restaurants, isLoading: loadingRest } = useQuery({
-    queryKey: ['owner', 'restaurants'],
-    queryFn: () => restaurantsApi.getMine(),
-  });
-  const restaurant = restaurants?.[0];
+  const { restaurants, restaurant, isLoading: loadingRest } = useOwnerRestaurants();
 
   // 2. Thực đơn của quán (backend trả cả món đã tắt "còn món", chỉ bỏ món đã xoá)
   const {
@@ -86,7 +110,8 @@ export const OwnerMenuScreen: React.FC = () => {
       toast('Đã thêm món mới vào thực đơn.', 'success');
     },
     onError: (err: any) => {
-      setFormError({ submit: err.response?.data?.message || 'Không thể tạo món mới' });
+      const msg = err.response?.data?.message;
+      setFormError({ submit: (Array.isArray(msg) ? msg.join('\n') : msg) || 'Không thể tạo món mới' });
     },
   });
 
@@ -99,7 +124,8 @@ export const OwnerMenuScreen: React.FC = () => {
       toast('Đã lưu thay đổi của món.', 'success');
     },
     onError: (err: any) => {
-      setFormError({ submit: err.response?.data?.message || 'Không thể cập nhật món ăn' });
+      const msg = err.response?.data?.message;
+      setFormError({ submit: (Array.isArray(msg) ? msg.join('\n') : msg) || 'Không thể cập nhật món ăn' });
     },
   });
 
@@ -159,9 +185,12 @@ export const OwnerMenuScreen: React.FC = () => {
     setName('');
     setPrice('');
     setDescription('');
-    setSelectedCatId(undefined);
+    setSelectedCatId(catFilter !== 'ALL' && catFilter !== 'none' ? catFilter : undefined);
     setImageUrl('');
+    setShowImageUrl(false);
     setDiscount(0);
+    setAvailable(true);
+    setOptionsDraft(EMPTY_OPTIONS_DRAFT);
     setFormError({});
     setSheet({ kind: 'create' });
   };
@@ -172,9 +201,12 @@ export const OwnerMenuScreen: React.FC = () => {
     setDescription(item.description || '');
     setSelectedCatId(item.categoryId || undefined);
     setImageUrl(item.imageUrl || '');
+    setShowImageUrl(false);
     // Mức giảm đang áp dụng; nếu không khớp mức nào (dữ liệu cũ) thì chọn mức gần nhất
     const current = discountPercent(item);
     setDiscount(DISCOUNT_OPTIONS.reduce((best, p) => (Math.abs(p - current) < Math.abs(best - current) ? p : best), 0));
+    setAvailable(item.isAvailable);
+    setOptionsDraft(draftFromOptions(item.options));
     setFormError({});
     setSheet({ kind: 'edit', item });
   };
@@ -205,15 +237,18 @@ export const OwnerMenuScreen: React.FC = () => {
   const handleSaveItem = () => {
     const errors: typeof formError = {};
     if (!name.trim()) errors.name = 'Vui lòng nhập tên món';
-    const numPrice = parseInt(price.replace(/\D/g, ''), 10);
-    if (!price.trim() || isNaN(numPrice)) errors.price = 'Vui lòng nhập giá bán';
+    const numPrice = parseInt(price, 10);
+    if (!price || isNaN(numPrice)) errors.price = 'Vui lòng nhập giá bán';
     else if (numPrice < MIN_PRICE) errors.price = 'Giá tối thiểu là 1.000 ₫';
     else if (numPrice > MAX_PRICE) errors.price = 'Giá tối đa là 10.000.000 ₫';
+    const optionsError = validateDraft(optionsDraft);
+    if (optionsError) errors.submit = optionsError;
     setFormError(errors);
-    if (errors.name || errors.price) return;
+    if (errors.name || errors.price || errors.submit) return;
 
+    const options = draftToInput(optionsDraft);
     if (sheet?.kind === 'edit') {
-      // Gửi chuỗi rỗng để xoá được mô tả/ảnh (undefined = giữ nguyên ở backend)
+      // Gửi chuỗi rỗng để xoá được mô tả/ảnh, null để xoá tuỳ chọn (undefined = giữ nguyên ở backend)
       updateItemMutation.mutate({
         id: sheet.item.id,
         data: {
@@ -223,6 +258,8 @@ export const OwnerMenuScreen: React.FC = () => {
           categoryId: selectedCatId || undefined,
           imageUrl: imageUrl.trim(),
           discountPercent: discount,
+          isAvailable: available,
+          options,
         },
       });
     } else {
@@ -233,6 +270,8 @@ export const OwnerMenuScreen: React.FC = () => {
         categoryId: selectedCatId || undefined,
         imageUrl: imageUrl.trim() || undefined,
         discountPercent: discount,
+        isAvailable: available,
+        ...(options ? { options } : {}),
       });
     }
   };
@@ -246,11 +285,33 @@ export const OwnerMenuScreen: React.FC = () => {
     createCategoryMutation.mutate({ name: catName.trim() });
   };
 
+  const sections = useMemo(
+    () => [
+      ...(detail?.categories ?? []).map((c) => ({ id: c.id, title: c.name, items: c.menuItems ?? [] })),
+      ...(detail?.uncategorizedItems?.length
+        ? [{ id: 'none', title: 'Chưa phân nhóm', items: detail.uncategorizedItems }]
+        : []),
+    ],
+    [detail],
+  );
+
   const stats = useMemo(() => {
-    const all = [...(detail?.categories?.flatMap((c) => c.menuItems ?? []) ?? []), ...(detail?.uncategorizedItems ?? [])];
+    const all = sections.flatMap((s) => s.items);
     const available = all.filter((m) => m.isAvailable).length;
     return { total: all.length, available, soldOut: all.length - available };
-  }, [detail]);
+  }, [sections]);
+
+  // Lọc theo nhóm đang chọn và từ khoá (không dấu)
+  const visibleSections = useMemo(() => {
+    const needle = normalize(search.trim());
+    return sections
+      .filter((s) => catFilter === 'ALL' || s.id === catFilter)
+      .map((s) => ({
+        ...s,
+        items: needle ? s.items.filter((m) => normalize(m.name).includes(needle)) : s.items,
+      }))
+      .filter((s) => !needle || s.items.length > 0);
+  }, [sections, catFilter, search]);
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -274,12 +335,8 @@ export const OwnerMenuScreen: React.FC = () => {
 
   const isEdit = sheet?.kind === 'edit';
   const saving = createItemMutation.isPending || updateItemMutation.isPending;
-  const sections = [
-    ...(detail.categories ?? []).map((c) => ({ id: c.id, title: c.name, items: c.menuItems ?? [] })),
-    ...(detail.uncategorizedItems?.length
-      ? [{ id: 'none', title: 'Chưa phân nhóm', items: detail.uncategorizedItems }]
-      : []),
-  ];
+  const numPrice = parseInt(price, 10) || 0;
+  const salePrice = numPrice ? discountPriceFor(numPrice, discount) : null;
 
   // Xác nhận xoá món: ConfirmDialog chạy được cả trên web (Alert.alert có nút thì không).
   const confirmDelete = (
@@ -302,44 +359,84 @@ export const OwnerMenuScreen: React.FC = () => {
       <ScrollView
         contentContainerClassName={TAB_BAR_CLEARANCE}
         showsVerticalScrollIndicator={false}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[palette.brand['500']]} />}
+        keyboardShouldPersistTaps="handled"
+        stickyHeaderIndices={[1]}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={palette.brand['500']}
+            colors={[palette.brand['500']]}
+          />
+        }
       >
-        <TabHeader title="Thực đơn" subtitle={restaurant.name}>
-          <View className="flex-row gap-2">
-            <Stat label="Tổng món" value={stats.total} />
-            <Stat label="Đang bán" value={stats.available} />
-            <Stat label="Hết món" value={stats.soldOut} />
-          </View>
-          <View className="flex-row gap-2">
+        <TabHeader
+          title="Thực đơn"
+          subtitle={<OwnerRestaurantSelector restaurants={restaurants} currentRestaurant={restaurant} />}
+          trailing={
             <Pressable
               accessibilityRole="button"
+              accessibilityLabel="Thêm món mới"
               onPress={openCreate}
-              className="min-h-touch flex-[2] flex-row items-center justify-center gap-2 rounded-full bg-surface active:opacity-85"
+              className="h-10 flex-row items-center gap-1.5 rounded-full bg-surface px-4 active:opacity-85"
             >
-              <Icon name="add-circle" size="md" tone="brand" />
+              <Icon name="add" size="md" tone="brand" />
               <Text variant="body" weight="bold" tone="brand">
                 Thêm món
               </Text>
             </Pressable>
+          }
+        >
+          {/* Số liệu nhanh dạng chip */}
+          <View className="flex-row flex-wrap gap-2">
+            <HeaderChip icon="restaurant" label={`${stats.total} món`} />
+            <HeaderChip icon="checkmark-circle" label={`${stats.available} đang bán`} dot="bg-success" />
+            {stats.soldOut > 0 && <HeaderChip icon="remove-circle" label={`${stats.soldOut} hết món`} dot="bg-warning" />}
+          </View>
+        </TabHeader>
+
+        {/* Tìm kiếm + nhóm món (dính trên cùng khi cuộn) */}
+        <View className="gap-2.5 bg-canvas-subtle pb-2 pt-3">
+          <View className="px-4">
+            <SearchBar
+              value={search}
+              onChangeText={setSearch}
+              onClear={() => setSearch('')}
+              placeholder="Tìm món trong thực đơn"
+              autoCorrect={false}
+            />
+          </View>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerClassName="gap-2 px-4">
+            <CategoryChip label="Tất cả" count={stats.total} selected={catFilter === 'ALL'} onPress={() => setCatFilter('ALL')} />
+            {sections.map((s) => (
+              <CategoryChip
+                key={s.id}
+                label={s.title}
+                count={s.items.length}
+                selected={catFilter === s.id}
+                onPress={() => setCatFilter(s.id)}
+              />
+            ))}
             <Pressable
               accessibilityRole="button"
+              accessibilityLabel="Thêm nhóm món"
               onPress={() => {
                 setCatName('');
                 setCatError(undefined);
                 setCatSheet(true);
               }}
-              className="min-h-touch flex-1 flex-row items-center justify-center gap-2 rounded-full border border-surface/40 active:opacity-80"
+              className="h-9 flex-row items-center gap-1 rounded-full border border-dashed border-brand-300 px-3 active:bg-brand-50"
             >
-              <Icon name="folder-open-outline" size="md" tone="inverse" />
-              <Text variant="body" weight="semibold" tone="inverse">
-                Thêm nhóm
+              <Icon name="add" size="sm" tone="brand" />
+              <Text variant="caption" weight="semibold" tone="brand">
+                Nhóm mới
               </Text>
             </Pressable>
-          </View>
-        </TabHeader>
+          </ScrollView>
+        </View>
 
-        <View className="gap-6 px-4 pt-5">
-          {sections.length === 0 || stats.total === 0 ? (
+        <View className="gap-5 px-4 pt-2">
+          {stats.total === 0 ? (
             <EmptyState
               variant="card"
               icon="restaurant-outline"
@@ -348,31 +445,36 @@ export const OwnerMenuScreen: React.FC = () => {
               actionLabel="Thêm món"
               onAction={openCreate}
             />
+          ) : visibleSections.length === 0 ? (
+            <EmptyState icon="search-outline" title="Không tìm thấy món" description="Thử từ khoá khác hoặc chọn nhóm khác." />
           ) : null}
 
-          {sections.map((section) =>
-            section.items.length === 0 && section.id !== 'none' ? (
-              <View key={section.id} className="gap-2">
-                <SectionTitle title={section.title} count={0} />
-                <Text variant="caption" tone="muted" className="px-1">
-                  Nhóm này chưa có món. Khi thêm món, chọn nhóm "{section.title}".
+          {visibleSections.map((section) => (
+            <View key={section.id} className="gap-2.5">
+              <View className="flex-row items-center gap-2 px-1">
+                <Text variant="headline" weight="bold" accessibilityRole="header" className="flex-1" numberOfLines={1}>
+                  {section.title}
+                </Text>
+                <Text variant="caption" tone="muted">
+                  {section.items.length} món
                 </Text>
               </View>
-            ) : (
-              <View key={section.id} className="gap-2.5">
-                <SectionTitle title={section.title} count={section.items.length} />
-                {section.items.map((item) => (
+              {section.items.length === 0 ? (
+                <Text variant="caption" weight="regular" tone="muted" className="px-1">
+                  Nhóm này chưa có món. Khi thêm món, chọn nhóm "{section.title}".
+                </Text>
+              ) : (
+                section.items.map((item) => (
                   <MenuItemCard
                     key={item.id}
                     item={item}
                     onEdit={() => openEdit(item)}
-                    onDelete={() => setDeleting(item)}
                     onToggle={(val) => toggleAvailableMutation.mutate({ id: item.id, isAvailable: val })}
                   />
-                ))}
-              </View>
-            ),
-          )}
+                ))
+              )}
+            </View>
+          ))}
         </View>
       </ScrollView>
 
@@ -391,9 +493,9 @@ export const OwnerMenuScreen: React.FC = () => {
             <View className="flex-row gap-2">
               {sheet?.kind === 'edit' && (
                 <Button
-                  label="Xoá món"
+                  label="Xoá"
                   leftIcon="trash-outline"
-                  variant="outline"
+                  variant="dangerSoft"
                   size="lg"
                   disabled={saving}
                   onPress={() => setDeleting(sheet.item)}
@@ -412,61 +514,80 @@ export const OwnerMenuScreen: React.FC = () => {
           </View>
         }
       >
-        <ScrollView keyboardShouldPersistTaps="handled" contentContainerClassName="gap-4 pb-4">
+        <ScrollView keyboardShouldPersistTaps="handled" contentContainerClassName="gap-5 pb-4" showsVerticalScrollIndicator={false}>
           {/* Ảnh món */}
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={imageUrl ? 'Đổi ảnh món' : 'Chọn ảnh món'}
-            onPress={handlePickImage}
-            className="active:opacity-85"
-          >
-            <AppImage uri={imageUrl} className="h-40 w-full rounded-xl" fallbackIcon="image-outline">
-              <View className="absolute bottom-2 right-2 flex-row items-center gap-1.5 rounded-full bg-scrim px-3 py-1.5">
-                <Icon name="camera-outline" size="sm" tone="inverse" />
-                <Text variant="caption" weight="semibold" tone="inverse">
-                  {imageUrl ? 'Đổi ảnh' : 'Chọn ảnh từ máy'}
+          <View className="gap-1.5">
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={imageUrl ? 'Đổi ảnh món' : 'Chọn ảnh món'}
+              onPress={handlePickImage}
+              className="active:opacity-85"
+            >
+              <AppImage uri={imageUrl} className="h-44 w-full rounded-2xl" fallbackIcon="image-outline">
+                <View className="absolute bottom-2.5 right-2.5 flex-row items-center gap-1.5 rounded-full bg-scrim px-3 py-1.5">
+                  <Icon name="camera-outline" size="sm" tone="inverse" />
+                  <Text variant="caption" weight="semibold" tone="inverse">
+                    {imageUrl ? 'Đổi ảnh' : 'Chọn ảnh từ máy'}
+                  </Text>
+                </View>
+              </AppImage>
+            </Pressable>
+            <View className="flex-row items-center justify-between px-1">
+              <Text variant="micro" weight="regular" tone="muted">
+                Ảnh ngang 4:3, rõ món, nền sạch giúp khách đặt nhiều hơn
+              </Text>
+              <Pressable hitSlop={8} onPress={() => setShowImageUrl((v) => !v)}>
+                <Text variant="micro" weight="semibold" tone="brand">
+                  {showImageUrl ? 'Ẩn link ảnh' : 'Dán link ảnh'}
                 </Text>
-              </View>
-            </AppImage>
-          </Pressable>
+              </Pressable>
+            </View>
+            {showImageUrl && (
+              <Input
+                placeholder="https://..."
+                autoCapitalize="none"
+                value={imageUrl.startsWith('data:') ? '' : imageUrl}
+                onChangeText={setImageUrl}
+              />
+            )}
+          </View>
 
-          <Input
-            label="Tên món *"
-            placeholder="VD: Bún chả đặc biệt"
-            value={name}
-            onChangeText={setName}
-            error={formError.name}
-          />
-          <Input
-            label="Giá bán (₫) *"
-            placeholder="VD: 55000"
-            keyboardType="number-pad"
-            value={price}
-            onChangeText={(t) => setPrice(t.replace(/\D/g, ''))}
-            error={formError.price}
-            hint={price && !formError.price ? formatVND(parseInt(price, 10) || 0) : undefined}
-          />
-          <Input
-            label="Mô tả"
-            placeholder="VD: Thịt nướng than hoa, nước mắm chua ngọt"
-            value={description}
-            onChangeText={setDescription}
-            multiline
-          />
-          <Input
-            label="Hoặc dán đường dẫn ảnh"
-            placeholder="https://..."
-            autoCapitalize="none"
-            value={imageUrl.startsWith('data:') ? '' : imageUrl}
-            onChangeText={setImageUrl}
-          />
+          {/* Thông tin cơ bản */}
+          <View className="gap-4">
+            <Input label="Tên món *" placeholder="VD: Bún chả đặc biệt" value={name} onChangeText={setName} error={formError.name} />
+            <View className="gap-1.5">
+              <Text variant="caption" weight="medium" tone="secondary">
+                Giá bán *
+              </Text>
+              <MoneyInput
+                value={price}
+                onChange={setPrice}
+                placeholder="VD: 55.000"
+                accessibilityLabel="Giá bán"
+                error={!!formError.price}
+                large
+              />
+              {!!formError.price && (
+                <Text variant="caption" tone="danger">
+                  {formError.price}
+                </Text>
+              )}
+            </View>
+            <Input
+              label="Mô tả"
+              placeholder="VD: Thịt nướng than hoa, nước mắm chua ngọt"
+              value={description}
+              onChangeText={setDescription}
+              multiline
+            />
+          </View>
 
           {/* Giảm giá */}
           <View className="gap-2">
-            <Text variant="caption" tone="secondary">
+            <Text variant="caption" weight="medium" tone="secondary">
               Giảm giá
             </Text>
-            <View className="flex-row flex-wrap gap-2">
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerClassName="gap-2">
               {DISCOUNT_OPTIONS.map((p) => {
                 const selected = discount === p;
                 return (
@@ -476,46 +597,46 @@ export const OwnerMenuScreen: React.FC = () => {
                     accessibilityState={{ selected }}
                     accessibilityLabel={p ? `Giảm ${p} phần trăm` : 'Không giảm giá'}
                     onPress={() => setDiscount(p)}
-                    className={`min-h-touch min-w-[56px] items-center justify-center rounded-full border px-3 active:opacity-75 ${
-                      selected ? (p ? 'border-accent-500 bg-accent-50' : 'border-brand-500 bg-brand-50') : 'border-line bg-surface'
-                    }`}
+                    className={cn(
+                      'h-10 min-w-[60px] items-center justify-center rounded-full border px-3.5 active:opacity-75',
+                      selected ? (p ? 'border-accent-500 bg-accent-50' : 'border-brand-500 bg-brand-50') : 'border-line bg-surface',
+                    )}
                   >
-                    <Text
-                      variant="body"
-                      weight={selected ? 'bold' : 'medium'}
-                      tone={selected ? (p ? 'accent' : 'brand') : 'default'}
-                    >
-                      {p ? `${p}%` : 'Không giảm'}
+                    <Text variant="body" weight={selected ? 'bold' : 'medium'} tone={selected ? (p ? 'accent' : 'brand') : 'default'}>
+                      {p ? `-${p}%` : 'Không giảm'}
                     </Text>
                   </Pressable>
                 );
               })}
-            </View>
-            {(() => {
-              const base = parseInt(price, 10);
-              const sale = base ? discountPriceFor(base, discount) : null;
-              if (!discount) return null;
-              return (
-                <View className="flex-row items-center gap-2 rounded-lg bg-accent-50 px-3 py-2">
-                  <Icon name="pricetag-outline" size="sm" tone="accent" />
-                  <Text variant="caption" className="flex-1">
-                    {sale
-                      ? `Khách trả ${formatVND(sale)} thay vì ${formatVND(base)} (bớt ${formatVND(base - sale)})`
-                      : 'Nhập giá bán để xem giá sau giảm'}
-                  </Text>
-                </View>
-              );
-            })()}
+            </ScrollView>
+            {!!discount && (
+              <View className="flex-row items-center gap-2 rounded-xl bg-accent-50 px-3 py-2.5">
+                <Icon name="pricetag-outline" size="sm" tone="accent" />
+                <Text variant="caption" className="flex-1">
+                  {salePrice ? (
+                    <>
+                      Khách trả{' '}
+                      <Text variant="caption" weight="bold" tone="accent">
+                        {formatVND(salePrice)}
+                      </Text>{' '}
+                      thay vì {formatVND(numPrice)}
+                    </>
+                  ) : (
+                    'Nhập giá bán để xem giá sau giảm'
+                  )}
+                </Text>
+              </View>
+            )}
           </View>
 
           {/* Nhóm món */}
           <View className="gap-2">
-            <Text variant="caption" tone="secondary">
+            <Text variant="caption" weight="medium" tone="secondary">
               Nhóm món
             </Text>
             {(detail.categories?.length ?? 0) === 0 ? (
-              <Text variant="caption" tone="muted">
-                Chưa có nhóm nào. Dùng nút "Thêm nhóm" ở đầu trang để tạo.
+              <Text variant="caption" weight="regular" tone="muted">
+                Chưa có nhóm nào. Dùng nút "Nhóm mới" trong thực đơn để tạo.
               </Text>
             ) : (
               <View className="flex-row flex-wrap gap-2">
@@ -528,9 +649,10 @@ export const OwnerMenuScreen: React.FC = () => {
                       accessibilityState={{ selected }}
                       // Khi sửa món, backend không cho bỏ nhóm (chỉ đổi sang nhóm khác)
                       onPress={() => setSelectedCatId(selected && !isEdit ? undefined : cat.id)}
-                      className={`min-h-touch justify-center rounded-full border px-4 active:opacity-75 ${
-                        selected ? 'border-brand-500 bg-brand-50' : 'border-line bg-surface'
-                      }`}
+                      className={cn(
+                        'h-10 justify-center rounded-full border px-4 active:opacity-75',
+                        selected ? 'border-brand-500 bg-brand-50' : 'border-line bg-surface',
+                      )}
                     >
                       <Text variant="caption" weight={selected ? 'bold' : 'medium'} tone={selected ? 'brand' : 'default'}>
                         {cat.name}
@@ -540,6 +662,35 @@ export const OwnerMenuScreen: React.FC = () => {
                 })}
               </View>
             )}
+          </View>
+
+          {/* Size / topping / mức */}
+          <MenuOptionsEditor
+            value={optionsDraft}
+            onChange={setOptionsDraft}
+            basePrice={salePrice ?? numPrice}
+          />
+
+          {/* Còn món */}
+          <View className="flex-row items-center gap-3 rounded-2xl border border-line-subtle bg-surface p-3.5">
+            <View className={cn('h-10 w-10 items-center justify-center rounded-full', available ? 'bg-success-soft' : 'bg-canvas-subtle')}>
+              <Icon name={available ? 'checkmark-circle' : 'remove-circle'} size="md" tone={available ? 'success' : 'muted'} />
+            </View>
+            <View className="flex-1">
+              <Text variant="body" weight="semibold">
+                {available ? 'Đang bán' : 'Tạm hết món'}
+              </Text>
+              <Text variant="micro" weight="regular" tone="muted">
+                {available ? 'Khách đặt được món này' : 'Món vẫn hiện nhưng khách không đặt được'}
+              </Text>
+            </View>
+            <Switch
+              accessibilityLabel={available ? 'Chuyển sang tạm hết món' : 'Mở bán lại món'}
+              value={available}
+              onValueChange={setAvailable}
+              trackColor={{ false: palette.line.DEFAULT, true: palette.success.DEFAULT }}
+              thumbColor={palette.surface}
+            />
           </View>
         </ScrollView>
         {!!sheet && confirmDelete}
@@ -580,100 +731,119 @@ export const OwnerMenuScreen: React.FC = () => {
   );
 };
 
-const Stat: React.FC<{ label: string; value: number }> = ({ label, value }) => (
-  <View className="flex-1 rounded-lg bg-surface/15 px-3 py-2.5">
-    <Text variant="title" weight="bold" tone="inverse">
-      {value}
-    </Text>
-    <Text variant="caption" tone="inverse" className="opacity-85">
+const HeaderChip: React.FC<{ icon: 'restaurant' | 'checkmark-circle' | 'remove-circle'; label: string; dot?: string }> = ({
+  icon,
+  label,
+  dot,
+}) => (
+  <View className="flex-row items-center gap-1.5 rounded-full bg-surface/20 px-3 py-1.5">
+    {dot ? <View className={cn('h-2 w-2 rounded-full', dot)} /> : <Icon name={icon} size={14} tone="inverse" />}
+    <Text variant="caption" weight="semibold" tone="inverse">
       {label}
     </Text>
   </View>
 );
 
-const SectionTitle: React.FC<{ title: string; count: number }> = ({ title, count }) => (
-  <View className="flex-row items-center gap-2 px-1">
-    <Text variant="headline" accessibilityRole="header" className="flex-1" numberOfLines={1}>
-      {title}
+const CategoryChip: React.FC<{ label: string; count: number; selected: boolean; onPress: () => void }> = ({
+  label,
+  count,
+  selected,
+  onPress,
+}) => (
+  <Pressable
+    accessibilityRole="button"
+    accessibilityState={{ selected }}
+    onPress={onPress}
+    className={cn(
+      'h-9 flex-row items-center gap-1.5 rounded-full border px-3.5 active:opacity-80',
+      selected ? 'border-brand-500 bg-brand-500' : 'border-line bg-surface',
+    )}
+  >
+    <Text variant="caption" weight={selected ? 'bold' : 'medium'} tone={selected ? 'inverse' : 'default'} numberOfLines={1}>
+      {label}
     </Text>
-    <View className="rounded-full bg-surface px-2.5 py-0.5">
-      <Text variant="caption" tone="secondary">
-        {count} món
-      </Text>
-    </View>
-  </View>
+    <Text variant="micro" weight="semibold" tone={selected ? 'inverse' : 'muted'}>
+      {count}
+    </Text>
+  </Pressable>
 );
 
 const MenuItemCard: React.FC<{
   item: MenuItem;
   onEdit: () => void;
-  onDelete: () => void;
   onToggle: (value: boolean) => void;
-}> = ({ item, onEdit, onDelete, onToggle }) => (
-  <View className="flex-row items-center gap-3 rounded-xl bg-surface p-3 shadow-card">
+}> = ({ item, onEdit, onToggle }) => {
+  const pct = discountPercent(item);
+  const summary = optionsSummary(item.options);
+  return (
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={`Sửa món ${item.name}`}
       onPress={onEdit}
-      className="flex-1 flex-row items-center gap-3 active:opacity-75"
+      className="flex-row gap-3 rounded-2xl bg-surface p-3 shadow-card active:opacity-90"
     >
-      <AppImage
-        uri={item.imageUrl}
-        className={`h-[72px] w-[72px] rounded-lg ${item.isAvailable ? '' : 'opacity-50'}`}
-      />
-      <View className="flex-1 gap-0.5">
-        <Text variant="body" weight="semibold" numberOfLines={2}>
-          {item.name}
-        </Text>
-        <View className="flex-row flex-wrap items-center gap-x-2">
-          <Text variant="body" weight="bold" tone="brand">
-            {formatVND(effectiveBasePrice(item))}
-          </Text>
-          {discountPercent(item) > 0 && (
-            <>
-              <Text variant="caption" tone="muted" className="line-through">
-                {formatVND(item.price)}
-              </Text>
-              <View className="rounded-full bg-accent-500 px-1.5 py-0.5">
-                <Text variant="micro" tone="inverse">
-                  -{discountPercent(item)}%
-                </Text>
-              </View>
-            </>
-          )}
-        </View>
-        {item.isAvailable ? (
-          !!item.description && (
-            <Text variant="caption" tone="muted" numberOfLines={1}>
-              {item.description}
+      <View>
+        <AppImage uri={item.imageUrl} className={cn('h-[84px] w-[84px] rounded-xl', item.isAvailable ? '' : 'opacity-40')} />
+        {!item.isAvailable && (
+          <View className="absolute bottom-1.5 left-1.5 right-1.5 items-center rounded-md bg-scrim py-0.5">
+            <Text variant="micro" weight="bold" tone="inverse">
+              Hết món
             </Text>
-          )
-        ) : (
-          <View className="self-start rounded-full bg-danger-soft px-2 py-0.5">
-            <Text variant="micro" className="text-danger-strong">
-              Tạm hết món
+          </View>
+        )}
+        {pct > 0 && item.isAvailable && (
+          <View className="absolute left-1.5 top-1.5 rounded-md bg-accent-500 px-1.5 py-0.5">
+            <Text variant="micro" weight="bold" tone="inverse">
+              -{pct}%
             </Text>
           </View>
         )}
       </View>
-    </Pressable>
 
-    <View className="items-center gap-1">
-      <Switch
-        accessibilityLabel={`${item.name}: ${item.isAvailable ? 'đang bán' : 'tạm hết'}`}
-        value={item.isAvailable}
-        onValueChange={onToggle}
-        trackColor={{ false: palette.line.DEFAULT, true: palette.brand['500'] }}
-        thumbColor={palette.surface}
-      />
-      <IconButton
-        icon="trash-outline"
-        variant="ghost"
-        size="sm"
-        tone="danger"
-        accessibilityLabel={`Xoá món ${item.name}`}
-        onPress={onDelete}
-      />
-    </View>
-  </View>
-);
+      <View className="flex-1 justify-between gap-1.5">
+        <View className="gap-0.5">
+          <Text variant="body" weight="semibold" numberOfLines={2} tone={item.isAvailable ? 'default' : 'muted'}>
+            {item.name}
+          </Text>
+          {!!summary && (
+            <View className="flex-row items-center gap-1">
+              <Icon name="options-outline" size={12} tone="muted" />
+              <Text variant="micro" weight="medium" tone="muted" numberOfLines={1}>
+                {summary}
+              </Text>
+            </View>
+          )}
+        </View>
+        <View className="flex-row items-center justify-between gap-2">
+          <View className="flex-1 flex-row flex-wrap items-baseline gap-x-1.5">
+            <Text variant="body-lg" weight="bold" tone={item.isAvailable ? 'brand' : 'muted'}>
+              {formatVND(effectiveBasePrice(item))}
+            </Text>
+            {pct > 0 && (
+              <Text variant="caption" tone="muted" className="line-through">
+                {formatVND(item.price)}
+              </Text>
+            )}
+          </View>
+          {/* Công tắc còn/hết món có chữ rõ ràng */}
+          <Pressable
+            accessibilityRole="switch"
+            accessibilityState={{ checked: item.isAvailable }}
+            accessibilityLabel={`${item.name}: ${item.isAvailable ? 'đang bán, bấm để báo hết món' : 'hết món, bấm để mở bán lại'}`}
+            hitSlop={6}
+            onPress={() => onToggle(!item.isAvailable)}
+            className={cn(
+              'h-8 flex-row items-center gap-1.5 rounded-full px-3',
+              item.isAvailable ? 'bg-success-soft' : 'bg-canvas-subtle',
+            )}
+          >
+            <View className={cn('h-2 w-2 rounded-full', item.isAvailable ? 'bg-success' : 'bg-ink-muted')} />
+            <Text variant="caption" weight="bold" tone={item.isAvailable ? 'success' : 'secondary'}>
+              {item.isAvailable ? 'Đang bán' : 'Hết món'}
+            </Text>
+          </Pressable>
+        </View>
+      </View>
+    </Pressable>
+  );
+};

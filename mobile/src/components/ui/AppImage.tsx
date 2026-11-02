@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { Image, StyleProp, StyleSheet, View, ViewStyle } from 'react-native';
+import { StyleProp, StyleSheet, View, ViewStyle } from 'react-native';
+import { Image as ExpoImage } from 'expo-image';
 import { resolveImageUrl } from '../../utils/image';
 import { cn } from './cn';
 import { Icon, IconName } from './Icon';
@@ -19,6 +20,7 @@ export interface AppImageProps {
 
 /**
  * Ảnh có khung chờ (skeleton) và ảnh dự phòng khi thiếu/lỗi – không bao giờ để khối xám trống.
+ * Dùng expo-image với cachePolicy memory-disk và transition mượt mà.
  * `children` được vẽ chồng lên ảnh (huy hiệu, nút "+").
  */
 export const AppImage: React.FC<AppImageProps> = ({
@@ -49,10 +51,12 @@ export const AppImage: React.FC<AppImageProps> = ({
         </View>
       ) : (
         <>
-          <Image
+          <ExpoImage
             source={{ uri: resolved }}
-            resizeMode={resizeMode}
+            contentFit={resizeMode === 'contain' ? 'contain' : 'cover'}
             style={StyleSheet.absoluteFill}
+            cachePolicy="memory-disk"
+            transition={200}
             onLoadEnd={() => setLoading(false)}
             onError={() => {
               setLoading(false);

@@ -1,7 +1,7 @@
-import { Ionicons } from '@expo/vector-icons';
-import React from 'react';
+import { forwardRef, useImperativeHandle } from 'react';
 import { StyleSheet, Text, View, ViewStyle } from 'react-native';
 import { colors } from '../../constants/colors';
+import { Icon } from '../ui/Icon';
 
 export interface MapMarkerItem {
   id: string;
@@ -13,6 +13,19 @@ export interface MapMarkerItem {
   type?: 'restaurant' | 'delivery' | 'driver';
 }
 
+export interface MapRoute {
+  id: string;
+  coordinates: { latitude: number; longitude: number }[];
+  color: string;
+  outlineColor?: string;
+  width?: number;
+  dashed?: boolean;
+}
+
+export interface AppMapViewHandle {
+  fitAll: () => void;
+}
+
 interface AppMapViewProps {
   initialRegion: {
     latitude: number;
@@ -21,14 +34,22 @@ interface AppMapViewProps {
     longitudeDelta: number;
   };
   markers?: MapMarkerItem[];
+  /** Web chưa có bản đồ thật: các prop dưới đây được nhận cho khớp kiểu nhưng không dùng. */
+  routes?: MapRoute[];
+  autoFit?: 'always' | 'once';
+  edgePadding?: { top: number; right: number; bottom: number; left: number };
   style?: ViewStyle;
 }
 
-export const AppMapView: React.FC<AppMapViewProps> = ({ markers = [], style }) => {
+export const AppMapView = forwardRef<AppMapViewHandle, AppMapViewProps>(function AppMapView(
+  { markers = [], style },
+  ref,
+) {
+  useImperativeHandle(ref, () => ({ fitAll: () => {} }), []);
   return (
     <View style={[styles.container, style]}>
       <View style={styles.header}>
-        <Ionicons name="map-outline" size={24} color={colors.primary} />
+        <Icon name="map-outline" size={24} tone="brand" />
         <Text style={styles.title}>Bản đồ theo dõi (Giao diện Web)</Text>
       </View>
       <View style={styles.markersList}>
@@ -47,7 +68,7 @@ export const AppMapView: React.FC<AppMapViewProps> = ({ markers = [], style }) =
       </View>
     </View>
   );
-};
+});
 
 const styles = StyleSheet.create({
   container: {

@@ -6,10 +6,12 @@ import { useDeliveryAddressStore } from '../store/useDeliveryAddressStore';
 
 export function useMe() {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+  const token = useAuthStore((s) => s.accessToken);
+  const isLoading = useAuthStore((s) => s.isLoading);
   return useQuery({
     queryKey: queryKeys.user.me,
     queryFn: () => usersApi.getMe(),
-    enabled: isAuthenticated,
+    enabled: Boolean(!isLoading && isAuthenticated && token && token.trim().length > 0),
   });
 }
 
@@ -44,10 +46,12 @@ export function useUploadAvatar() {
 
 export function useAddresses() {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+  const token = useAuthStore((s) => s.accessToken);
+  const isLoading = useAuthStore((s) => s.isLoading);
   return useQuery({
     queryKey: queryKeys.user.addresses,
     queryFn: () => usersApi.getAddresses(),
-    enabled: isAuthenticated,
+    enabled: Boolean(!isLoading && isAuthenticated && token && token.trim().length > 0),
   });
 }
 

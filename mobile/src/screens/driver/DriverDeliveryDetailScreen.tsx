@@ -1,25 +1,40 @@
-import { Ionicons } from '@expo/vector-icons';
 import { useQueryClient } from '@tanstack/react-query';
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Animated,
   Linking,
   Modal,
+  PanResponder,
   Platform,
   Pressable,
   ScrollView,
+  useWindowDimensions,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { StatusBar } from 'expo-status-bar';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { mapsApi } from '../../api/maps';
 import { ordersApi } from '../../api/orders';
-import { AppMapView, MapMarkerItem } from '../../components/common/AppMapView';
+import { AppMapView, AppMapViewHandle, MapMarkerItem, MapRoute } from '../../components/common/AppMapView';
+import {
+  Money,
+  NoticeCard,
+  orderCode,
+  RoundAction,
+  RouteStops,
+  SectionCard,
+  TripStepper,
+} from '../../components/modules/partner/PartnerKit';
 import {
   BottomSheet,
   Button,
   cn,
   ConfirmDialog,
   Icon,
+  IconButton,
+  IconName,
+  IconTone,
   Input,
   OrderStatusBadge,
   Text,
@@ -27,10 +42,11 @@ import {
   useToast,
 } from '../../components/ui';
 import { queryKeys } from '../../constants/queryKeys';
+import { palette } from '../../theme';
 import { useLocation } from '../../hooks/useLocation';
 import { useSocket } from '../../hooks/useSocket';
 import { useOrderDetail } from '../../services/useOrders';
-import { FailedDeliveryReason, OrderDetail, OrderStatus } from '../../types/api';
+import { FailedDeliveryReason, OrderDetail } from '../../types/api';
 import { formatVND } from '../../utils/format';
 import { haversineKm } from '../../utils/geo';
 import { FAILED_DELIVERY_REASON_LABELS, formatOrderEndReason } from '../../utils/orderStatus';
@@ -44,13 +60,82 @@ interface Props {
   };
 }
 
-const STEP_LABELS: { status: OrderStatus; label: string; desc: string }[] = [
-  { status: 'CONFIRMED', label: 'Đã nhận chuyến', desc: 'Tài xế đã tiếp nhận đơn hàng' },
-  { status: 'PREPARING', label: 'Quán đang làm món', desc: 'Đang chờ bếp hoàn tất chế biến' },
-  { status: 'READY_FOR_PICKUP', label: 'Sẵn sàng lấy món', desc: 'Món ăn đã sẵn sàng tại quầy' },
-  { status: 'PICKED_UP', label: 'Đang đi giao', desc: 'Tài xế đang trên đường đến khách' },
-  { status: 'DELIVERED', label: 'Đã giao thành công', desc: 'Đơn hàng hoàn tất' },
-];
+type ScrollableLike = { scrollTo: (o: { y: number; animated?: boolean }) => void };
+
+/**
+ * Bộ điều khiển bottom sheet kéo được, tạo một lần cho mỗi màn.
+ * Giữ trạng thái cử chỉ trong một object thường để các hàm xử lý cử chỉ đọc/ghi được
+ * mà không phải đọc ref trong lúc render.
+ */
+function createSheetController(initialCollapsedY: number, setExpanded: (v: boolean) => void) {
+  const state = {
+    collapsedY: initialCollapsedY,
+    pos: initialCollapsedY, // vị trí đích hiện tại (0 = mở hẳn)
+    start: 0,
+    scrollY: 0,
+    expanded: false,
+    scroll: null as ScrollableLike | null,
+  };
+  const y = new Animated.Value(initialCollapsedY);
+  const clamp = (v: number) => Math.min(state.collapsedY, Math.max(0, v));
+
+  const snap = (expand: boolean) => {
+    const target = expand ? 0 : state.collapsedY;
+    state.pos = target;
+    state.expanded = expand;
+    setExpanded(expand);
+    if (!expand) state.scroll?.scrollTo({ y: 0, animated: false });
+    Animated.spring(y, { toValue: target, useNativeDriver: true, bounciness: 0, speed: 16 }).start();
+  };
+
+  const pan = PanResponder.create({
+    // Chỉ giành cử chỉ khi kéo dọc rõ ràng; chạm/bấm nút bên trong vẫn hoạt động bình thường
+    onMoveShouldSetPanResponderCapture: (_e, g) => {
+      if (Math.abs(g.dy) < 8 || Math.abs(g.dy) < Math.abs(g.dx)) return false;
+      if (!state.expanded) return true; // đang hạ: kéo đâu cũng di chuyển sheet
+      return g.dy > 0 && state.scrollY <= 0; // đang mở: chỉ khi kéo xuống lúc nội dung ở đầu
+    },
+    onPanResponderGrant: () => {
+      state.start = state.pos;
+    },
+    onPanResponderMove: (_e, g) => {
+      y.setValue(clamp(state.start + g.dy));
+    },
+    onPanResponderRelease: (_e, g) => {
+      const pos = clamp(state.start + g.dy);
+      snap(g.vy < -0.4 ? true : g.vy > 0.4 ? false : pos < state.collapsedY / 2);
+    },
+    onPanResponderTerminate: () => snap(state.expanded),
+  });
+
+  /** Xoay màn / đổi kích thước: cập nhật vị trí hạ, kéo sheet về đó nếu đang hạ. */
+  const setCollapsedY = (v: number) => {
+    state.collapsedY = v;
+    if (!state.expanded) {
+      state.pos = v;
+      y.setValue(v);
+    }
+  };
+  const setScroll = (r: ScrollableLike | null) => {
+    state.scroll = r;
+  };
+  const setScrollY = (v: number) => {
+    state.scrollY = v;
+  };
+
+  return { y, snap, pan, setCollapsedY, setScroll, setScrollY };
+}
+
+type RouteLine = {
+  coordinates: { latitude: number; longitude: number }[];
+  isEstimate: boolean;
+};
+
+// Màu đường đi kiểu Google Maps: chặng đang đi xanh đậm, chặng kế tiếp xanh nhạt
+const ROUTE_ACTIVE = '#1A73E8';
+const ROUTE_ACTIVE_OUTLINE = '#1557B0';
+const ROUTE_NEXT = '#8AB4F8';
+const ROUTE_NEXT_OUTLINE = '#5E97F6';
 
 const FAILED_REASONS: FailedDeliveryReason[] = [
   'CUSTOMER_UNREACHABLE',
@@ -59,25 +144,10 @@ const FAILED_REASONS: FailedDeliveryReason[] = [
   'UNSAFE_LOCATION',
 ];
 
-function getStepIndex(status: OrderStatus): number {
-  switch (status) {
-    case 'CONFIRMED':
-      return 0;
-    case 'PREPARING':
-      return 1;
-    case 'READY_FOR_PICKUP':
-      return 2;
-    case 'PICKED_UP':
-      return 3;
-    case 'DELIVERED':
-      return 4;
-    default:
-      return 0;
-  }
-}
-
 export const DriverDeliveryDetailScreen: React.FC<Props> = ({ navigation, route }) => {
   const { orderId } = route.params;
+  const insets = useSafeAreaInsets();
+  const { height: windowHeight } = useWindowDimensions();
   const { data: order, isLoading, refetch } = useOrderDetail(orderId);
   const queryClient = useQueryClient();
   const { coords: driverCoords } = useLocation();
@@ -89,6 +159,31 @@ export const DriverDeliveryDetailScreen: React.FC<Props> = ({ navigation, route 
     durationMinutes: number;
     isEstimate: boolean;
   } | null>(null);
+
+  // Đường vẽ trên bản đồ: Quán → Khách và Tài xế → Quán
+  const [mainRoute, setMainRoute] = useState<RouteLine | null>(null);
+  const [driverLeg, setDriverLeg] = useState<RouteLine | null>(null);
+  const driverLegOrigin = useRef<{
+    latitude: number;
+    longitude: number;
+  } | null>(null);
+  const mapRef = useRef<AppMapViewHandle>(null);
+
+  // BOTTOM SHEET kéo được (kiểu Grab):
+  // - Hạ xuống (mặc định): bản đồ lộ ~45% màn trên, kéo/zoom bình thường.
+  // - Vuốt lên: sheet trượt lên che bản đồ, sau đó nội dung bên trong mới cuộn.
+  // - Đang mở mà nội dung ở đầu, kéo xuống: sheet hạ xuống, bản đồ hiện lại.
+  // Dùng Animated + PanResponder của React Native (không phải Reanimated) và chỉ đặt transform qua style.
+  const mapHeight = Math.round(windowHeight * 0.45);
+  const sheetTop = insets.top + 64; // ngay dưới thanh nút quay lại
+  const collapsedY = Math.max(0, mapHeight - 24 - sheetTop); // khoảng sheet bị đẩy xuống khi hạ
+  const [sheetExpanded, setSheetExpanded] = useState(false);
+  const [sheet] = useState(() => createSheetController(collapsedY, setSheetExpanded));
+
+  // Xoay màn / đổi kích thước: cập nhật vị trí hạ của sheet
+  useEffect(() => {
+    sheet.setCollapsedY(collapsedY);
+  }, [collapsedY, sheet]);
 
   const [confirmDialog, setConfirmDialog] = useState<{
     visible: boolean;
@@ -165,7 +260,7 @@ export const DriverDeliveryDetailScreen: React.FC<Props> = ({ navigation, route 
     };
   }, [orderId, socket, joinOrder, leaveOrder, refetch, toast]);
 
-  // Tính khoảng cách & thời gian ước tính giữa Quán và Khách
+  // Đường đi Quán → Khách: vừa để vẽ lên bản đồ, vừa lấy khoảng cách & thời gian
   useEffect(() => {
     if (!order) return;
     let active = true;
@@ -173,7 +268,7 @@ export const DriverDeliveryDetailScreen: React.FC<Props> = ({ navigation, route 
     async function calculateRoute() {
       if (!order) return;
       try {
-        const res = await mapsApi.getDistance(
+        const res = await mapsApi.getRoute(
           order.restaurant.latitude,
           order.restaurant.longitude,
           order.deliveryLat,
@@ -183,19 +278,36 @@ export const DriverDeliveryDetailScreen: React.FC<Props> = ({ navigation, route 
           setRouteInfo({
             distanceKm: res.distanceKm,
             durationMinutes: res.durationMinutes,
-            isEstimate: false,
+            isEstimate: res.source === 'ESTIMATED',
+          });
+          setMainRoute({
+            coordinates: res.coordinates,
+            isEstimate: res.source === 'ESTIMATED',
           });
         }
       } catch {
         if (active) {
           const dist = haversineKm(
-            { latitude: order.restaurant.latitude, longitude: order.restaurant.longitude },
+            {
+              latitude: order.restaurant.latitude,
+              longitude: order.restaurant.longitude,
+            },
             { latitude: order.deliveryLat, longitude: order.deliveryLng },
           );
           const duration = Math.max(5, Math.round((dist / 25) * 60 + 5));
           setRouteInfo({
             distanceKm: dist,
             durationMinutes: duration,
+            isEstimate: true,
+          });
+          setMainRoute({
+            coordinates: [
+              {
+                latitude: order.restaurant.latitude,
+                longitude: order.restaurant.longitude,
+              },
+              { latitude: order.deliveryLat, longitude: order.deliveryLng },
+            ],
             isEstimate: true,
           });
         }
@@ -206,7 +318,53 @@ export const DriverDeliveryDetailScreen: React.FC<Props> = ({ navigation, route 
     return () => {
       active = false;
     };
-  }, [order]);
+    // Chỉ tính lại khi đổi đơn hoặc đổi toạ độ quán/khách, không phải mỗi lần đơn được tải lại
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    order?.id,
+    order?.restaurant.latitude,
+    order?.restaurant.longitude,
+    order?.deliveryLat,
+    order?.deliveryLng,
+  ]);
+
+  // Chặng Tài xế → Quán (chỉ khi chưa lấy món). Chỉ tải lại khi tài xế đã đi xa hơn 300m
+  // so với lần tải trước, để không tốn lượt gọi bản đồ mỗi lần GPS cập nhật.
+  const needsDriverLeg =
+    order?.status === 'CONFIRMED' || order?.status === 'PREPARING' || order?.status === 'READY_FOR_PICKUP';
+  useEffect(() => {
+    // Sau khi lấy món, chặng này tự ẩn nhờ điều kiện showDriverLeg lúc vẽ
+    if (!order || !needsDriverLeg || !driverCoords?.latitude || !driverCoords?.longitude) return;
+    const origin = {
+      latitude: driverCoords.latitude,
+      longitude: driverCoords.longitude,
+    };
+    const last = driverLegOrigin.current;
+    if (last && haversineKm(last, origin) < 0.3) return;
+    driverLegOrigin.current = origin;
+
+    let active = true;
+    const dest = {
+      latitude: order.restaurant.latitude,
+      longitude: order.restaurant.longitude,
+    };
+    mapsApi
+      .getRoute(origin.latitude, origin.longitude, dest.latitude, dest.longitude)
+      .then((res) => {
+        if (active)
+          setDriverLeg({
+            coordinates: res.coordinates,
+            isEstimate: res.source === 'ESTIMATED',
+          });
+      })
+      .catch(() => {
+        if (active) setDriverLeg({ coordinates: [origin, dest], isEstimate: true });
+      });
+    return () => {
+      active = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [order?.id, needsDriverLeg, driverCoords?.latitude, driverCoords?.longitude]);
 
   // Marker cho bản đồ
   const markers: MapMarkerItem[] = useMemo(() => {
@@ -219,7 +377,7 @@ export const DriverDeliveryDetailScreen: React.FC<Props> = ({ navigation, route 
         title: order.restaurant.name,
         description: `Điểm lấy món: ${order.restaurant.address}`,
         type: 'restaurant',
-        pinColor: '#EF4444',
+        pinColor: palette.danger.DEFAULT,
       },
       {
         id: 'delivery',
@@ -228,7 +386,7 @@ export const DriverDeliveryDetailScreen: React.FC<Props> = ({ navigation, route 
         title: `Khách hàng: ${order.customer.fullName}`,
         description: `Điểm giao: ${order.deliveryAddress}`,
         type: 'delivery',
-        pinColor: '#1EB9CE',
+        pinColor: palette.brand['500'],
       },
     ];
 
@@ -239,7 +397,7 @@ export const DriverDeliveryDetailScreen: React.FC<Props> = ({ navigation, route 
         longitude: driverCoords.longitude,
         title: 'Vị trí của bạn',
         type: 'driver',
-        pinColor: '#10B981',
+        pinColor: palette.success.DEFAULT,
       });
     }
 
@@ -323,7 +481,9 @@ export const DriverDeliveryDetailScreen: React.FC<Props> = ({ navigation, route 
         try {
           setIsSubmitting(true);
           await ordersApi.updateStatus(order.id, 'PICKED_UP');
-          await queryClient.invalidateQueries({ queryKey: queryKeys.orders.all });
+          await queryClient.invalidateQueries({
+            queryKey: queryKeys.orders.all,
+          });
           await refetch();
           toast('Đã nhận món! Di chuyển cẩn thận đến địa chỉ của khách nhé.', 'success');
         } catch (err: any) {
@@ -350,7 +510,8 @@ export const DriverDeliveryDetailScreen: React.FC<Props> = ({ navigation, route 
       toast('Đã xác nhận đến điểm giao! Khách hàng đã nhận được thông báo.', 'success');
     } catch (err: any) {
       toast(
-        err?.response?.data?.message || 'Không thể xác nhận đến điểm giao. Hãy tiến lại gần địa chỉ khách hơn.',
+        err?.response?.data?.message ||
+          'Không thể xác nhận đến điểm giao. Hãy tiến lại gần địa chỉ khách hơn.',
         'error',
       );
     } finally {
@@ -421,7 +582,9 @@ export const DriverDeliveryDetailScreen: React.FC<Props> = ({ navigation, route 
           setIsSubmitting(true);
           await ordersApi.updateStatus(order.id, 'DELIVERED');
           await queryClient.invalidateQueries({ queryKey: ['driver'] });
-          await queryClient.invalidateQueries({ queryKey: queryKeys.orders.all });
+          await queryClient.invalidateQueries({
+            queryKey: queryKeys.orders.all,
+          });
           await refetch();
           setShowSuccessModal(true);
         } catch (err: any) {
@@ -436,10 +599,10 @@ export const DriverDeliveryDetailScreen: React.FC<Props> = ({ navigation, route 
 
   if (isLoading || !order) {
     return (
-      <SafeAreaView edges={['top']} className="flex-1 bg-surface">
+      <SafeAreaView edges={['top']} className="flex-1 bg-canvas-subtle">
         <TopBar title="Chi tiết chuyến giao" onLeadingPress={() => navigation.goBack()} />
         <View className="flex-1 items-center justify-center p-6">
-          <ActivityIndicator size="large" color="#1EB9CE" />
+          <ActivityIndicator size="large" color={palette.brand['500']} />
           <Text variant="body" tone="secondary" className="mt-4">
             Đang tải dữ liệu chuyến giao...
           </Text>
@@ -448,19 +611,16 @@ export const DriverDeliveryDetailScreen: React.FC<Props> = ({ navigation, route 
     );
   }
 
-  const currentStep = getStepIndex(order.status);
   const isCancelled = order.status === 'CANCELLED';
   const isFailed = order.status === 'DELIVERY_FAILED';
   const isDelivered = order.status === 'DELIVERED';
   const isFinished = isCancelled || isFailed || isDelivered;
   const isCod = order.paymentMethod === 'COD';
-  const isHeadingToCustomer = order.status === 'PICKED_UP';
   const canRelease =
-    order.status === 'CONFIRMED' ||
-    order.status === 'PREPARING' ||
-    order.status === 'READY_FOR_PICKUP';
+    order.status === 'CONFIRMED' || order.status === 'PREPARING' || order.status === 'READY_FOR_PICKUP';
 
   const tripEarning = order.driverEarning ?? order.deliveryFee;
+  const itemCount = order.items.reduce((s, i) => s + i.quantity, 0);
 
   // Đếm số lần gọi sau thời điểm arrivedAt
   const callsAfterArrived = !order.contactAttempts
@@ -475,394 +635,493 @@ export const DriverDeliveryDetailScreen: React.FC<Props> = ({ navigation, route 
   const waitedSecRem = waitedSeconds % 60;
   const hasWaitedMin10 = Boolean(order.arrivedAt && waitedSeconds >= 10 * 60);
 
-  return (
-    <SafeAreaView edges={['top']} className="flex-1 bg-surface-subtle">
-      <TopBar
-        title={`Chuyến giao #${order.id.slice(0, 8).toUpperCase()}`}
-        onLeadingPress={() => navigation.goBack()}
-        trailing={
-          <View className="pr-3">
-            <OrderStatusBadge status={order.status} />
-          </View>
+  const openChat = (channel: 'CUSTOMER_DRIVER' | 'RESTAURANT_DRIVER') =>
+    navigation.navigate('Chat', {
+      orderId: order.id,
+      channel,
+      recipientName: channel === 'CUSTOMER_DRIVER' ? order.customer.fullName : order.restaurant.name,
+      recipientRole: channel === 'CUSTOMER_DRIVER' ? 'Khách hàng' : 'Quán ăn',
+    });
+
+  // "Bước tiếp theo": điều duy nhất tài xế cần biết khi liếc vào màn hình
+  const routeText = routeInfo
+    ? `Quãng giao ${routeInfo.distanceKm} km • ~${routeInfo.durationMinutes} phút${routeInfo.isEstimate ? ' (ước tính)' : ''}`
+    : 'Đang ước tính lộ trình...';
+  const nextStep: {
+    title: string;
+    subtitle: string;
+    icon: IconName;
+    box: string;
+    tone: IconTone;
+  } = isCancelled
+    ? {
+        title: 'Đơn hàng đã bị huỷ',
+        subtitle: 'Bạn không cần giao đơn này nữa',
+        icon: 'close-circle',
+        box: 'bg-danger-soft',
+        tone: 'danger',
+      }
+    : isFailed
+      ? {
+          title: 'Giao hàng không thành công',
+          subtitle: 'Chuyến đã được ghi nhận',
+          icon: 'alert-circle',
+          box: 'bg-danger-soft',
+          tone: 'danger',
         }
-      />
+      : isDelivered
+        ? {
+            title: 'Chuyến đã hoàn tất',
+            subtitle: `Bạn nhận được ${formatVND(tripEarning)}`,
+            icon: 'checkmark-circle',
+            box: 'bg-success-soft',
+            tone: 'success',
+          }
+        : order.status === 'READY_FOR_PICKUP'
+          ? {
+              title: 'Đến quán lấy món',
+              subtitle: `${order.restaurant.name} • Món đã sẵn sàng`,
+              icon: 'storefront',
+              box: 'bg-brand-50',
+              tone: 'brand',
+            }
+          : order.status === 'PICKED_UP'
+            ? order.arrivedAt
+              ? {
+                  title: 'Đang chờ khách nhận hàng',
+                  subtitle: order.customer.fullName,
+                  icon: 'time',
+                  box: 'bg-brand-50',
+                  tone: 'brand',
+                }
+              : {
+                  title: 'Giao đến khách hàng',
+                  subtitle: routeText,
+                  icon: 'navigate',
+                  box: 'bg-brand-50',
+                  tone: 'brand',
+                }
+            : {
+                title: 'Quán đang làm món',
+                subtitle: `Bạn có thể di chuyển tới ${order.restaurant.name}`,
+                icon: 'restaurant',
+                box: 'bg-violet-soft',
+                tone: 'violet',
+              };
 
-      <ScrollView className="flex-1" contentContainerStyle={{ paddingBottom: 140 }}>
-        {/* NỬA TRÊN: BẢN ĐỒ LỘ TRÌNH CHUYẾN GIAO */}
-        <View className="h-72 w-full overflow-hidden bg-surface shadow-card">
-          <AppMapView initialRegion={mapRegion} markers={markers} style={{ flex: 1 }} />
+  // Chưa lấy món: chặng Tài xế → Quán là chặng đang đi (xanh đậm), Quán → Khách là chặng kế tiếp (xanh nhạt).
+  // Đã lấy món: Quán → Khách là chặng đang đi. Đường ước tính (không lấy được đường phố) vẽ nét đứt.
+  const showDriverLeg = needsDriverLeg && !!driverLeg;
+  const mapRoutes: MapRoute[] = [];
+  if (mainRoute) {
+    mapRoutes.push({
+      id: 'restaurant-customer',
+      coordinates: mainRoute.coordinates,
+      color: showDriverLeg ? ROUTE_NEXT : ROUTE_ACTIVE,
+      outlineColor: showDriverLeg ? ROUTE_NEXT_OUTLINE : ROUTE_ACTIVE_OUTLINE,
+      width: showDriverLeg ? 5 : 6,
+      dashed: mainRoute.isEstimate,
+    });
+  }
+  if (showDriverLeg && driverLeg) {
+    mapRoutes.push({
+      id: 'driver-restaurant',
+      coordinates: driverLeg.coordinates,
+      color: ROUTE_ACTIVE,
+      outlineColor: ROUTE_ACTIVE_OUTLINE,
+      width: 6,
+      dashed: driverLeg.isEstimate,
+    });
+  }
 
-          {!isFinished && (
-            <View className="absolute bottom-3 left-3 right-3 flex-row items-center justify-between gap-2">
-              <View className="flex-1 flex-row items-center gap-2 rounded-xl bg-surface/95 px-3 py-2 shadow-float backdrop-blur-md">
-                <Icon
-                  name={isHeadingToCustomer ? 'location' : 'storefront'}
-                  size="sm"
-                  tone="brand"
-                />
-                <View className="flex-1">
-                  <Text variant="caption" weight="bold" numberOfLines={1}>
-                    {isHeadingToCustomer ? 'Điểm đến: Khách hàng' : 'Điểm đến: Quán lấy món'}
-                  </Text>
-                  <Text variant="caption" tone="secondary" numberOfLines={1}>
-                    {routeInfo
-                      ? `${routeInfo.distanceKm} km • ~${routeInfo.durationMinutes} phút${
-                          routeInfo.isEstimate ? ' (ước tính)' : ''
-                        }`
-                      : 'Đang ước tính lộ trình...'}
-                  </Text>
-                </View>
-              </View>
+  return (
+    <View className="flex-1 bg-canvas-subtle">
+      <StatusBar style="dark" />
 
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Chỉ đường trên Google Maps hoặc Apple Maps"
-                onPress={handleOpenNavigation}
-                className="flex-row items-center gap-1.5 rounded-xl bg-brand-500 px-3.5 py-2.5 shadow-float active:bg-brand-600"
-              >
-                <Icon name="navigate" size="sm" tone="inverse" />
-                <Text variant="caption" weight="bold" tone="inverse">
-                  Chỉ đường
-                </Text>
-              </Pressable>
-            </View>
-          )}
+      {/* BẢN ĐỒ nằm dưới cùng; phần không bị sheet che vẫn kéo/zoom được */}
+      <View
+        style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          right: 0,
+          height: mapHeight,
+        }}
+      >
+        <AppMapView
+          ref={mapRef}
+          initialRegion={mapRegion}
+          markers={markers}
+          routes={mapRoutes}
+          autoFit="once"
+          edgePadding={{
+            top: insets.top + 72,
+            right: 56,
+            bottom: 64,
+            left: 56,
+          }}
+          style={{ flex: 1 }}
+        />
+
+        {/* Nút canh lại bản đồ */}
+        <View className="absolute right-3" style={{ bottom: 36 }}>
+          <IconButton
+            icon="locate"
+            variant="surface"
+            accessibilityLabel="Canh lại bản đồ cho vừa lộ trình"
+            onPress={() => mapRef.current?.fitAll()}
+          />
         </View>
+      </View>
 
-        {/* THÔNG BÁO NẾU ĐƠN BỊ HUỶ HOẶC GIAO THẤT BẠI */}
-        {(isCancelled || isFailed) && (
-          <View className="mx-4 mt-4 flex-row items-center gap-3 rounded-2xl border border-danger-soft bg-danger-soft/20 p-4">
-            <Icon name="close-circle" size="lg" tone="danger" />
-            <View className="flex-1">
-              <Text variant="body" weight="bold" tone="danger">
-                {isFailed ? 'Chuyến giao không thành công' : 'Đơn hàng này đã bị huỷ'}
-              </Text>
-              <Text variant="caption" tone="secondary">
-                {formatOrderEndReason(order) ||
-                  'Đơn đã kết thúc. Bạn không cần tiếp tục giao đơn này nữa.'}
-              </Text>
-            </View>
-          </View>
-        )}
-
-        {/* C5: BẢNG ĐỒNG HỒ CHỜ TẠI ĐIỂM GIAO & BÁO GIAO THẤT BẠI */}
-        {order.status === 'PICKED_UP' && (
-          <View className="mx-4 mt-4 gap-3 rounded-2xl border border-brand-200 bg-brand-50/40 p-4 shadow-card">
-            <View className="flex-row items-center justify-between">
-              <View className="flex-row items-center gap-2">
-                <Icon name="location" size="md" tone="brand" />
-                <Text variant="headline" weight="bold">
-                  {order.arrivedAt ? 'Đã đến điểm giao hàng' : 'Xác nhận khi tới điểm giao'}
-                </Text>
-              </View>
-              {order.arrivedAt && (
-                <View className="rounded-full bg-surface px-3 py-1">
-                  <Text variant="caption" weight="bold" tone="brand">
-                    Chờ: {String(waitedMin).padStart(2, '0')}:{String(waitedSecRem).padStart(2, '0')}
-                  </Text>
-                </View>
-              )}
-            </View>
-
-            {!order.arrivedAt ? (
-              <View className="gap-2">
-                <Text variant="caption" tone="secondary">
-                  Khi đến trong phạm vi 200m quanh địa chỉ khách, hãy bấm nút bên dưới để báo cho khách và bắt đầu tính thời gian chờ.
-                </Text>
-                <Button
-                  label="Đã đến điểm giao"
-                  variant="secondary"
-                  size="md"
-                  leftIcon="checkmark-circle-outline"
-                  loading={isSubmitting}
-                  onPress={handleMarkArrived}
-                />
-              </View>
-            ) : (
-              <View className="gap-2">
-                <Text variant="caption" tone="secondary">
-                  Đã gọi liên hệ khách sau khi đến: <Text variant="caption" weight="bold">{callsAfterArrived}/3 lần</Text> • Thời gian chờ tối thiểu: <Text variant="caption" weight="bold">10 phút</Text>.
-                </Text>
-                <View className="flex-row gap-2">
-                  <Button
-                    label="Gọi khách ngay"
-                    variant="outline"
-                    size="sm"
-                    leftIcon="call-outline"
-                    className="flex-1"
-                    onPress={() => handleCallCustomer(order.customer.phone)}
-                  />
-                  <Button
-                    label="Giao thất bại"
-                    variant="dangerSoft"
-                    size="sm"
-                    disabled={!hasWaitedMin10 || isSubmitting}
-                    className="flex-1"
-                    onPress={() => setFailedSheetOpen(true)}
-                  />
-                </View>
-                {!hasWaitedMin10 && (
-                  <Text variant="micro" tone="muted">
-                    Nút "Giao thất bại" sẽ mở sau khi chờ đủ 10 phút tại điểm giao.
-                  </Text>
-                )}
-              </View>
-            )}
-          </View>
-        )}
-
-        {/* TIẾN TRÌNH CÁC BƯỚC GIAO HÀNG */}
-        <View className="mx-4 mt-4 rounded-2xl border border-line bg-surface p-4 shadow-card">
-          <View className="mb-3 flex-row items-center justify-between">
-            <Text variant="headline" weight="bold">
-              Tiến trình chuyến giao
-            </Text>
-            <Text variant="caption" tone="secondary">
-              Bước {Math.min(currentStep + 1, 5)}/5
-            </Text>
-          </View>
-
-          <View className="flex-row items-center justify-between pt-1">
-            {STEP_LABELS.map((step, idx) => {
-              const isDone = idx < currentStep;
-              const isCurrent = idx === currentStep;
-              return (
-                <View key={step.status} className="flex-1 items-center">
-                  <View className="relative w-full items-center">
-                    {idx > 0 && (
-                      <View
-                        className={cn(
-                          'absolute left-0 right-1/2 top-3.5 h-0.5',
-                          isDone || isCurrent ? 'bg-brand-500' : 'bg-line',
-                        )}
-                      />
-                    )}
-                    {idx < STEP_LABELS.length - 1 && (
-                      <View
-                        className={cn(
-                          'absolute left-1/2 right-0 top-3.5 h-0.5',
-                          isDone ? 'bg-brand-500' : 'bg-line',
-                        )}
-                      />
-                    )}
-                    <View
-                      className={cn(
-                        'h-7 w-7 items-center justify-center rounded-full border-2',
-                        isCurrent
-                          ? 'border-brand-500 bg-brand-500 shadow-glow'
-                          : isDone
-                          ? 'border-brand-500 bg-brand-500'
-                          : 'border-line bg-surface',
-                      )}
-                    >
-                      <Ionicons
-                        name={isDone ? 'checkmark' : 'ellipse'}
-                        size={isDone ? 14 : 8}
-                        color={isDone || isCurrent ? '#FFFFFF' : '#94A3B8'}
-                      />
-                    </View>
-                  </View>
-                  <Text
-                    variant="caption"
-                    weight={isCurrent ? 'bold' : 'regular'}
-                    tone={isCurrent ? 'brand' : isDone ? 'default' : 'secondary'}
-                    className="mt-1.5 text-center text-[10px]"
-                    numberOfLines={1}
-                  >
-                    {step.label}
-                  </Text>
-                </View>
-              );
-            })}
-          </View>
-        </View>
-
-        {/* THÔNG TIN LỘ TRÌNH HAI ĐIỂM: QUÁN & KHÁCH */}
-        <View className="mx-4 mt-4 rounded-2xl border border-line bg-surface p-4 shadow-card">
-          <Text variant="headline" weight="bold" className="mb-3">
-            Lộ trình giao hàng
-          </Text>
-
-          {/* Điểm 1: Quán lấy món */}
-          <View className="flex-row items-start gap-3">
-            <View className="items-center">
-              <View className="h-8 w-8 items-center justify-center rounded-full bg-danger-soft">
-                <Ionicons name="storefront" size={16} color="#EF4444" />
-              </View>
-              <View className="my-1 h-7 w-0.5 border-l-2 border-dashed border-line" />
-            </View>
-            <View className="flex-1">
-              <Text variant="caption" tone="secondary">
-                ĐIỂM LẤY MÓN (QUÁN)
-              </Text>
-              <Text variant="body" weight="bold">
-                {order.restaurant.name}
-              </Text>
-              <Text variant="caption" tone="secondary">
-                {order.restaurant.address}
-              </Text>
-            </View>
-          </View>
-
-          {/* Điểm 2: Khách nhận món */}
-          <View className="flex-row items-start gap-3">
-            <View className="h-8 w-8 items-center justify-center rounded-full bg-brand-50">
-              <Ionicons name="home" size={16} color="#1EB9CE" />
-            </View>
-            <View className="flex-1">
-              <Text variant="caption" tone="secondary">
-                ĐIỂM GIAO MÓN (KHÁCH HÀNG)
-              </Text>
-              <Text variant="body" weight="bold">
-                {order.customer.fullName}
-              </Text>
-              <Text variant="caption" tone="secondary">
-                {order.deliveryAddress}
-              </Text>
-              {!!order.note && (
-                <View className="mt-1.5 rounded-lg bg-warning-soft/20 p-2">
-                  <Text variant="caption" weight="medium" tone="warning">
-                    Ghi chú của khách: {order.note}
-                  </Text>
-                </View>
-              )}
-            </View>
-          </View>
-
-          {/* Nút liên hệ thật qua số điện thoại */}
-          <View className="mt-4 flex-row items-center gap-2 border-t border-line-subtle pt-3">
+      {/* SHEET: chỉ dịch chuyển bằng transform (Animated của React Native) */}
+      <Animated.View
+        {...sheet.pan.panHandlers}
+        style={{
+          position: 'absolute',
+          left: 0,
+          right: 0,
+          top: sheetTop,
+          bottom: 0,
+          transform: [{ translateY: sheet.y }],
+        }}
+      >
+        <View className="flex-1 overflow-hidden rounded-t-3xl bg-canvas-subtle shadow-float">
+          {/* PHẦN ĐẦU SHEET: bước tiếp theo + chỉ đường + tiến trình */}
+          <View className="gap-4 bg-surface px-4 pb-4 pt-2.5">
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel="Gọi cho khách hàng"
-              onPress={() => handleCallCustomer(order.customer.phone)}
-              className="flex-1 flex-row items-center justify-center gap-2 rounded-xl bg-brand-50 py-2.5 active:bg-brand-100"
+              accessibilityLabel={
+                sheetExpanded ? 'Hạ bảng thông tin để xem bản đồ' : 'Kéo bảng thông tin lên'
+              }
+              onPress={() => sheet.snap(!sheetExpanded)}
+              hitSlop={10}
+              className="items-center"
             >
-              <Ionicons name="call" size={16} color="#1EB9CE" />
-              <Text variant="caption" weight="bold" tone="brand">
-                Gọi khách hàng
-              </Text>
+              <View className="h-1.5 w-10 rounded-full bg-line" />
             </Pressable>
 
-            {!!order.restaurant.phone && (
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Gọi cho nhà hàng"
-                onPress={() => handleCallRestaurant(order.restaurant.phone)}
-                className="flex-1 flex-row items-center justify-center gap-2 rounded-xl bg-surface-subtle py-2.5 active:bg-line-subtle"
-              >
-                <Ionicons name="call-outline" size={16} color="#64748B" />
-                <Text variant="caption" weight="bold" tone="secondary">
-                  Gọi nhà hàng
+            <View className="flex-row items-center gap-3">
+              <View className={cn('h-12 w-12 items-center justify-center rounded-2xl', nextStep.box)}>
+                <Icon name={nextStep.icon} size="lg" tone={nextStep.tone} />
+              </View>
+              <View className="flex-1">
+                <Text variant="micro" tone="muted" className="uppercase">
+                  {isFinished ? 'Trạng thái' : 'Bước tiếp theo'}
                 </Text>
-              </Pressable>
-            )}
-          </View>
-        </View>
-
-        {/* THÔNG TIN THANH TOÁN & THU NHẬP */}
-        <View className="mx-4 mt-4 rounded-2xl border border-line bg-surface p-4 shadow-card">
-          <Text variant="headline" weight="bold" className="mb-3">
-            Tài chính chuyến giao
-          </Text>
-
-          <View className="flex-row items-center justify-between border-b border-line-subtle pb-3">
-            <View>
-              <Text variant="caption" tone="secondary">
-                THU NHẬP THỰC NHẬN (CÔNG GIAO)
-              </Text>
-              <Text variant="headline" weight="bold" tone="brand">
-                +{formatVND(tripEarning)}
-              </Text>
-            </View>
-            <View className="rounded-full bg-brand-50 px-3 py-1">
-              <Text variant="caption" weight="bold" tone="brand">
-                Giữ lại từ tiền thu hộ
-              </Text>
-            </View>
-          </View>
-
-          <View className="mt-3 flex-row items-center justify-between">
-            <View className="flex-1">
-              <Text variant="caption" tone="secondary">
-                TIỀN CẦN THU TỪ KHÁCH HÀNG
-              </Text>
-              {isCod ? (
-                <Text variant="body-lg" weight="bold" tone="danger">
-                  Thu tiền mặt: {formatVND(order.total)}
+                <Text variant="headline" weight="bold" numberOfLines={1}>
+                  {nextStep.title}
                 </Text>
-              ) : (
-                <Text variant="body-lg" weight="bold" tone="success">
-                  0 ₫ (Khách đã trả trực tuyến)
-                </Text>
-              )}
-            </View>
-            <View
-              className={cn(
-                'rounded-lg px-2.5 py-1',
-                isCod ? 'bg-danger-soft' : 'bg-success-soft',
-              )}
-            >
-              <Text
-                variant="caption"
-                weight="bold"
-                tone={isCod ? 'danger' : 'success'}
-              >
-                {isCod ? 'TIỀN MẶT COD' : 'ĐÃ THANH TOÁN'}
-              </Text>
-            </View>
-          </View>
-        </View>
-
-        {/* DANH SÁCH MÓN ĂN TRONG ĐƠN */}
-        <View className="mx-4 mt-4 rounded-2xl border border-line bg-surface p-4 shadow-card">
-          <Text variant="headline" weight="bold" className="mb-3">
-            Món ăn cần nhận ({order.items.reduce((s, i) => s + i.quantity, 0)} món)
-          </Text>
-
-          <View className="gap-2.5">
-            {order.items.map((item) => (
-              <View key={item.id} className="flex-row items-center justify-between">
-                <View className="flex-1 flex-row items-center gap-2">
-                  <View className="h-6 w-6 items-center justify-center rounded-md bg-brand-50">
-                    <Text variant="caption" weight="bold" tone="brand">
-                      {item.quantity}x
-                    </Text>
-                  </View>
-                  <Text variant="body" weight="medium" className="flex-1" numberOfLines={1}>
-                    {item.name}
-                  </Text>
-                </View>
-                <Text variant="body" tone="secondary">
-                  {formatVND(item.unitPrice * item.quantity)}
+                <Text variant="caption" weight="regular" tone="secondary" numberOfLines={1}>
+                  {nextStep.subtitle}
                 </Text>
               </View>
-            ))}
-          </View>
-        </View>
+              {!isFinished && (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Chỉ đường trên Google Maps hoặc Apple Maps"
+                  onPress={handleOpenNavigation}
+                  className="h-12 items-center justify-center rounded-2xl bg-brand-500 px-3.5 shadow-glow active:bg-brand-600"
+                >
+                  <Icon name="navigate" size="sm" tone="inverse" />
+                  <Text variant="micro" weight="bold" tone="inverse">
+                    Chỉ đường
+                  </Text>
+                </Pressable>
+              )}
+            </View>
 
-        {/* C3: NÚT TRẢ LẠI ĐƠN KHI CHƯA LẤY MÓN */}
-        {canRelease && (
-          <View className="mx-4 mt-4">
-            <Button
-              label="Gặp sự cố? Trả lại chuyến giao"
-              variant="ghost"
-              size="md"
-              onPress={() => {
-                setReleaseReason('');
-                setReleaseSheetOpen(true);
-              }}
-            />
+            {!isCancelled && !isFailed && <TripStepper status={order.status} />}
           </View>
-        )}
-      </ScrollView>
+
+          {/* Phần đầu nằm ngoài vùng cuộn: kéo ở đây luôn điều khiển sheet */}
+          <ScrollView
+            ref={(r) => sheet.setScroll(r as unknown as ScrollableLike | null)}
+            style={{ flex: 1 }}
+            // Khi sheet đang hạ, kéo lên sẽ đẩy cả sheet lên trước; mở hẳn rồi mới cuộn nội dung
+            scrollEnabled={sheetExpanded}
+            bounces={false}
+            overScrollMode="never"
+            onScroll={(e) => sheet.setScrollY(e.nativeEvent.contentOffset.y)}
+            scrollEventThrottle={16}
+            contentContainerStyle={{ paddingBottom: 140 }}
+            showsVerticalScrollIndicator={false}
+          >
+            <View className="gap-3 px-4 pt-3">
+              {/* LÝ DO KẾT THÚC (huỷ / giao thất bại) */}
+              {(isCancelled || isFailed) && !!formatOrderEndReason(order) && (
+                <NoticeCard
+                  tone="danger"
+                  icon="information-circle"
+                  title="Lý do"
+                  message={formatOrderEndReason(order)}
+                />
+              )}
+
+              {/* ĐỒNG HỒ CHỜ TẠI ĐIỂM GIAO & BÁO GIAO THẤT BẠI */}
+              {order.status === 'PICKED_UP' && (
+                <SectionCard
+                  title={order.arrivedAt ? 'Đã đến điểm giao' : 'Khi tới điểm giao'}
+                  icon="flag"
+                  surfaceClassName="bg-brand-50"
+                  className="border border-brand-200"
+                  iconBox="bg-surface"
+                  right={
+                    order.arrivedAt ? (
+                      <View className="flex-row items-center gap-1 rounded-full bg-surface px-3 py-1">
+                        <Icon name="time-outline" size={14} tone="brand" />
+                        <Text variant="caption" weight="bold" tone="brand">
+                          {String(waitedMin).padStart(2, '0')}:{String(waitedSecRem).padStart(2, '0')}
+                        </Text>
+                      </View>
+                    ) : undefined
+                  }
+                >
+                  {!order.arrivedAt ? (
+                    <>
+                      <Text variant="caption" weight="regular" tone="secondary">
+                        Khi cách địa chỉ khách dưới 200m, bấm nút bên dưới để báo cho khách và bắt đầu tính
+                        thời gian chờ.
+                      </Text>
+                      <Button
+                        label="Tôi đã đến điểm giao"
+                        variant="primary"
+                        size="md"
+                        leftIcon="checkmark-circle-outline"
+                        loading={isSubmitting}
+                        onPress={handleMarkArrived}
+                      />
+                    </>
+                  ) : (
+                    <>
+                      <View className="flex-row gap-2">
+                        <View className="flex-1 rounded-xl bg-surface p-2.5">
+                          <Text variant="micro" tone="muted">
+                            Đã gọi khách
+                          </Text>
+                          <Text variant="body" weight="bold">
+                            {callsAfterArrived}/3 lần
+                          </Text>
+                        </View>
+                        <View className="flex-1 rounded-xl bg-surface p-2.5">
+                          <Text variant="micro" tone="muted">
+                            Chờ tối thiểu
+                          </Text>
+                          <Text variant="body" weight="bold">
+                            10 phút
+                          </Text>
+                        </View>
+                      </View>
+                      <View className="flex-row gap-2">
+                        <Button
+                          label="Gọi khách"
+                          variant="outline"
+                          size="md"
+                          leftIcon="call-outline"
+                          className="flex-1"
+                          onPress={() => handleCallCustomer(order.customer.phone)}
+                        />
+                        <Button
+                          label="Giao thất bại"
+                          variant="dangerSoft"
+                          size="md"
+                          disabled={!hasWaitedMin10 || isSubmitting}
+                          className="flex-1"
+                          onPress={() => setFailedSheetOpen(true)}
+                        />
+                      </View>
+                      {!hasWaitedMin10 && (
+                        <Text variant="micro" weight="medium" tone="muted">
+                          Nút "Giao thất bại" mở sau khi chờ đủ 10 phút tại điểm giao.
+                        </Text>
+                      )}
+                    </>
+                  )}
+                </SectionCard>
+              )}
+
+              {/* LỘ TRÌNH: QUÁN → KHÁCH */}
+              <SectionCard title="Lộ trình">
+                <RouteStops
+                  pickup={{
+                    label: 'Lấy món tại quán',
+                    title: order.restaurant.name,
+                    address: order.restaurant.address,
+                    actions: isFinished ? undefined : (
+                      <>
+                        {!!order.restaurant.phone && (
+                          <RoundAction
+                            icon="call"
+                            tone="danger"
+                            label="Gọi cho quán"
+                            onPress={() => handleCallRestaurant(order.restaurant.phone)}
+                          />
+                        )}
+                        <RoundAction
+                          icon="chatbubble-ellipses"
+                          tone="danger"
+                          label="Nhắn tin với quán"
+                          onPress={() => openChat('RESTAURANT_DRIVER')}
+                        />
+                      </>
+                    ),
+                  }}
+                  dropoff={{
+                    label: 'Giao đến khách',
+                    title: order.customer.fullName,
+                    meta: order.customer.phone,
+                    address: order.deliveryAddress,
+                    actions: isFinished ? undefined : (
+                      <>
+                        <RoundAction
+                          icon="call"
+                          label="Gọi cho khách hàng"
+                          onPress={() => handleCallCustomer(order.customer.phone)}
+                        />
+                        <RoundAction
+                          icon="chatbubble-ellipses"
+                          label="Nhắn tin với khách hàng"
+                          onPress={() => openChat('CUSTOMER_DRIVER')}
+                        />
+                      </>
+                    ),
+                    footer: order.note ? (
+                      <View className="mt-1 flex-row gap-2 rounded-xl bg-warning-soft p-2.5">
+                        <Icon name="document-text-outline" size={15} tone="warning" />
+                        <Text variant="caption" tone="warning" className="flex-1">
+                          {order.note}
+                        </Text>
+                      </View>
+                    ) : undefined,
+                  }}
+                />
+              </SectionCard>
+
+              {/* THANH TOÁN: tiền cần thu nổi bật bằng vạch đỏ, không phủ cả mảng màu */}
+              <SectionCard title="Thanh toán">
+                {isCod ? (
+                  <View className="flex-row overflow-hidden rounded-xl border border-danger-soft bg-surface">
+                    <View className="w-1.5 bg-danger" />
+                    <View className="flex-1 flex-row items-center justify-between gap-2 p-3.5">
+                      <View className="flex-1">
+                        <View className="flex-row items-center gap-1.5">
+                          <Icon name="cash" size="sm" tone="danger" />
+                          <Text variant="caption" weight="bold" tone="danger">
+                            Thu tiền mặt
+                          </Text>
+                        </View>
+                        <Text variant="micro" weight="regular" tone="muted">
+                          Thu đủ trước khi giao món
+                        </Text>
+                      </View>
+                      <Money amount={order.total} variant="title" tone="danger" />
+                    </View>
+                  </View>
+                ) : (
+                  <View className="flex-row items-center gap-2.5 rounded-xl bg-success-soft p-3.5">
+                    <Icon name="checkmark-circle" size="md" tone="success" />
+                    <View className="flex-1">
+                      <Text variant="caption" weight="bold" tone="success">
+                        Khách đã thanh toán trực tuyến
+                      </Text>
+                      <Text variant="caption" weight="regular" tone="secondary">
+                        Không thu thêm tiền mặt
+                      </Text>
+                    </View>
+                  </View>
+                )}
+
+                <View className="flex-row items-center justify-between gap-3 px-1">
+                  <View className="flex-1">
+                    <Text variant="body" weight="medium">
+                      Bạn nhận được
+                    </Text>
+                    <Text variant="micro" weight="regular" tone="muted">
+                      {isCod ? 'Giữ lại từ tiền thu hộ' : 'Cộng vào thu nhập chuyến'}
+                    </Text>
+                  </View>
+                  <Money amount={tripEarning} sign="+" variant="headline" tone="brand" />
+                </View>
+              </SectionCard>
+
+              {/* MÓN CẦN LẤY */}
+              <SectionCard
+                title="Món cần lấy"
+                right={
+                  <View className="rounded-full bg-brand-50 px-2.5 py-0.5">
+                    <Text variant="caption" weight="bold" tone="brand">
+                      {itemCount} món
+                    </Text>
+                  </View>
+                }
+              >
+                <View className="gap-2.5">
+                  {order.items.map((item) => (
+                    <View key={item.id} className="flex-row items-center gap-2.5">
+                      <View className="h-7 min-w-[28px] items-center justify-center rounded-lg bg-brand-50 px-1">
+                        <Text variant="caption" weight="bold" tone="brand">
+                          {item.quantity}x
+                        </Text>
+                      </View>
+                      <Text variant="body" weight="medium" className="flex-1" numberOfLines={2}>
+                        {item.name}
+                      </Text>
+                      <Text variant="body" tone="secondary">
+                        {formatVND(item.unitPrice * item.quantity)}
+                      </Text>
+                    </View>
+                  ))}
+                </View>
+              </SectionCard>
+
+              {/* TRẢ LẠI ĐƠN KHI CHƯA LẤY MÓN */}
+              {canRelease && (
+                <Button
+                  label="Gặp sự cố? Trả lại chuyến giao"
+                  variant="ghost"
+                  size="md"
+                  leftIcon="alert-circle-outline"
+                  onPress={() => {
+                    setReleaseReason('');
+                    setReleaseSheetOpen(true);
+                  }}
+                />
+              )}
+            </View>
+          </ScrollView>
+        </View>
+      </Animated.View>
+
+      {/* NÚT QUAY LẠI + MÃ ĐƠN nổi trên bản đồ */}
+      <View
+        className="absolute left-3 right-3 flex-row items-center justify-between"
+        style={{ top: insets.top + 8 }}
+        pointerEvents="box-none"
+      >
+        <IconButton
+          icon="arrow-back"
+          variant="surface"
+          accessibilityLabel="Quay lại"
+          onPress={() => navigation.goBack()}
+        />
+        <View className="flex-row items-center gap-2 rounded-full bg-surface py-1.5 pl-3 pr-1.5 shadow-raised">
+          <Text variant="caption" weight="bold">
+            #{orderCode(order.id)}
+          </Text>
+          <OrderStatusBadge status={order.status} />
+        </View>
+      </View>
 
       {/* THANH THAO TÁC CỐ ĐỊNH PHÍA DƯỚI */}
       {!isFinished && (
-        <View className="absolute bottom-0 left-0 right-0 border-t border-line bg-surface p-4 shadow-float">
+        <View
+          className="absolute bottom-0 left-0 right-0 border-t border-line-subtle bg-surface px-4 pt-3"
+          style={{ paddingBottom: Math.max(insets.bottom, 16) }}
+        >
           {order.status === 'CONFIRMED' || order.status === 'PREPARING' ? (
-            <View className="flex-row items-center justify-center gap-2 rounded-xl bg-surface-subtle py-3.5">
-              <ActivityIndicator size="small" color="#64748B" />
-              <Text variant="body" weight="bold" tone="secondary">
+            <View className="h-button-lg flex-row items-center justify-center gap-2 rounded-xl bg-violet-soft">
+              <ActivityIndicator size="small" color={palette.violet.strong} />
+              <Text variant="body" weight="bold" className="text-violet-strong">
                 Quán đang chuẩn bị món...
               </Text>
             </View>
@@ -871,18 +1130,16 @@ export const DriverDeliveryDetailScreen: React.FC<Props> = ({ navigation, route 
               label="Đã lấy món & Bắt đầu đi giao"
               variant="primary"
               size="lg"
+              leftIcon="bag-check-outline"
               loading={isSubmitting}
               onPress={handleConfirmPickup}
             />
           ) : order.status === 'PICKED_UP' ? (
             <Button
-              label={
-                isCod
-                  ? `Đã thu ${formatVND(order.total)} & Hoàn tất giao`
-                  : 'Hoàn tất giao hàng'
-              }
+              label={isCod ? `Đã thu ${formatVND(order.total)} & Hoàn tất` : 'Hoàn tất giao hàng'}
               variant="primary"
               size="lg"
+              leftIcon="checkmark-done"
               loading={isSubmitting}
               onPress={handleConfirmDelivered}
             />
@@ -921,9 +1178,12 @@ export const DriverDeliveryDetailScreen: React.FC<Props> = ({ navigation, route 
         }
       >
         <View className="gap-3 py-2">
-          <Text variant="caption" tone="secondary">
-            Bạn chỉ được trả lại đơn tối đa 3 lần/ngày trước khi lấy món tại quán. Đơn sẽ được chuyển cho tài xế khác gần quán.
-          </Text>
+          <NoticeCard
+            tone="warning"
+            icon="information-circle"
+            title="Tối đa 3 lần mỗi ngày"
+            message="Chỉ trả được đơn trước khi lấy món. Đơn sẽ được chuyển cho tài xế khác gần quán."
+          />
           <Input
             label="Lý do trả đơn *"
             placeholder="Ví dụ: Xe gặp sự cố, quán chờ quá lâu..."
@@ -952,8 +1212,9 @@ export const DriverDeliveryDetailScreen: React.FC<Props> = ({ navigation, route 
         }
       >
         <View className="gap-3 py-2">
-          <Text variant="caption" tone="secondary">
-            Chọn lý do không thể giao hàng cho khách. Với lý do "Không liên lạc được với khách hàng", hệ thống yêu cầu tối thiểu 3 cuộc gọi sau khi đến điểm giao.
+          <Text variant="caption" weight="regular" tone="secondary">
+            Chọn lý do không thể giao hàng. Với lý do "Không liên lạc được với khách hàng", hệ thống yêu cầu
+            tối thiểu 3 cuộc gọi sau khi đến điểm giao.
           </Text>
           <View className="gap-2">
             {FAILED_REASONS.map((r) => {
@@ -961,9 +1222,11 @@ export const DriverDeliveryDetailScreen: React.FC<Props> = ({ navigation, route 
               return (
                 <Pressable
                   key={r}
+                  accessibilityRole="radio"
+                  accessibilityState={{ selected }}
                   onPress={() => setFailedReason(r)}
                   className={cn(
-                    'flex-row items-center gap-3 rounded-xl border p-3',
+                    'flex-row items-center gap-3 rounded-xl border p-3.5',
                     selected ? 'border-brand-500 bg-brand-50' : 'border-line bg-surface',
                   )}
                 >
@@ -994,29 +1257,30 @@ export const DriverDeliveryDetailScreen: React.FC<Props> = ({ navigation, route 
         <View className="flex-1 items-center justify-center bg-scrim p-6">
           <View className="w-full max-w-sm rounded-3xl bg-surface p-6 shadow-float">
             <View className="items-center">
-              <View className="h-16 w-16 items-center justify-center rounded-full bg-success-soft">
-                <Ionicons name="checkmark-circle" size={42} color="#10B981" />
+              <View className="h-20 w-20 items-center justify-center rounded-full bg-success-soft">
+                <Icon name="checkmark-circle" size={52} tone="success" />
               </View>
-              <Text variant="title" weight="bold" className="mt-3 text-center">
+              <Text variant="title" weight="bold" className="mt-4 text-center">
                 Giao hàng thành công!
               </Text>
-              <Text variant="caption" tone="secondary" className="mt-1 text-center">
-                Đơn hàng #{order.id.slice(0, 8).toUpperCase()} đã được bàn giao an toàn.
+              <Text variant="caption" weight="regular" tone="secondary" className="mt-1 text-center">
+                Đơn #{orderCode(order.id)} đã được bàn giao an toàn.
               </Text>
             </View>
 
-            <View className="mt-6 gap-3 rounded-2xl bg-surface-subtle p-4">
+            <View className="mt-5 gap-3 rounded-2xl bg-canvas-subtle p-4">
               <View className="flex-row items-center justify-between">
                 <Text variant="caption" tone="secondary">
-                  Thu nhập thực nhận:
+                  Bạn nhận được
                 </Text>
-                <Text variant="body" weight="bold" tone="brand">
+                <Text variant="headline" weight="bold" tone="brand">
                   +{formatVND(tripEarning)}
                 </Text>
               </View>
+              <View className="h-px bg-line" />
               <View className="flex-row items-center justify-between">
                 <Text variant="caption" tone="secondary">
-                  Tiền mặt COD đã thu:
+                  Tiền mặt đã thu
                 </Text>
                 <Text variant="body" weight="bold" tone={isCod ? 'danger' : 'secondary'}>
                   {isCod ? formatVND(order.total) : '0 ₫ (Đã thanh toán)'}
@@ -1026,18 +1290,21 @@ export const DriverDeliveryDetailScreen: React.FC<Props> = ({ navigation, route 
 
             <View className="mt-6">
               <Button
-                label="Về trang tìm đơn mới"
+                label="Tìm đơn mới"
                 variant="primary"
                 size="lg"
+                leftIcon="search"
                 onPress={() => {
                   setShowSuccessModal(false);
-                  navigation.navigate('DriverTabs', { screen: 'DriverAvailableTab' });
+                  navigation.navigate('DriverTabs', {
+                    screen: 'DriverAvailableTab',
+                  });
                 }}
               />
             </View>
           </View>
         </View>
       </Modal>
-    </SafeAreaView>
+    </View>
   );
 };

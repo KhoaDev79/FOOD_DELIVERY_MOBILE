@@ -1,7 +1,7 @@
 import React from 'react';
 import { View } from 'react-native';
 import { OrderStatus } from '../../types/api';
-import { ORDER_STATUS_CONFIG } from '../../utils/orderStatus';
+import { getOrderStatusRoleLabel } from '../../utils/orderStatus';
 import { cn } from './cn';
 import { Icon, IconName, IconTone } from './Icon';
 import { Text, TextTone } from './Text';
@@ -79,24 +79,29 @@ export const CountBadge: React.FC<{ count: number; className?: string }> = ({ co
   );
 };
 
-// Bảng màu duy nhất cho trạng thái đơn; nhãn lấy từ ORDER_STATUS_CONFIG (một bảng nhãn duy nhất).
+// Bảng màu duy nhất cho trạng thái đơn; nhãn lấy từ ORDER_STATUS_CONFIG & role-aware.
 const STATUS_CLASS: Record<OrderStatus, { box: string; text: string }> = {
   PENDING: { box: 'bg-warning-soft', text: 'text-warning-strong' },
   CONFIRMED: { box: 'bg-info-soft', text: 'text-info-strong' },
   PREPARING: { box: 'bg-violet-soft', text: 'text-violet-strong' },
   READY_FOR_PICKUP: { box: 'bg-brand-100', text: 'text-brand-800' },
-  PICKED_UP: { box: 'bg-brand-50', text: 'text-brand-700' },
+  PICKED_UP: { box: 'bg-brand-500', text: 'text-ink-inverse' },
   DELIVERED: { box: 'bg-success-soft', text: 'text-success-strong' },
   DELIVERY_FAILED: { box: 'bg-danger-soft', text: 'text-danger-strong' },
   CANCELLED: { box: 'bg-danger-soft', text: 'text-danger-strong' },
 };
 
-export const OrderStatusBadge: React.FC<{ status: OrderStatus; className?: string }> = ({ status, className }) => {
+export const OrderStatusBadge: React.FC<{
+  status: OrderStatus;
+  role?: 'customer' | 'driver' | 'owner' | 'admin';
+  className?: string;
+}> = ({ status, role, className }) => {
   const cls = STATUS_CLASS[status];
+  const label = getOrderStatusRoleLabel(status, role);
   return (
     <View className={cn('self-start rounded-full px-2.5 py-1', cls.box, className)}>
       <Text variant="caption" weight="semibold" className={cls.text} numberOfLines={1}>
-        {ORDER_STATUS_CONFIG[status].label}
+        {label}
       </Text>
     </View>
   );

@@ -7,8 +7,10 @@ import { useFonts } from 'expo-font';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useRef } from 'react';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { ChatNotifier } from './src/components/modules/chat/ChatNotifier';
 import { ToastProvider } from './src/components/ui/Overlays';
 import { AppNavigator } from './src/navigation/AppNavigator';
+import { markNavigationReady, navigationRef } from './src/navigation/navigationRef';
 import { useAuthStore } from './src/store/useAuthStore';
 import { fontAssets } from './src/theme';
 import { installWebAlert } from './src/utils/webAlert';
@@ -62,9 +64,11 @@ export default function App() {
       <QueryClientProvider client={queryClient}>
         <ResetCacheOnAccountChange />
         <ToastProvider>
-          <NavigationContainer linking={linking}>
+          <NavigationContainer ref={navigationRef} linking={linking} onReady={markNavigationReady}>
             <StatusBar style="dark" />
             <AppNavigator />
+            {/* Thông báo nổi tin nhắn chat: đặt sau AppNavigator để nằm trên mọi màn hình */}
+            <ChatNotifier />
           </NavigationContainer>
         </ToastProvider>
       </QueryClientProvider>

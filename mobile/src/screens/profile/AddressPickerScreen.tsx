@@ -1,7 +1,6 @@
-import { Ionicons } from '@expo/vector-icons';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import * as Location from 'expo-location';
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -13,10 +12,11 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { AutocompleteItem, mapsApi } from '../../api/maps';
-import { Button, Text, useToast } from '../../components/ui';
+import { Button, Icon, Text, useToast } from '../../components/ui';
 import { DEFAULT_COORDS } from '../../constants/config';
 import { isCoordinateAddressString, useAddressDraftStore } from '../../store/useAddressDraftStore';
 import { RootStackParamList } from '../../types/navigation';
+import { palette } from '../../theme';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'AddressPicker'>;
 
@@ -53,7 +53,7 @@ export const AddressPickerScreen: React.FC<Props> = ({ navigation, route }) => {
   const [geocodingError, setGeocodingError] = useState<string | null>(null);
 
   // Reverse Geocoding qua Backend Maps Adapter (Goong / Nominatim / Fallback)
-  const reverseGeocode = async (lat: number, lng: number) => {
+  const reverseGeocode = useCallback(async (lat: number, lng: number) => {
     // Nếu người dùng đang tự gõ tay, không tự ý ghi đè địa chỉ người dùng đã nhập
     if (isManualMode) return;
 
@@ -102,7 +102,7 @@ export const AddressPickerScreen: React.FC<Props> = ({ navigation, route }) => {
     } finally {
       setIsGeocoding(false);
     }
-  };
+  }, [isManualMode]);
 
   // Khởi tạo lấy tên địa chỉ khi vừa mở màn hình
   useEffect(() => {
@@ -117,7 +117,7 @@ export const AddressPickerScreen: React.FC<Props> = ({ navigation, route }) => {
       isMounted = false;
       if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
     };
-  }, []);
+  }, [initialCoords.latitude, initialCoords.longitude, reverseGeocode]);
 
   // Khi kéo bản đồ dừng lại -> Áp dụng Debounce 400ms
   const handleRegionChangeComplete = (region: any) => {
@@ -251,14 +251,14 @@ export const AddressPickerScreen: React.FC<Props> = ({ navigation, route }) => {
       {/* Top Header & Search Bar */}
       <View className="z-10 flex-row items-center border-b border-line bg-surface px-3 py-2.5 gap-2">
         <Pressable onPress={() => navigation.goBack()} className="p-2 active:opacity-70">
-          <Ionicons name="arrow-back" size={24} color="#1A1A1A" />
+          <Icon name="arrow-back" size={24} tone="default" />
         </Pressable>
 
         <View className="h-10 flex-1 flex-row items-center gap-2 rounded-lg bg-canvas-subtle px-3">
-          <Ionicons name="search" size={18} color="#9A9EA5" />
+          <Icon name="search" size={18} tone="muted" />
           <TextInput
             placeholder="Tìm tên đường, địa điểm..."
-            placeholderTextColor="#9A9EA5"
+            placeholderTextColor={palette.ink.muted}
             value={searchQuery}
             onChangeText={(txt) => {
               setSearchQuery(txt);
@@ -276,7 +276,7 @@ export const AddressPickerScreen: React.FC<Props> = ({ navigation, route }) => {
               }}
               className="p-1 active:opacity-70"
             >
-              <Ionicons name="close-circle" size={16} color="#9A9EA5" />
+              <Icon name="close-circle" size={16} tone="muted" />
             </Pressable>
           )}
         </View>
@@ -286,7 +286,7 @@ export const AddressPickerScreen: React.FC<Props> = ({ navigation, route }) => {
           onPress={handleSearchAddress}
         >
           {isSearching ? (
-            <ActivityIndicator size="small" color="#FFFFFF" />
+            <ActivityIndicator size="small" color={palette.surface} />
           ) : (
             <Text variant="caption" weight="bold" tone="inverse">
               Tìm
@@ -298,7 +298,7 @@ export const AddressPickerScreen: React.FC<Props> = ({ navigation, route }) => {
       {/* Thông báo lỗi khi dịch vụ bản đồ lỗi hoặc chưa có key */}
       {geocodingError && (
         <View className="z-10 flex-row items-center gap-2 bg-danger-soft px-3.5 py-2">
-          <Ionicons name="alert-circle-outline" size={18} color="#E5484D" />
+          <Icon name="alert-circle-outline" size={18} tone="danger" />
           <Text variant="caption" tone="danger" numberOfLines={2} className="flex-1">
             {geocodingError}
           </Text>
@@ -325,7 +325,7 @@ export const AddressPickerScreen: React.FC<Props> = ({ navigation, route }) => {
                 className="flex-row items-start border-b border-line p-3 active:bg-canvas-subtle"
                 onPress={() => handleSelectSearchResult(item)}
               >
-                <Ionicons name="location-outline" size={20} color="#1EB9CE" style={{ marginTop: 2 }} />
+                <Icon name="location-outline" size={20} tone="brand" style={{ marginTop: 2 }} />
                 <View className="ml-2.5 flex-1">
                   <Text variant="body" weight="semibold" numberOfLines={1}>
                     {item.mainText}
@@ -353,7 +353,7 @@ export const AddressPickerScreen: React.FC<Props> = ({ navigation, route }) => {
           />
         ) : (
           <View className="flex-1 items-center justify-center bg-canvas-subtle p-6">
-            <Ionicons name="map-outline" size={48} color="#1EB9CE" />
+            <Icon name="map-outline" size={48} tone="brand" />
             <Text variant="headline" weight="bold" className="mt-3 text-center">
               Chế độ xem bản đồ trên Web
             </Text>
@@ -371,7 +371,7 @@ export const AddressPickerScreen: React.FC<Props> = ({ navigation, route }) => {
                 {isGeocoding ? 'Đang định vị...' : 'Giao đến đây'}
               </Text>
             </View>
-            <Ionicons name="location" size={44} color="#1EB9CE" />
+            <Icon name="location" size={44} tone="brand" />
             <View className="h-1.5 w-3.5 rounded-full bg-black/20" />
           </View>
         )}
@@ -382,9 +382,9 @@ export const AddressPickerScreen: React.FC<Props> = ({ navigation, route }) => {
           onPress={handleGetCurrentLocation}
         >
           {isLocating ? (
-            <ActivityIndicator size="small" color="#1EB9CE" />
+            <ActivityIndicator size="small" color={palette.brand['500']} />
           ) : (
-            <Ionicons name="locate" size={24} color="#1EB9CE" />
+            <Icon name="locate" size={24} tone="brand" />
           )}
         </Pressable>
       </View>
@@ -393,7 +393,7 @@ export const AddressPickerScreen: React.FC<Props> = ({ navigation, route }) => {
       <View className="border-t border-line bg-surface p-4 shadow-raised gap-3.5">
         <View className="flex-row items-start gap-3">
           <View className="h-10 w-10 items-center justify-center rounded-full bg-brand-50">
-            <Ionicons name="location-sharp" size={20} color="#1EB9CE" />
+            <Icon name="location-sharp" size={20} tone="brand" />
           </View>
 
           {isManualMode ? (
@@ -409,7 +409,7 @@ export const AddressPickerScreen: React.FC<Props> = ({ navigation, route }) => {
                   setSelectedAddress(txt.split(',')[0] || 'Địa chỉ tự gõ');
                 }}
                 placeholder="Số nhà, tên đường, phường, quận..."
-                placeholderTextColor="#9A9EA5"
+                placeholderTextColor={palette.ink.muted}
                 multiline
                 textAlignVertical="top"
               />

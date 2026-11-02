@@ -6,6 +6,8 @@ import { Pressable, RefreshControl, Text as RNText, ScrollView, View } from 'rea
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { restaurantsApi } from '../../api/restaurants';
 import { ErrorState, Gradient, Icon, IconButton, IconName, LoadingSpinner, Text } from '../../components/ui';
+import { OwnerRestaurantSelector } from '../../components/modules/owner/OwnerRestaurantSelector';
+import { useOwnerRestaurantStore } from '../../store/useOwnerRestaurantStore';
 import { palette } from '../../theme';
 import { OwnerStackParamList } from '../../types/navigation';
 import { formatVND } from '../../utils/format';
@@ -38,7 +40,8 @@ export const OwnerStatsScreen: React.FC<Props> = ({ navigation }) => {
     queryKey: ['owner', 'restaurants'],
     queryFn: () => restaurantsApi.getMine(),
   });
-  const restaurant = restaurants?.[0];
+  const getActiveRestaurant = useOwnerRestaurantStore((s) => s.getActiveRestaurant);
+  const restaurant = getActiveRestaurant(restaurants);
 
   const stats = useQuery({
     queryKey: ['owner', 'stats', restaurant?.id, days],
@@ -70,6 +73,12 @@ export const OwnerStatsScreen: React.FC<Props> = ({ navigation }) => {
                 Thống kê bán hàng
               </Text>
             </View>
+            {restaurant && (
+              <OwnerRestaurantSelector
+                restaurants={restaurants}
+                currentRestaurant={restaurant}
+              />
+            )}
 
             <View className="flex-row gap-2 rounded-full bg-surface/15 p-1">
               {RANGES.map((r) => {

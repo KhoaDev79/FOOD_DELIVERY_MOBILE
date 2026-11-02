@@ -64,8 +64,12 @@ export async function refreshAuthTokens(): Promise<string | null> {
 apiClient.interceptors.request.use(
   (config: InternalAxiosRequestConfig) => {
     const token = useAuthStore.getState().accessToken;
-    if (token && config.headers) {
-      config.headers.Authorization = `Bearer ${token}`;
+    if (token && typeof token === 'string' && token.trim().length > 0) {
+      if (config.headers) {
+        config.headers.Authorization = `Bearer ${token.trim()}`;
+      }
+    } else if (config.headers?.Authorization) {
+      delete config.headers.Authorization;
     }
     // Nếu data là FormData trong React Native, xoá Content-Type application/json mặc định để network layer tự thêm multipart boundary
     if (config.data instanceof FormData && config.headers) {

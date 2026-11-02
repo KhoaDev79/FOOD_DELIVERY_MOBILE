@@ -2,6 +2,8 @@ import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import React from 'react';
 import { FloatingTabBar, TabMeta } from '../components/ui/FloatingTabBar';
+import { AdminBannersScreen } from '../screens/admin/AdminBannersScreen';
+import { AdminCuisinesScreen } from '../screens/admin/AdminCuisinesScreen';
 import { AdminDashboardScreen } from '../screens/admin/AdminDashboardScreen';
 import { AdminOrdersScreen } from '../screens/admin/AdminOrdersScreen';
 import { AdminProfileScreen } from '../screens/admin/AdminProfileScreen';
@@ -44,5 +46,7 @@ export const AdminTabNavigator: React.FC = () => (
   <Stack.Navigator screenOptions={{ headerShown: false }}>
     <Stack.Screen name="AdminTabs" component={AdminTabs} />
     <Stack.Screen name="EditProfile" component={EditProfileScreen as React.ComponentType<any>} />
+    <Stack.Screen name="AdminBanners" component={AdminBannersScreen} />
+    <Stack.Screen name="AdminCuisines" component={AdminCuisinesScreen} />
   </Stack.Navigator>
 );

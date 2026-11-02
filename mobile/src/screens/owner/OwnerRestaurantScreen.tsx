@@ -4,17 +4,20 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { StatusBar } from 'expo-status-bar';
 import * as ImagePicker from 'expo-image-picker';
 import React, { useEffect, useRef, useState } from 'react';
-import { Pressable, ScrollView, Switch, View } from 'react-native';
+import { Pressable, ScrollView, View } from 'react-native';
 import { restaurantsApi } from '../../api/restaurants';
 import {
   AppImage,
   Avatar,
-  Badge,
   BottomSheet,
   Button,
-  ConfirmDialog,
+  cn,
   Divider,
+  EmptyState,
   Icon,
+  LogoutButton,
+  IconName,
+  IconTone,
   Input,
   ListRow,
   LoadingSpinner,
@@ -23,11 +26,13 @@ import {
   Text,
   useToast,
 } from '../../components/ui';
+import { OwnerRestaurantSelector } from '../../components/modules/owner/OwnerRestaurantSelector';
+import { StoreStatusCard } from '../../components/modules/owner/OwnerKit';
+import { Money, NoticeCard } from '../../components/modules/partner/PartnerKit';
+import { useOwnerRestaurants } from '../../hooks/useOwnerRestaurants';
 import { useAddressDraftStore } from '../../store/useAddressDraftStore';
 import { useAuthStore } from '../../store/useAuthStore';
-import { palette } from '../../theme';
 import { Restaurant } from '../../types/api';
-import { formatVND } from '../../utils/format';
 import { OwnerStackParamList } from '../../types/navigation';
 
 const RADIUS_OPTIONS = [2, 3, 5, 7, 10, 15];
@@ -48,7 +53,6 @@ export const OwnerRestaurantScreen: React.FC = () => {
   const user = useAuthStore((s) => s.user);
   const logout = useAuthStore((s) => s.logout);
 
-  const [confirmLogout, setConfirmLogout] = useState(false);
   const [editVisible, setEditVisible] = useState(false);
   const [restName, setRestName] = useState('');
   const [restAddress, setRestAddress] = useState('');
@@ -63,11 +67,7 @@ export const OwnerRestaurantScreen: React.FC = () => {
   const reopenAfterPicker = useRef(false);
   const [formError, setFormError] = useState<{ name?: string; address?: string; submit?: string }>({});
 
-  const { data: restaurants, isLoading } = useQuery({
-    queryKey: ['owner', 'restaurants'],
-    queryFn: () => restaurantsApi.getMine(),
-  });
-  const restaurant = restaurants?.[0];
+  const { restaurants, restaurant, isLoading } = useOwnerRestaurants();
 
   // Số liệu tóm tắt (dùng chung khoá với màn Thống kê nên không tải lại khi mở chi tiết)
   const todayStats = useQuery({
@@ -92,7 +92,8 @@ export const OwnerRestaurantScreen: React.FC = () => {
       );
       return { previous };
     },
-    onSuccess: (_d, isOpen) => toast(isOpen ? 'Quán đã mở cửa nhận đơn.' : 'Quán đã tạm ngừng nhận đơn.', 'success'),
+    onSuccess: (_d, isOpen) =>
+      toast(isOpen ? 'Đã bật nhận đơn theo giờ mở cửa.' : 'Quán đã tạm nghỉ, khách không đặt được món.', 'success'),
     onError: (err: any, _v, ctx) => {
       if (ctx?.previous) queryClient.setQueryData(['owner', 'restaurants'], ctx.previous);
       toast(err.response?.data?.message || 'Không thể đổi trạng thái quán', 'error');
@@ -206,7 +207,6 @@ export const OwnerRestaurantScreen: React.FC = () => {
   };
 
   const handleLogout = async () => {
-    setConfirmLogout(false);
     // Dữ liệu đã tải được xoá tự động khi đổi tài khoản (App.tsx: ResetCacheOnAccountChange)
     await logout();
   };
@@ -215,212 +215,188 @@ export const OwnerRestaurantScreen: React.FC = () => {
     return <LoadingSpinner message="Đang tải thông tin quán..." />;
   }
 
+  const approval =
+    restaurant?.status === 'PENDING_APPROVAL'
+      ? { label: 'Chờ duyệt', tone: 'warning' as const }
+      : restaurant?.status === 'SUSPENDED'
+        ? { label: 'Tạm khoá', tone: 'danger' as const }
+        : { label: 'Đã duyệt', tone: 'success' as const };
+
   return (
     <View className="flex-1 bg-canvas-subtle">
       {isFocused && <StatusBar style="light" />}
 
       <ScrollView contentContainerClassName={TAB_BAR_CLEARANCE} showsVerticalScrollIndicator={false}>
-        <TabHeader title="Cửa hàng">
-          {/* Chủ quán */}
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Sửa thông tin tài khoản"
-            onPress={() => navigation.navigate('EditProfile')}
-            className="flex-row items-center gap-3 active:opacity-80"
-          >
-            <Avatar uri={user?.avatarUrl} name={user?.fullName} size="lg" className="border-2 border-surface/60" />
-            <View className="flex-1 gap-0.5">
-              <Text variant="headline" tone="inverse" numberOfLines={1}>
-                {user?.fullName || 'Chủ quán'}
-              </Text>
-              <Text variant="body" tone="inverse" className="opacity-85" numberOfLines={1}>
-                {user?.email}
-              </Text>
-              <View className="mt-1 self-start flex-row items-center gap-1 rounded-full bg-surface/20 px-2.5 py-0.5">
-                <Icon name="storefront" size="xs" tone="inverse" />
-                <Text variant="micro" tone="inverse">
-                  Đối tác quán ăn
+        <TabHeader
+          title="Cửa hàng"
+          subtitle={
+            restaurant ? <OwnerRestaurantSelector restaurants={restaurants} currentRestaurant={restaurant} /> : undefined
+          }
+        >
+          {/* Danh tính quán: ảnh, tên, điểm đánh giá, trạng thái duyệt */}
+          {restaurant && (
+            <View className="flex-row items-center gap-3">
+              <AppImage
+                uri={restaurant.imageUrl}
+                className="h-16 w-16 rounded-2xl border-2 border-surface/60"
+                fallbackIcon="storefront-outline"
+              />
+              <View className="flex-1 gap-1">
+                <Text variant="headline" weight="bold" tone="inverse" numberOfLines={1}>
+                  {restaurant.name}
                 </Text>
+                <View className="flex-row flex-wrap items-center gap-2">
+                  <View className="flex-row items-center gap-1 rounded-full bg-surface/20 px-2.5 py-0.5">
+                    <Icon name="star" size={13} tone="rating" />
+                    <Text variant="caption" weight="bold" tone="inverse">
+                      {restaurant.rating.toFixed(1)}
+                    </Text>
+                    <Text variant="micro" weight="regular" tone="inverse" className="opacity-80">
+                      ({restaurant.ratingCount ?? 0})
+                    </Text>
+                  </View>
+                  <View className="flex-row items-center gap-1 rounded-full bg-surface/20 px-2.5 py-0.5">
+                    <Icon
+                      name={approval.tone === 'success' ? 'shield-checkmark' : 'alert-circle'}
+                      size={13}
+                      tone="inverse"
+                    />
+                    <Text variant="caption" weight="semibold" tone="inverse">
+                      {approval.label}
+                    </Text>
+                  </View>
+                </View>
               </View>
             </View>
-            <View className="rounded-full bg-surface/20 px-3 py-1.5">
-              <Text variant="caption" weight="semibold" tone="inverse">
-                Sửa
-              </Text>
-            </View>
-          </Pressable>
+          )}
         </TabHeader>
 
-        <View className="gap-5 px-4 pt-5">
+        <View className="gap-4 px-4 pt-4">
           {restaurant ? (
             <>
               {/* Cảnh báo trạng thái duyệt quán */}
               {restaurant.status === 'PENDING_APPROVAL' && (
-                <View className="flex-row items-start gap-3 rounded-xl border border-warning/40 bg-warning-soft p-4">
-                  <Icon name="time-outline" size="md" tone="accent" />
-                  <View className="flex-1 gap-0.5">
-                    <Text variant="body" weight="bold">
-                      Quán chưa hiển thị với khách
-                    </Text>
-                    <Text variant="caption" tone="secondary">
-                      Hồ sơ quán ăn hoặc thay đổi tên/địa chỉ/toạ độ của bạn đang chờ Quản trị viên phê duyệt.
-                    </Text>
-                  </View>
-                </View>
+                <NoticeCard
+                  tone="warning"
+                  icon="time-outline"
+                  title="Quán chưa hiển thị với khách"
+                  message="Hồ sơ quán hoặc thay đổi tên/địa chỉ/toạ độ đang chờ Quản trị viên phê duyệt."
+                />
               )}
-
               {restaurant.status === 'SUSPENDED' && (
-                <View className="flex-row items-start gap-3 rounded-xl border border-danger/40 bg-danger-soft p-4">
-                  <Icon name="alert-circle-outline" size="md" tone="danger" />
-                  <View className="flex-1 gap-0.5">
-                    <Text variant="body" weight="bold" tone="danger">
-                      Quán đang bị tạm khoá / từ chối duyệt
-                    </Text>
-                    <Text variant="caption" tone="secondary">
-                      {restaurant.suspendReason
-                        ? `Lý do: ${restaurant.suspendReason}`
-                        : 'Vui lòng kiểm tra lại thông tin quán hoặc liên hệ Quản trị viên.'}
-                    </Text>
-                  </View>
-                </View>
+                <NoticeCard
+                  tone="danger"
+                  icon="alert-circle-outline"
+                  title="Quán đang bị tạm khoá / từ chối duyệt"
+                  message={
+                    restaurant.suspendReason
+                      ? `Lý do: ${restaurant.suspendReason}`
+                      : 'Vui lòng kiểm tra lại thông tin quán hoặc liên hệ Quản trị viên.'
+                  }
+                />
               )}
 
-              {/* Thẻ quán */}
-              <View className="overflow-hidden rounded-xl bg-surface shadow-card">
-                <AppImage uri={restaurant.imageUrl} className="h-40 w-full" fallbackIcon="storefront-outline" />
-                <View className="gap-2 p-4">
-                  <View className="flex-row items-start justify-between gap-2">
-                    <Text variant="title" weight="bold" numberOfLines={2} className="flex-1">
-                      {restaurant.name}
-                    </Text>
-                    <Badge
-                      label={
-                        restaurant.status === 'PENDING_APPROVAL'
-                          ? 'Chờ duyệt'
-                          : restaurant.status === 'SUSPENDED'
-                            ? 'Tạm khoá'
-                            : 'Đã duyệt'
-                      }
-                      tone={
-                        restaurant.status === 'PENDING_APPROVAL'
-                          ? 'warning'
-                          : restaurant.status === 'SUSPENDED'
-                            ? 'danger'
-                            : 'success'
-                      }
-                    />
-                  </View>
-                  <View className="flex-row flex-wrap items-center gap-x-3 gap-y-1">
-                    <View className="flex-row items-center gap-1">
-                      <Icon name="star" size="sm" tone="rating" />
-                      <Text variant="body" weight="semibold">
-                        {restaurant.rating.toFixed(1)}
-                      </Text>
-                    </View>
-                    <View className="flex-row items-center gap-1">
-                      <Icon name="navigate-outline" size="sm" tone="secondary" />
-                      <Text variant="body" tone="secondary">
-                        Giao trong {restaurant.deliveryRadiusKm} km
-                      </Text>
-                    </View>
-                  </View>
-                  <Button
-                    label="Sửa thông tin quán"
-                    leftIcon="create-outline"
-                    variant="secondary"
-                    size="md"
-                    onPress={openEdit}
-                    className="mt-1 min-h-touch"
-                  />
-                </View>
-              </View>
+              {/* Trạng thái thật của quán + công tắc nhận đơn */}
+              <StoreStatusCard
+                restaurant={restaurant}
+                busy={toggleOpenMutation.isPending}
+                onToggle={(val) => toggleOpenMutation.mutate(val)}
+              />
 
-              {/* Mở / đóng nhận đơn */}
-              <View
-                className={`flex-row items-center gap-3 rounded-xl border p-4 ${
-                  restaurant.isOpen ? 'border-success/30 bg-success-soft' : 'border-line bg-surface'
-                }`}
-              >
-                <View
-                  className={`h-11 w-11 items-center justify-center rounded-full ${
-                    restaurant.isOpen ? 'bg-success' : 'bg-canvas-subtle'
-                  }`}
-                >
-                  <Icon name={restaurant.isOpen ? 'storefront' : 'moon-outline'} size="md" tone={restaurant.isOpen ? 'inverse' : 'secondary'} />
-                </View>
-                <View className="flex-1">
-                  <Text variant="body-lg" weight="bold">
-                    {restaurant.isOpen ? 'Đang mở cửa' : 'Đang đóng cửa'}
-                  </Text>
-                  <Text variant="caption" tone="secondary">
-                    {!restaurant.isOpen
-                      ? 'Quán tạm ngừng, khách không đặt được món'
-                      : restaurant.acceptingOrders
-                        ? `Khách trong bán kính ${restaurant.deliveryRadiusKm} km quanh quán có thể đặt món`
-                        : `Ngoài giờ mở cửa (${restaurant.openTime} – ${restaurant.closeTime}), khách chưa đặt được`}
-                  </Text>
-                </View>
-                <Switch
-                  accessibilityLabel={restaurant.isOpen ? 'Đóng cửa quán' : 'Mở cửa quán'}
-                  value={restaurant.isOpen}
-                  disabled={toggleOpenMutation.isPending || restaurant.status !== 'ACTIVE'}
-                  onValueChange={(val) => toggleOpenMutation.mutate(val)}
-                  trackColor={{ false: palette.line.DEFAULT, true: palette.success.DEFAULT }}
-                  thumbColor={palette.surface}
+              {/* Thao tác nhanh */}
+              <View className="flex-row flex-wrap gap-3">
+                <QuickTile
+                  icon="time"
+                  box="bg-brand-50"
+                  tone="brand"
+                  title="Giờ mở cửa"
+                  value={`${restaurant.openTime || '07:00'} – ${restaurant.closeTime || '22:00'}`}
+                  onPress={openEdit}
+                />
+                <QuickTile
+                  icon="navigate"
+                  box="bg-success-soft"
+                  tone="success"
+                  title="Bán kính giao"
+                  value={`${restaurant.deliveryRadiusKm} km`}
+                  onPress={openEdit}
+                />
+                <QuickTile
+                  icon="star"
+                  box="bg-accent-50"
+                  tone="accent"
+                  title="Đánh giá"
+                  value={`${restaurant.rating.toFixed(1)} ★ · ${restaurant.ratingCount ?? 0} lượt`}
+                  onPress={() => navigation.navigate('OwnerReviews')}
+                />
+                <QuickTile
+                  icon="stats-chart"
+                  box="bg-violet-soft"
+                  tone="violet"
+                  title="Thống kê"
+                  value="Doanh thu, món bán chạy"
+                  onPress={() => navigation.navigate('OwnerStats')}
                 />
               </View>
 
-              {/* Thống kê tóm tắt */}
+              {/* Doanh thu tóm tắt */}
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel="Xem thống kê bán hàng"
                 onPress={() => navigation.navigate('OwnerStats')}
-                className="gap-3 rounded-xl bg-surface p-4 shadow-card active:opacity-85"
+                className="gap-3 rounded-2xl bg-surface p-4 shadow-card active:opacity-90"
               >
                 <View className="flex-row items-center gap-2">
-                  <View className="h-9 w-9 items-center justify-center rounded-lg bg-brand-50">
-                    <Icon name="stats-chart" size="md" tone="brand" />
-                  </View>
-                  <Text variant="body-lg" weight="bold" className="flex-1">
-                    Thống kê bán hàng
+                  <Text variant="headline" weight="bold" className="flex-1">
+                    Doanh thu
                   </Text>
                   <Text variant="caption" weight="semibold" tone="brand">
-                    Xem chi tiết
+                    Chi tiết
                   </Text>
                   <Icon name="chevron-forward" size="sm" tone="brand" />
                 </View>
                 <View className="flex-row gap-2">
                   <MiniStat
-                    label="Doanh thu hôm nay"
-                    value={todayStats.data ? formatVND(todayStats.data.revenue) : '—'}
+                    label="Hôm nay"
+                    amount={todayStats.data?.revenue}
                     note={todayStats.data ? `${todayStats.data.deliveredOrders} đơn hoàn thành` : undefined}
+                    highlight
                   />
                   <MiniStat
                     label="7 ngày qua"
-                    value={weekStats.data ? formatVND(weekStats.data.revenue) : '—'}
+                    amount={weekStats.data?.revenue}
                     note={weekStats.data ? `${weekStats.data.itemsSold} món đã bán` : undefined}
                   />
                 </View>
                 {!!weekStats.data?.topItems[0] && (
-                  <View className="flex-row items-center gap-2 rounded-lg bg-accent-50 px-3 py-2">
+                  <View className="flex-row items-center gap-2 rounded-xl bg-accent-50 px-3 py-2.5">
                     <Icon name="flame" size="sm" tone="accent" />
                     <Text variant="caption" className="flex-1" numberOfLines={1}>
-                      Bán chạy nhất tuần: {weekStats.data.topItems[0].name} ({weekStats.data.topItems[0].quantity} phần)
+                      Bán chạy nhất tuần:{' '}
+                      <Text variant="caption" weight="bold">
+                        {weekStats.data.topItems[0].name}
+                      </Text>{' '}
+                      ({weekStats.data.topItems[0].quantity} phần)
                     </Text>
                   </View>
                 )}
               </Pressable>
 
               {/* Thông tin quán */}
-              <Group title="Thông tin quán">
-                <ListRow
-                  icon="star-outline"
-                  iconTone="brand"
-                  title="Đánh giá thực khách"
-                  subtitle={`${restaurant.rating.toFixed(1)} sao (${restaurant.ratingCount ?? 0} lượt) · Xem & phản hồi`}
-                  onPress={() => navigation.navigate('OwnerReviews')}
-                />
-                <Divider inset />
+              <Group
+                title="Thông tin quán"
+                action={
+                  <Pressable accessibilityRole="button" hitSlop={8} onPress={openEdit} className="flex-row items-center gap-1">
+                    <Icon name="create-outline" size="sm" tone="brand" />
+                    <Text variant="caption" weight="semibold" tone="brand">
+                      Sửa
+                    </Text>
+                  </Pressable>
+                }
+              >
+                <Pressable accessibilityRole="button" accessibilityLabel="Sửa ảnh bìa quán" onPress={openEdit} className="pt-3">
+                  <AppImage uri={restaurant.imageUrl} className="h-32 w-full rounded-xl" fallbackIcon="image-outline" />
+                </Pressable>
                 <ListRow
                   icon="location-outline"
                   iconTone="brand"
@@ -431,18 +407,10 @@ export const OwnerRestaurantScreen: React.FC = () => {
                 />
                 <Divider inset />
                 <ListRow
-                  icon="time-outline"
+                  icon="call-outline"
                   iconTone="brand"
-                  title="Giờ mở cửa"
-                  subtitle={`${restaurant.openTime || '07:00'} – ${restaurant.closeTime || '22:00'}`}
-                  onPress={openEdit}
-                />
-                <Divider inset />
-                <ListRow
-                  icon="navigate-outline"
-                  iconTone="brand"
-                  title="Bán kính giao hàng"
-                  subtitle={`${restaurant.deliveryRadiusKm} km quanh quán`}
+                  title="Số điện thoại quán"
+                  subtitle={restaurant.phone || 'Chưa cập nhật'}
                   onPress={openEdit}
                 />
                 <Divider inset />
@@ -457,31 +425,36 @@ export const OwnerRestaurantScreen: React.FC = () => {
               </Group>
             </>
           ) : (
-            <View className="items-center gap-2 rounded-xl bg-surface p-6 shadow-card">
-              <Icon name="storefront-outline" size="xl" tone="muted" />
-              <Text variant="headline">Bạn chưa có nhà hàng nào</Text>
-              <Text variant="body" tone="secondary" className="text-center">
-                Vui lòng liên hệ Quản trị viên để đăng ký mở quán trên hệ thống.
-              </Text>
-            </View>
+            <EmptyState
+              variant="card"
+              icon="storefront-outline"
+              title="Bạn chưa có nhà hàng nào"
+              description="Vui lòng liên hệ Quản trị viên để đăng ký mở quán trên hệ thống."
+            />
           )}
 
+          {/* Tài khoản chủ quán */}
           <Group title="Tài khoản">
-            <ListRow
-              icon="person-outline"
-              iconTone="brand"
-              title="Thông tin cá nhân & mật khẩu"
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Thông tin cá nhân và mật khẩu"
               onPress={() => navigation.navigate('EditProfile')}
-            />
-            <Divider inset />
-            <ListRow
-              icon="log-out-outline"
-              title="Đăng xuất"
-              destructive
-              showChevron={false}
-              onPress={() => setConfirmLogout(true)}
-            />
+              className="min-h-touch flex-row items-center gap-3 py-3 active:opacity-80"
+            >
+              <Avatar uri={user?.avatarUrl} name={user?.fullName} size="md" />
+              <View className="flex-1">
+                <Text variant="body" weight="semibold" numberOfLines={1}>
+                  {user?.fullName || 'Chủ quán'}
+                </Text>
+                <Text variant="caption" weight="regular" tone="muted" numberOfLines={1}>
+                  {user?.email} · Đối tác quán ăn
+                </Text>
+              </View>
+              <Icon name="chevron-forward" size="sm" tone="muted" />
+            </Pressable>
           </Group>
+
+          <LogoutButton onLogout={handleLogout} message="Bạn sẽ cần đăng nhập lại để quản lý quán." />
         </View>
       </ScrollView>
 
@@ -617,43 +590,78 @@ export const OwnerRestaurantScreen: React.FC = () => {
         </ScrollView>
       </BottomSheet>
 
-      {/* Hộp xác nhận chạy được cả trên web (Alert.alert có nút không hiện gì trên web) */}
-      <ConfirmDialog
-        visible={confirmLogout}
-        title="Đăng xuất?"
-        message="Bạn có chắc chắn muốn đăng xuất khỏi tài khoản chủ quán?"
-        confirmLabel="Đăng xuất"
-        destructive
-        onCancel={() => setConfirmLogout(false)}
-        onConfirm={handleLogout}
-      />
     </View>
   );
 };
 
-const Group: React.FC<{ title: string; children: React.ReactNode }> = ({ title, children }) => (
+const Group: React.FC<{ title: string; action?: React.ReactNode; children: React.ReactNode }> = ({
+  title,
+  action,
+  children,
+}) => (
   <View className="gap-2">
-    <Text variant="caption" weight="semibold" tone="secondary" className="px-1">
-      {title}
-    </Text>
-    <View className="rounded-lg bg-surface px-3 shadow-card">{children}</View>
+    <View className="flex-row items-center justify-between px-1">
+      <Text variant="caption" weight="bold" tone="secondary" className="uppercase">
+        {title}
+      </Text>
+      {action}
+    </View>
+    <View className="rounded-2xl bg-surface px-3 shadow-card">{children}</View>
   </View>
 );
 
-const MiniStat: React.FC<{ label: string; value: string; note?: string }> = ({ label, value, note }) => (
-  <View className="flex-1 rounded-lg bg-canvas-subtle px-3 py-2.5">
+const MiniStat: React.FC<{ label: string; amount?: number; note?: string; highlight?: boolean }> = ({
+  label,
+  amount,
+  note,
+  highlight,
+}) => (
+  <View className={cn('flex-1 gap-0.5 rounded-xl px-3 py-2.5', highlight ? 'bg-brand-50' : 'bg-canvas-subtle')}>
     <Text variant="caption" tone="secondary" numberOfLines={1}>
       {label}
     </Text>
-    <Text variant="headline" weight="bold" numberOfLines={1}>
-      {value}
-    </Text>
+    {amount === undefined ? (
+      <Text variant="headline" weight="bold" tone="muted">
+        —
+      </Text>
+    ) : (
+      <Money amount={amount} variant="headline" tone={highlight ? 'brand' : 'default'} />
+    )}
     {!!note && (
       <Text variant="micro" weight="regular" tone="muted" numberOfLines={1}>
         {note}
       </Text>
     )}
   </View>
+);
+
+/** Ô thao tác nhanh (2 cột). */
+const QuickTile: React.FC<{
+  icon: IconName;
+  box: string;
+  tone: IconTone;
+  title: string;
+  value: string;
+  onPress: () => void;
+}> = ({ icon, box, tone, title, value, onPress }) => (
+  <Pressable
+    accessibilityRole="button"
+    accessibilityLabel={`${title}: ${value}`}
+    onPress={onPress}
+    className="min-w-[45%] flex-1 gap-2 rounded-2xl bg-surface p-3.5 shadow-card active:opacity-85"
+  >
+    <View className={cn('h-10 w-10 items-center justify-center rounded-xl', box)}>
+      <Icon name={icon} size="md" tone={tone} />
+    </View>
+    <View className="gap-0.5">
+      <Text variant="body" weight="bold">
+        {title}
+      </Text>
+      <Text variant="caption" weight="regular" tone="secondary" numberOfLines={1}>
+        {value}
+      </Text>
+    </View>
+  </Pressable>
 );
 
 /** Chọn giờ bằng nút −/+ (bước 30 phút), không cần thư viện chọn giờ. */

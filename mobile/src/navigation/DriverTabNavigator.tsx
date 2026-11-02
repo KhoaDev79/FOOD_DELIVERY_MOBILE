@@ -7,8 +7,12 @@ import { DriverAvailableOrdersScreen } from '../screens/driver/DriverAvailableOr
 import { DriverDeliveriesScreen } from '../screens/driver/DriverDeliveriesScreen';
 import { DriverDeliveryDetailScreen } from '../screens/driver/DriverDeliveryDetailScreen';
 import { DriverProfileScreen } from '../screens/driver/DriverProfileScreen';
+import { DriverReviewsScreen } from '../screens/driver/DriverReviewsScreen';
 import { DriverVehicleScreen } from '../screens/driver/DriverVehicleScreen';
 import { DriverWalletScreen } from '../screens/driver/DriverWalletScreen';
+import { ChatScreen } from '../screens/chat/ChatScreen';
+import { InboxScreen } from '../screens/chat/InboxScreen';
+import { useUnreadChatCount } from '../hooks/useUnreadChatCount';
 import { EditProfileScreen } from '../screens/profile/EditProfileScreen';
 import { DriverStackParamList, DriverTabParamList } from '../types/navigation';
 
@@ -18,6 +22,7 @@ const Stack = createNativeStackNavigator<DriverStackParamList>();
 const TAB_META: Record<keyof DriverTabParamList, TabMeta> = {
   DriverAvailableTab: { label: 'Tìm đơn', icon: 'compass-outline', iconActive: 'compass' },
   DriverDeliveriesTab: { label: 'Chuyến giao', icon: 'bicycle-outline', iconActive: 'bicycle' },
+  DriverInboxTab: { label: 'Tin nhắn', icon: 'chatbubbles-outline', iconActive: 'chatbubbles' },
   DriverProfileTab: { label: 'Tài xế', icon: 'person-outline', iconActive: 'person' },
 };
 
@@ -25,28 +30,36 @@ const TAB_META: Record<keyof DriverTabParamList, TabMeta> = {
  * Các tab chính của tài xế:
  * Dùng chung thanh tab nổi FloatingTabBar (không có nút giỏ hàng, giống chủ quán).
  */
-const DriverTabs: React.FC = () => (
-  <Tab.Navigator
-    screenOptions={{ headerShown: false }}
-    tabBar={(props) => <FloatingTabBar {...props} meta={TAB_META} />}
-  >
-    <Tab.Screen
-      name="DriverAvailableTab"
-      component={DriverAvailableOrdersScreen}
-      options={{ title: TAB_META.DriverAvailableTab.label }}
-    />
-    <Tab.Screen
-      name="DriverDeliveriesTab"
-      component={DriverDeliveriesScreen}
-      options={{ title: TAB_META.DriverDeliveriesTab.label }}
-    />
-    <Tab.Screen
-      name="DriverProfileTab"
-      component={DriverProfileScreen}
-      options={{ title: TAB_META.DriverProfileTab.label }}
-    />
-  </Tab.Navigator>
-);
+const DriverTabs: React.FC = () => {
+  const unreadChats = useUnreadChatCount();
+  return (
+    <Tab.Navigator
+      screenOptions={{ headerShown: false }}
+      tabBar={(props) => <FloatingTabBar {...props} meta={TAB_META} badges={{ DriverInboxTab: unreadChats }} />}
+    >
+      <Tab.Screen
+        name="DriverAvailableTab"
+        component={DriverAvailableOrdersScreen}
+        options={{ title: TAB_META.DriverAvailableTab.label }}
+      />
+      <Tab.Screen
+        name="DriverDeliveriesTab"
+        component={DriverDeliveriesScreen}
+        options={{ title: TAB_META.DriverDeliveriesTab.label }}
+      />
+      <Tab.Screen
+        name="DriverInboxTab"
+        component={InboxScreen}
+        options={{ title: TAB_META.DriverInboxTab.label }}
+      />
+      <Tab.Screen
+        name="DriverProfileTab"
+        component={DriverProfileScreen}
+        options={{ title: TAB_META.DriverProfileTab.label }}
+      />
+    </Tab.Navigator>
+  );
+};
 
 /**
  * Stack điều hướng của tài xế:
@@ -76,6 +89,14 @@ export const DriverTabNavigator: React.FC = () => {
       <Stack.Screen
         name="DriverWallet"
         component={DriverWalletScreen as React.ComponentType<any>}
+      />
+      <Stack.Screen
+        name="DriverReviews"
+        component={DriverReviewsScreen as React.ComponentType<any>}
+      />
+      <Stack.Screen
+        name="Chat"
+        component={ChatScreen as React.ComponentType<any>}
       />
     </Stack.Navigator>
   );

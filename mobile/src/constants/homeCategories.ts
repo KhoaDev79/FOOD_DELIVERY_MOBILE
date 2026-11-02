@@ -1,7 +1,8 @@
+import { CuisineCategory } from '../types/api';
+
 /**
- * Lối tắt danh mục trên trang chủ. Đây KHÔNG phải dữ liệu từ API: chạm vào chỉ lọc
- * danh sách quán theo từ khoá trong tên/mô tả. Ảnh là ảnh cục bộ của backend
- * (backend/public/images/food, giấy phép Unsplash – xem SOURCES.md).
+ * Lối tắt danh mục ẩm thực trên trang chủ (lấy động từ GET /cuisines,
+ * fallback về danh sách mặc định nếu mạng offline hoặc đang tải).
  */
 export interface HomeCategory {
   id: string;
@@ -10,7 +11,7 @@ export interface HomeCategory {
   image: string;
 }
 
-export const HOME_CATEGORIES: HomeCategory[] = [
+export const DEFAULT_HOME_CATEGORIES: HomeCategory[] = [
   {
     id: 'bun-pho',
     label: 'Bún - Phở',
@@ -34,3 +35,19 @@ export const HOME_CATEGORIES: HomeCategory[] = [
     image: '/public/images/food/che.jpg',
   },
 ];
+
+/**
+ * Chuyển đổi dữ liệu CuisineCategory từ API backend thành định dạng hiển thị HomeCategory
+ */
+export function mapCuisinesToHomeCategories(items?: CuisineCategory[]): HomeCategory[] {
+  // Chỉ dùng danh mục mặc định khi chưa tải được dữ liệu; danh sách rỗng nghĩa là quản trị viên đã tắt hết
+  if (!items) return DEFAULT_HOME_CATEGORIES;
+  return items.map((item) => ({
+    id: item.code || item.id,
+    label: item.name,
+    keywords: item.keywords && item.keywords.length > 0 ? item.keywords : [item.name.toLowerCase()],
+    image: item.imageUrl,
+  }));
+}
+
+export const HOME_CATEGORIES = DEFAULT_HOME_CATEGORIES;

@@ -166,6 +166,8 @@ export const RestaurantDetailScreen: React.FC<Props> = ({ route, navigation }) =
     imageUrl: restaurant.imageUrl,
     latitude: restaurant.latitude,
     longitude: restaurant.longitude,
+    address: restaurant.address,
+    phone: restaurant.phone,
   };
 
   const commitAdd = ({ item, sel }: PendingAdd) => {
@@ -206,7 +208,11 @@ export const RestaurantDetailScreen: React.FC<Props> = ({ route, navigation }) =
   return (
     <View className="flex-1 bg-canvas-subtle">
       <StatusBar style="light" />
-      <ScrollView ref={scrollRef} contentContainerClassName={showCartBar ? 'pb-32' : 'pb-10'}>
+      <ScrollView
+        ref={scrollRef}
+        contentContainerClassName={showCartBar ? 'pb-36' : 'pb-16'}
+        contentContainerStyle={{ paddingBottom: showCartBar ? 140 : 80 }}
+      >
         {/* Ảnh bìa + lớp tối để nút nổi luôn rõ */}
         <AppImage uri={restaurant.imageUrl} className="h-64 w-full" fallbackIcon="storefront-outline">
           <Gradient preset="imageScrim" className="absolute inset-0" />
@@ -263,7 +269,7 @@ export const RestaurantDetailScreen: React.FC<Props> = ({ route, navigation }) =
             {distanceKm !== undefined && (
               <MetaItem icon="navigate-outline" label={`Khoảng ${formatDistance(distanceKm) ?? ''}`} />
             )}
-            {distanceKm !== undefined && <MetaItem icon="bicycle-outline" label={estimateDeliveryTime(distanceKm)} />}
+            {distanceKm !== undefined && <MetaItem icon="bicycle-outline" label={estimateDeliveryTime(distanceKm, true)} />}
             {restaurant.openTime && restaurant.closeTime && (
               <MetaItem icon="time-outline" label={`${restaurant.openTime} - ${restaurant.closeTime}`} />
             )}
@@ -308,12 +314,16 @@ export const RestaurantDetailScreen: React.FC<Props> = ({ route, navigation }) =
         )}
 
         {canOrder && outOfRange && (
-          <View className="mx-4 mt-3 flex-row items-center gap-2 rounded-md bg-warning-soft p-3">
-            <Icon name="alert-circle-outline" size="md" tone="accent" />
-            <Text variant="body" className="flex-1 text-warning-strong">
-              Quán chỉ giao trong {restaurant.deliveryRadiusKm} km, vị trí hiện tại của bạn cách{' '}
-              {formatDistance(distanceKm)}. Hãy chọn địa chỉ giao gần quán hơn khi thanh toán.
-            </Text>
+          <View className="mx-4 mt-3 flex-row items-center gap-2.5 rounded-2xl border border-warning/30 bg-warning-soft/60 p-3.5 shadow-card">
+            <Icon name="warning" size="md" tone="accent" />
+            <View className="flex-1">
+              <Text variant="body" weight="bold" tone="accent">
+                Vị trí của bạn hiện nằm ngoài phạm vi giao hàng của quán ăn này
+              </Text>
+              <Text variant="caption" tone="secondary" className="mt-0.5">
+                Quán chỉ giao trong bán kính {restaurant.deliveryRadiusKm} km (vị trí hiện tại của bạn cách {formatDistance(distanceKm)}). Hãy chọn địa chỉ giao gần quán hơn khi thanh toán.
+              </Text>
+            </View>
           </View>
         )}
 

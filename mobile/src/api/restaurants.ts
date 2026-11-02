@@ -1,7 +1,10 @@
 import { apiClient } from './client';
 import {
   Banner,
+  CuisineCategory,
   ManageRestaurantReview,
+  MenuItemOptionsInput,
+  MenuSuggestion,
   NearbyDish,
   OrderDetail,
   OrderReview,
@@ -30,6 +33,18 @@ export const restaurantsApi = {
     apiClient.get<any, { items: NearbyDish[] }>('/restaurants/nearby/dishes', { params }),
 
   getBanners: () => apiClient.get<any, Banner[]>('/banners'),
+
+  getCuisines: () => apiClient.get<any, CuisineCategory[]>('/cuisines'),
+
+  getPopularSearches: () => apiClient.get<any, string[]>('/search/popular'),
+
+  logSearch: (query: string) => apiClient.post<any, { success: boolean }>('/search/log', { query }),
+
+  /** Gợi ý món thêm vào giỏ ("Thường được đặt cùng"). */
+  getSuggestions: (restaurantId: string, itemIds: string[]) =>
+    apiClient.get<any, { items: MenuSuggestion[] }>(`/restaurants/${restaurantId}/suggestions`, {
+      params: { itemIds: itemIds.join(',') },
+    }),
 
   getDetail: (id: string) =>
     apiClient.get<any, RestaurantDetail>(`/restaurants/${id}`),
@@ -71,6 +86,8 @@ export const restaurantsApi = {
       imageUrl?: string;
       /** 0, 5, 7, 10, 15, 20 – backend tự tính giá giảm */
       discountPercent?: number;
+      isAvailable?: boolean;
+      options?: MenuItemOptionsInput | null;
     },
   ) => apiClient.post<any, any>(`/restaurants/${restaurantId}/menu-items`, data),
 
@@ -84,6 +101,8 @@ export const restaurantsApi = {
       categoryId?: string;
       imageUrl?: string;
       discountPercent?: number;
+      /** null = xoá hết tuỳ chọn; bỏ trống = giữ nguyên */
+      options?: MenuItemOptionsInput | null;
     },
   ) => apiClient.patch<any, any>(`/menu-items/${id}`, data),
 

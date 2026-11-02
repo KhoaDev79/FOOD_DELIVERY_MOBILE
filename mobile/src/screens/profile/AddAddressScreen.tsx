@@ -1,4 +1,3 @@
-import { Ionicons } from '@expo/vector-icons';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import React, { useEffect } from 'react';
@@ -13,7 +12,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { usersApi } from '../../api/users';
-import { Button, Text, TopBar } from '../../components/ui';
+import { Button, Icon, Text, TopBar } from '../../components/ui';
 import { queryKeys } from '../../constants/queryKeys';
 import { useLocation } from '../../hooks/useLocation';
 import {
@@ -24,6 +23,7 @@ import {
 import { useAuthStore } from '../../store/useAuthStore';
 import { useDeliveryAddressStore } from '../../store/useDeliveryAddressStore';
 import { RootStackParamList } from '../../types/navigation';
+import { palette } from '../../theme';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'AddAddress'>;
 
@@ -62,7 +62,7 @@ export const AddAddressScreen: React.FC<Props> = ({ navigation, route }) => {
     return () => {
       resetDraft();
     };
-  }, []);
+  }, [resetDraft]);
 
   // Khởi tạo các giá trị mặc định từ tài khoản người dùng
   useEffect(() => {
@@ -75,7 +75,7 @@ export const AddAddressScreen: React.FC<Props> = ({ navigation, route }) => {
     if (initialTag) {
       setSelectedTag(initialTag);
     }
-  }, [user]);
+  }, [initialTag, receiverName, receiverPhone, setReceiverName, setReceiverPhone, setSelectedTag, user?.fullName, user?.phone]);
 
   const createMutation = useMutation({
     mutationFn: (data: any) => usersApi.createAddress(data),
@@ -151,19 +151,19 @@ export const AddAddressScreen: React.FC<Props> = ({ navigation, route }) => {
             <View className="flex-row items-center justify-between">
               <TextInput
                 placeholder="Tên người nhận *"
-                placeholderTextColor="#9A9EA5"
+                placeholderTextColor={palette.ink.muted}
                 value={receiverName}
                 onChangeText={setReceiverName}
                 className="flex-1 font-body text-body text-ink"
               />
-              <Ionicons name="person-circle-outline" size={26} color="#1EB9CE" />
+              <Icon name="person-circle-outline" size={26} tone="brand" />
             </View>
 
             <View className="h-[1px] bg-line" />
 
             <TextInput
               placeholder="Số điện thoại *"
-              placeholderTextColor="#9A9EA5"
+              placeholderTextColor={palette.ink.muted}
               value={receiverPhone}
               onChangeText={setReceiverPhone}
               keyboardType="phone-pad"
@@ -178,10 +178,10 @@ export const AddAddressScreen: React.FC<Props> = ({ navigation, route }) => {
               onPress={handleOpenMapPicker}
             >
               <View className="flex-1 flex-row items-start mr-2">
-                <Ionicons
+                <Icon
                   name="location-outline"
                   size={22}
-                  color="#1EB9CE"
+                  tone="brand"
                   style={{ marginRight: 8, marginTop: 2 }}
                 />
                 <View className="flex-1">
@@ -200,7 +200,7 @@ export const AddAddressScreen: React.FC<Props> = ({ navigation, route }) => {
                   )}
                 </View>
               </View>
-              <Ionicons name="chevron-forward" size={18} color="#9A9EA5" />
+              <Icon name="chevron-forward" size={18} tone="muted" />
             </Pressable>
 
             <View className="h-[1px] bg-line" />
@@ -208,7 +208,7 @@ export const AddAddressScreen: React.FC<Props> = ({ navigation, route }) => {
             <View className="flex-row items-center justify-between">
               <TextInput
                 placeholder="Hoặc tự gõ địa chỉ chữ (Số nhà, đường, phường...)"
-                placeholderTextColor="#9A9EA5"
+                placeholderTextColor={palette.ink.muted}
                 value={selectedAddressLine}
                 onChangeText={(txt) => setManualAddressLine(txt)}
                 className="flex-1 font-body text-body text-ink"
@@ -250,7 +250,7 @@ export const AddAddressScreen: React.FC<Props> = ({ navigation, route }) => {
 
             <TextInput
               placeholder="Tòa nhà, Số tầng (Không bắt buộc)"
-              placeholderTextColor="#9A9EA5"
+              placeholderTextColor={palette.ink.muted}
               value={buildingFloor}
               onChangeText={setBuildingFloor}
               className="font-body text-body text-ink"
@@ -260,7 +260,7 @@ export const AddAddressScreen: React.FC<Props> = ({ navigation, route }) => {
 
             <TextInput
               placeholder="Cổng (không bắt buộc)"
-              placeholderTextColor="#9A9EA5"
+              placeholderTextColor={palette.ink.muted}
               value={gateInfo}
               onChangeText={setGateInfo}
               className="font-body text-body text-ink"
@@ -302,7 +302,7 @@ export const AddAddressScreen: React.FC<Props> = ({ navigation, route }) => {
           <View className="rounded-xl border border-line bg-surface p-4 shadow-card">
             <TextInput
               placeholder="Ghi chú cho Tài xế (không bắt buộc)"
-              placeholderTextColor="#9A9EA5"
+              placeholderTextColor={palette.ink.muted}
               value={driverNote}
               onChangeText={setDriverNote}
               multiline
@@ -317,7 +317,7 @@ export const AddAddressScreen: React.FC<Props> = ({ navigation, route }) => {
         <View className="border-t border-line bg-surface p-4 shadow-card gap-2.5">
           {!canSave && (
             <View className="flex-row items-center gap-1.5 rounded-lg border border-warning/40 bg-warning-soft px-3 py-2">
-              <Ionicons name="alert-circle-outline" size={16} color="#B45309" />
+              <Icon name="alert-circle-outline" size={16} tone="warning" />
               <Text variant="caption" weight="medium" tone="warning" numberOfLines={2} className="flex-1">
                 Còn thiếu: {missingFields.join(' • ')}
               </Text>

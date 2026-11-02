@@ -8,10 +8,9 @@ import { InfoRow, RoleBadge } from '../../components/modules/admin/adminShared';
 import {
   Avatar,
   BottomSheet,
-  Button,
-  ConfirmDialog,
   Divider,
   ListRow,
+  LogoutButton,
   TAB_BAR_CLEARANCE,
   TabHeader,
   Text,
@@ -36,7 +35,6 @@ export const AdminProfileScreen: React.FC = () => {
   const queryClient = useQueryClient();
   const user = useAuthStore((s) => s.user);
   const logout = useAuthStore((s) => s.logout);
-  const [confirmLogout, setConfirmLogout] = useState(false);
   const [techOpen, setTechOpen] = useState(false);
 
   const handleClearCache = () => {
@@ -73,6 +71,24 @@ export const AdminProfileScreen: React.FC = () => {
             />
           </Group>
 
+          <Group title="Nội dung trang chủ">
+            <ListRow
+              icon="images-outline"
+              iconTone="brand"
+              title="Banner & quảng cáo"
+              subtitle="Ảnh khuyến mãi ở đầu trang chủ, lịch chạy"
+              onPress={() => navigation.navigate('AdminBanners')}
+            />
+            <Divider inset />
+            <ListRow
+              icon="grid-outline"
+              iconTone="accent"
+              title="Danh mục ẩm thực"
+              subtitle="Bún - Phở, Cơm, Trà sữa… và từ khoá lọc quán"
+              onPress={() => navigation.navigate('AdminCuisines')}
+            />
+          </Group>
+
           <Group title="Vận hành">
             <ListRow
               icon="refresh-outline"
@@ -92,13 +108,7 @@ export const AdminProfileScreen: React.FC = () => {
             />
           </Group>
 
-          <Button
-            label="Đăng xuất"
-            leftIcon="log-out-outline"
-            variant="dangerSoft"
-            size="lg"
-            onPress={() => setConfirmLogout(true)}
-          />
+          <LogoutButton onLogout={logout} message="Bạn sẽ cần đăng nhập lại để vào trang quản trị." />
         </View>
       </ScrollView>
 
@@ -113,18 +123,6 @@ export const AdminProfileScreen: React.FC = () => {
         </View>
       </BottomSheet>
 
-      <ConfirmDialog
-        visible={confirmLogout}
-        title="Đăng xuất?"
-        message="Bạn sẽ cần đăng nhập lại để vào trang quản trị."
-        confirmLabel="Đăng xuất"
-        destructive
-        onCancel={() => setConfirmLogout(false)}
-        onConfirm={() => {
-          setConfirmLogout(false);
-          logout();
-        }}
-      />
     </View>
   );
 };

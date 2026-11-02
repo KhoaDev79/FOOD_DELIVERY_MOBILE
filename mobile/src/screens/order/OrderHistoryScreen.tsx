@@ -1,40 +1,34 @@
-import { useNavigation } from '@react-navigation/native';
+import { useIsFocused, useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { StatusBar } from 'expo-status-bar';
 import React, { memo, useMemo, useState } from 'react';
-import { FlatList, Pressable, RefreshControl, View } from 'react-native';
-import { useIsFocused } from '@react-navigation/native';
+import { ActivityIndicator, FlatList, Pressable, RefreshControl, View } from 'react-native';
+import { clockTime, dayLabel, Money, SegmentedTabs } from '../../components/modules/partner/PartnerKit';
 import {
   AppImage,
   cn,
+  ConfirmDialog,
   EmptyState,
   ErrorState,
-  FilterBar,
   Icon,
-  OrderStatusBadge,
   Skeleton,
   TabHeader,
   TAB_BAR_CLEARANCE,
   Text,
 } from '../../components/ui';
+import { useReorder } from '../../hooks/useReorder';
 import { useMyOrders } from '../../services/useOrders';
 import { useAuthStore } from '../../store/useAuthStore';
 import { palette } from '../../theme';
 import { OrderStatus, OrderSummary } from '../../types/api';
 import { RootStackParamList } from '../../types/navigation';
-import { formatDateTime, formatVND } from '../../utils/format';
-import { formatOrderEndReason } from '../../utils/orderStatus';
+import { CUSTOMER_STEPS, customerHeadline, customerStepIndex, etaText } from '../../utils/customerOrderProgress';
+import { formatVND } from '../../utils/format';
+import { formatOrderEndReason, getOrderStatusRoleLabel } from '../../utils/orderStatus';
 
 type FilterKey = 'all' | 'active' | 'done' | 'cancelled';
 
 const ACTIVE: OrderStatus[] = ['PENDING', 'CONFIRMED', 'PREPARING', 'READY_FOR_PICKUP', 'PICKED_UP'];
-
-const FILTERS: { value: FilterKey; label: string }[] = [
-  { value: 'all', label: 'Tất cả' },
-  { value: 'active', label: 'Đang xử lý' },
-  { value: 'done', label: 'Hoàn thành' },
-  { value: 'cancelled', label: 'Đã huỷ / Thất bại' },
-];
 
 const matches = (o: OrderSummary, f: FilterKey) =>
   f === 'all' ||
@@ -42,110 +36,191 @@ const matches = (o: OrderSummary, f: FilterKey) =>
   (f === 'done' && o.status === 'DELIVERED') ||
   (f === 'cancelled' && (o.status === 'CANCELLED' || o.status === 'DELIVERY_FAILED'));
 
-const OrderCard = memo<{
-  order: OrderSummary;
-  onOpen: (o: OrderSummary) => void;
-  onReview: (o: OrderSummary) => void;
-}>(({ order, onOpen, onReview }) => {
-  const active = ACTIVE.includes(order.status);
-  const itemCount = order.items.reduce((s, i) => s + i.quantity, 0);
-  const canReview = Boolean(order.canReview || (order.status === 'DELIVERED' && !order.review && order.canReview !== false));
+
+const itemsText = (o: OrderSummary) => o.items.map((i) => `${i.quantity}× ${i.name}`).join(', ');
+const itemCount = (o: OrderSummary) => o.items.reduce((s, i) => s + i.quantity, 0);
+const paymentText = (o: OrderSummary) => (o.paymentMethod === 'VNPAY' ? 'VNPay' : 'Tiền mặt');
+
+type Row =
+  | { kind: 'section'; key: string; title: string }
+  | { kind: 'active'; key: string; order: OrderSummary }
+  | { kind: 'day'; key: string; label: string }
+  | { kind: 'past'; key: string; order: OrderSummary };
+
+/** Đơn đang xử lý: thẻ lớn nổi bật, có tiến trình và giờ giao dự kiến. */
+const ActiveOrderCard = memo<{ order: OrderSummary; onOpen: (o: OrderSummary) => void }>(({ order, onOpen }) => {
+  const step = customerStepIndex(order.status);
+  const headline = customerHeadline(order.status);
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={`Đơn từ ${order.restaurant.name}, ${formatVND(order.total)}, ${formatDateTime(order.createdAt)}`}
+      accessibilityLabel={`Theo dõi đơn từ ${order.restaurant.name}, ${getOrderStatusRoleLabel(order.status, 'customer')}`}
       onPress={() => onOpen(order)}
-      className={cn(
-        'gap-3 rounded-lg border bg-surface p-3 shadow-card',
-        'hover:border-brand-400 active:bg-brand-50',
-        active ? 'border-brand-200' : 'border-line-subtle',
-      )}
+      className="gap-3 rounded-2xl border border-brand-200 bg-surface p-4 shadow-card active:opacity-95"
     >
       <View className="flex-row items-center gap-3">
-        <AppImage uri={order.restaurant.imageUrl} className="h-14 w-14 rounded-md" fallbackIcon="storefront-outline" />
+        <AppImage uri={order.restaurant.imageUrl} className="h-14 w-14 rounded-xl" fallbackIcon="storefront-outline" />
         <View className="flex-1 gap-0.5">
-          <Text variant="body-lg" weight="semibold" numberOfLines={1}>
+          <Text variant="body-lg" weight="bold" numberOfLines={1}>
             {order.restaurant.name}
           </Text>
-          <View className="flex-row items-center gap-1">
-            <Icon name="calendar-clear-outline" size={12} tone="muted" />
-            <Text variant="caption" weight="regular" tone="secondary">
-              {formatDateTime(order.createdAt)}
-            </Text>
-          </View>
-        </View>
-        <OrderStatusBadge status={order.status} />
-      </View>
-
-      <View className="rounded-md bg-canvas-subtle px-3 py-2">
-        <Text variant="body" tone="secondary" numberOfLines={2}>
-          {order.items.map((i) => `${i.quantity}× ${i.name}`).join(' · ')}
-        </Text>
-      </View>
-
-      <View className="flex-row items-center justify-between">
-        <Text variant="caption" weight="regular" tone="secondary">
-          {itemCount} món · {order.paymentMethod === 'VNPAY' ? 'VNPAY' : 'Tiền mặt'}
-        </Text>
-        <Text variant="body-lg" weight="bold" tone="brand">
-          {formatVND(order.total)}
-        </Text>
-      </View>
-
-      {(order.status === 'CANCELLED' || order.status === 'DELIVERY_FAILED') && !!formatOrderEndReason(order) && (
-        <View className="flex-row items-center gap-1.5 rounded-sm bg-danger-soft/30 px-2.5 py-1.5">
-          <Icon name="alert-circle-outline" size="xs" tone="danger" />
-          <Text variant="caption" tone="danger" className="flex-1" numberOfLines={2}>
-            {formatOrderEndReason(order)}
+          <Text variant="caption" weight="regular" tone="secondary" numberOfLines={1}>
+            {itemCount(order)} món · {formatVND(order.total)} · {paymentText(order)}
           </Text>
         </View>
-      )}
+        <Icon name="chevron-forward" size="sm" tone="muted" />
+      </View>
 
-      {/* Chỉ là nhãn hiển thị: cả thẻ đã là nút mở trang theo dõi (tránh nút lồng nút). */}
-      {active && (
-        <View
-          accessible={false}
-          className="h-button-sm flex-row items-center justify-center gap-1 rounded-sm border border-brand-100 bg-brand-50"
-        >
-          <Text variant="caption" weight="semibold" tone="brand">
-            Theo dõi đơn
-          </Text>
-          <Icon name="chevron-forward" size="sm" tone="brand" />
+      {/* Tiến trình 4 bước (cùng bước với màn Theo dõi đơn) */}
+      <View className="gap-1.5">
+        <View className="flex-row gap-1.5">
+          {CUSTOMER_STEPS.map((st, i) => (
+            <View key={st.label} className={cn('h-1.5 flex-1 rounded-full', i <= step ? 'bg-brand-500' : 'bg-line')} />
+          ))}
         </View>
-      )}
-
-      {canReview && (
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={`Đánh giá đơn hàng từ ${order.restaurant.name}`}
-          onPress={(e) => {
-            e.stopPropagation();
-            onReview(order);
-          }}
-          className="h-button-sm flex-row items-center justify-center gap-1.5 rounded-sm border border-warning/40 bg-warning-soft/30 active:opacity-80"
-        >
-          <Icon name="star" size="xs" tone="rating" />
-          <Text variant="caption" weight="bold">
-            Đánh giá đơn hàng
+        <View className="flex-row items-center justify-between gap-2">
+          <Text variant="caption" weight="bold" tone="brand" numberOfLines={1} className="flex-1">
+            {headline.title}
           </Text>
-        </Pressable>
-      )}
+          <Text variant="caption" weight="medium" tone="secondary">
+            Giao {etaText(order)}
+          </Text>
+        </View>
+      </View>
+
+      {/* Nhãn hành động: cả thẻ đã là nút (tránh nút lồng nút) */}
+      <View
+        accessible={false}
+        className="h-10 flex-row items-center justify-center gap-1.5 rounded-xl bg-brand-50"
+      >
+        <Icon name="navigate" size="sm" tone="brand" />
+        <Text variant="caption" weight="bold" tone="brand">
+          Theo dõi đơn
+        </Text>
+        <Icon name="chevron-forward" size={14} tone="brand" />
+      </View>
     </Pressable>
   );
 });
-OrderCard.displayName = 'OrderCard';
+ActiveOrderCard.displayName = 'ActiveOrderCard';
+
+/** Đơn đã kết thúc: thẻ gọn, có Đánh giá và Đặt lại. */
+const PastOrderCard = memo<{
+  order: OrderSummary;
+  reordering: boolean;
+  onOpen: (o: OrderSummary) => void;
+  onReview: (o: OrderSummary) => void;
+  onReorder: (o: OrderSummary) => void;
+}>(({ order, reordering, onOpen, onReview, onReorder }) => {
+  const delivered = order.status === 'DELIVERED';
+  const canReview = Boolean(order.canReview || (delivered && !order.review && order.canReview !== false));
+  const endReason = !delivered ? formatOrderEndReason(order) : null;
+
+  return (
+    <Pressable
+      accessibilityLabel={`Đơn từ ${order.restaurant.name}, ${getOrderStatusRoleLabel(order.status, 'customer')}`}
+      onPress={() => onOpen(order)}
+      className="gap-3 rounded-2xl bg-surface p-3.5 shadow-card active:opacity-95"
+    >
+      <View className="flex-row gap-3">
+        <AppImage
+          uri={order.restaurant.imageUrl}
+          className={cn('h-14 w-14 rounded-xl', delivered ? '' : 'opacity-50')}
+          fallbackIcon="storefront-outline"
+        />
+        <View className="flex-1 gap-0.5">
+          <View className="flex-row items-start justify-between gap-2">
+            <Text variant="body" weight="bold" numberOfLines={1} className="flex-1">
+              {order.restaurant.name}
+            </Text>
+            <Money amount={order.total} variant="body" tone={delivered ? 'default' : 'muted'} />
+          </View>
+          <Text variant="caption" weight="regular" tone="secondary" numberOfLines={1}>
+            {itemsText(order)}
+          </Text>
+          <View className="flex-row items-center gap-1.5">
+            <Icon
+              name={delivered ? 'checkmark-circle' : 'close-circle'}
+              size={13}
+              tone={delivered ? 'success' : 'danger'}
+            />
+            <Text variant="micro" weight="semibold" tone={delivered ? 'success' : 'danger'}>
+              {getOrderStatusRoleLabel(order.status, 'customer')}
+            </Text>
+            <Text variant="micro" weight="medium" tone="muted">
+              · {clockTime(order.createdAt)} · {paymentText(order)}
+            </Text>
+          </View>
+        </View>
+      </View>
+
+      {!!endReason && (
+        <Text variant="caption" weight="regular" tone="danger" numberOfLines={2}>
+          {endReason}
+        </Text>
+      )}
+
+      <View className="flex-row items-center justify-end gap-2 border-t border-line-subtle pt-3">
+        {order.review ? (
+          <View className="flex-row items-center gap-1 rounded-full bg-warning-soft px-2.5 py-1">
+            <Icon name="star" size={13} tone="rating" />
+            <Text variant="caption" weight="bold" className="text-warning-strong">
+              Đã đánh giá {order.review.rating}
+            </Text>
+          </View>
+        ) : canReview ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`Đánh giá đơn hàng từ ${order.restaurant.name}`}
+            onPress={(e) => {
+              e.stopPropagation();
+              onReview(order);
+            }}
+            className="h-9 flex-row items-center gap-1.5 rounded-full border border-line px-3.5 active:bg-canvas-subtle"
+          >
+            <Icon name="star" size={14} tone="rating" />
+            <Text variant="caption" weight="semibold">
+              Đánh giá
+            </Text>
+          </Pressable>
+        ) : null}
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`Đặt lại đơn từ ${order.restaurant.name}`}
+          disabled={reordering}
+          onPress={(e) => {
+            e.stopPropagation();
+            onReorder(order);
+          }}
+          className="h-9 min-w-[96px] flex-row items-center justify-center gap-1.5 rounded-full bg-brand-50 px-3.5 active:bg-brand-100"
+        >
+          {reordering ? (
+            <ActivityIndicator size="small" color={palette.brand['500']} />
+          ) : (
+            <>
+              <Icon name="refresh" size={14} tone="brand" />
+              <Text variant="caption" weight="bold" tone="brand">
+                Đặt lại
+              </Text>
+            </>
+          )}
+        </Pressable>
+      </View>
+    </Pressable>
+  );
+});
+PastOrderCard.displayName = 'PastOrderCard';
 
 const OrderSkeleton: React.FC = () => (
-  <View className="gap-3 rounded-lg bg-surface p-3">
+  <View className="gap-3 rounded-2xl bg-surface p-3.5">
     <View className="flex-row items-center gap-3">
-      <Skeleton className="h-14 w-14 rounded-md" />
+      <Skeleton className="h-14 w-14 rounded-xl" />
       <View className="flex-1 gap-2">
         <Skeleton className="h-4 w-3/5" />
+        <Skeleton className="h-3 w-4/5" />
         <Skeleton className="h-3 w-2/5" />
       </View>
     </View>
-    <Skeleton className="h-9 w-full" />
-    <Skeleton className="h-4 w-1/3 self-end" />
   </View>
 );
 
@@ -156,6 +231,7 @@ export const OrderHistoryScreen: React.FC = () => {
   const [refreshing, setRefreshing] = useState(false);
   const [filter, setFilter] = useState<FilterKey>('all');
   const { data, isLoading, isError, refetch } = useMyOrders();
+  const { reorder, confirmReplace, cancelReplace, conflict, loadingId } = useReorder();
 
   const onRefresh = async () => {
     if (!isAuthenticated) return;
@@ -164,9 +240,31 @@ export const OrderHistoryScreen: React.FC = () => {
     setRefreshing(false);
   };
 
-  const orders = useMemo(() => data?.items ?? [], [data]);
-  const visible = useMemo(() => orders.filter((o) => matches(o, filter)), [orders, filter]);
+  const orders = useMemo(() => (isAuthenticated ? data?.items ?? [] : []), [data, isAuthenticated]);
   const activeCount = orders.filter((o) => ACTIVE.includes(o.status)).length;
+
+  // Đơn đang xử lý lên đầu; đơn đã kết thúc nhóm theo ngày
+  const rows = useMemo<Row[]>(() => {
+    const visible = orders.filter((o) => matches(o, filter));
+    const active = visible.filter((o) => ACTIVE.includes(o.status));
+    const past = visible.filter((o) => !ACTIVE.includes(o.status));
+    const out: Row[] = [];
+    if (active.length) {
+      if (filter === 'all') out.push({ kind: 'section', key: 's-active', title: 'Đang xử lý' });
+      active.forEach((o) => out.push({ kind: 'active', key: o.id, order: o }));
+    }
+    let lastDay = '';
+    for (const o of past) {
+      const label = dayLabel(o.createdAt);
+      if (label !== lastDay) {
+        out.push({ kind: 'day', key: `d-${label}`, label });
+        lastDay = label;
+      }
+      out.push({ kind: 'past', key: o.id, order: o });
+    }
+    return out;
+  }, [orders, filter]);
+
   const openOrder = (o: OrderSummary) => navigation.navigate('OrderTracking', { orderId: o.id });
   const openReview = (o: OrderSummary) =>
     navigation.navigate('Rating', {
@@ -184,32 +282,67 @@ export const OrderHistoryScreen: React.FC = () => {
           !isAuthenticated
             ? 'Đăng nhập để xem lịch sử đơn'
             : isLoading
-            ? 'Đang tải…'
-            : activeCount > 0
-            ? `${activeCount} đơn đang xử lý`
-            : `${orders.length} đơn đã đặt`
+              ? 'Đang tải…'
+              : activeCount > 0
+                ? `${activeCount} đơn đang xử lý`
+                : `${orders.length} đơn đã đặt`
         }
       />
-      <FilterBar options={FILTERS} value={filter} onChange={setFilter} className="mt-1" />
 
-      {isLoading ? (
-        <View className="gap-3 px-4 pt-2">
+      {isAuthenticated && (
+        <View className="px-4 pb-1 pt-3">
+          <SegmentedTabs
+            value={filter}
+            onChange={setFilter}
+            trackClassName="bg-line"
+            items={[
+              { key: 'all', label: 'Tất cả' },
+              { key: 'active', label: 'Đang xử lý', count: activeCount || undefined },
+              { key: 'done', label: 'Đã giao' },
+              { key: 'cancelled', label: 'Đã huỷ' },
+            ]}
+          />
+        </View>
+      )}
+
+      {isAuthenticated && isLoading ? (
+        <View className="gap-3 px-4 pt-3">
           <OrderSkeleton />
           <OrderSkeleton />
           <OrderSkeleton />
         </View>
-      ) : isError ? (
+      ) : isAuthenticated && isError ? (
         <ErrorState onRetry={onRefresh} />
       ) : (
         <FlatList
-          data={visible}
-          keyExtractor={(o) => o.id}
-          contentContainerClassName={cn('flex-grow gap-3 px-4 pt-2', TAB_BAR_CLEARANCE)}
-          renderItem={({ item }) => (
-            <OrderCard order={item} onOpen={openOrder} onReview={openReview} />
-          )}
+          data={rows}
+          keyExtractor={(r) => r.key}
+          contentContainerClassName={cn('flex-grow gap-3 px-4 pt-3', TAB_BAR_CLEARANCE)}
+          showsVerticalScrollIndicator={false}
+          renderItem={({ item: row }) =>
+            row.kind === 'section' || row.kind === 'day' ? (
+              <Text variant="caption" weight="bold" tone="secondary" className="mt-1 px-1 uppercase">
+                {row.kind === 'section' ? row.title : row.label}
+              </Text>
+            ) : row.kind === 'active' ? (
+              <ActiveOrderCard order={row.order} onOpen={openOrder} />
+            ) : (
+              <PastOrderCard
+                order={row.order}
+                reordering={loadingId === row.order.id}
+                onOpen={openOrder}
+                onReview={openReview}
+                onReorder={reorder}
+              />
+            )
+          }
           refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[palette.brand['500']]} />
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              tintColor={palette.brand['500']}
+              colors={[palette.brand['500']]}
+            />
           }
           ListEmptyComponent={
             !isAuthenticated ? (
@@ -240,6 +373,23 @@ export const OrderHistoryScreen: React.FC = () => {
           }
         />
       )}
+
+      {/* Giỏ đang có món của quán khác */}
+      <ConfirmDialog
+        visible={!!conflict}
+        title="Thay giỏ hàng?"
+        message={
+          conflict
+            ? `Giỏ hàng đang có món của "${conflict.cartRestaurantName}". Bỏ các món đó để đặt lại đơn từ "${conflict.order.restaurant.name}"?`
+            : ''
+        }
+        confirmLabel="Thay giỏ hàng"
+        cancelLabel="Giữ giỏ cũ"
+        onCancel={cancelReplace}
+        onConfirm={() => {
+          confirmReplace();
+        }}
+      />
     </View>
   );
 };

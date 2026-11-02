@@ -1,4 +1,3 @@
-import { Ionicons } from '@expo/vector-icons';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import React, { useState } from 'react';
 import {
@@ -9,13 +8,14 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Button, LoadingSpinner, Text, TopBar } from '../../components/ui';
+import { Button, Icon, LoadingSpinner, Text, TopBar } from '../../components/ui';
 import { useLocation } from '../../hooks/useLocation';
 import { useAddresses, useDeleteAddress, useSetDefaultAddress } from '../../services/useUser';
 import { useAuthStore } from '../../store/useAuthStore';
 import { useDeliveryAddressStore } from '../../store/useDeliveryAddressStore';
 import { Address } from '../../types/api';
 import { RootStackParamList } from '../../types/navigation';
+import { palette } from '../../theme';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'AddressManagement'>;
 
@@ -71,7 +71,7 @@ export const AddressManagementScreen: React.FC<Props> = ({ navigation }) => {
             onPress={() => navigation.navigate('AddressPicker', { initialCoords: coords || undefined })}
             className="p-1 active:opacity-70"
           >
-            <Ionicons name="map-outline" size={24} color="#1EB9CE" />
+            <Icon name="map-outline" size={24} tone="brand" />
           </Pressable>
         }
       />
@@ -79,10 +79,10 @@ export const AddressManagementScreen: React.FC<Props> = ({ navigation }) => {
       {/* Thanh tìm kiếm vị trí */}
       <View className="px-4 py-2.5">
         <View className="h-11 flex-row items-center gap-2 rounded-xl border border-line bg-canvas-subtle px-3.5">
-          <Ionicons name="search" size={18} color="#9A9EA5" />
+          <Icon name="search" size={18} tone="muted" />
           <TextInput
             placeholder="Tìm kiếm địa chỉ đã lưu..."
-            placeholderTextColor="#9A9EA5"
+            placeholderTextColor={palette.ink.muted}
             value={searchQuery}
             onChangeText={setSearchQuery}
             className="h-full flex-1 font-body text-body text-ink"
@@ -106,12 +106,12 @@ export const AddressManagementScreen: React.FC<Props> = ({ navigation }) => {
                 onPress={() => navigation.navigate('AddAddress', { initialTag: 'Nhà' })}
               >
                 <View className="flex-row items-center gap-2.5">
-                  <Ionicons name="home-outline" size={20} color="#1A1A1A" />
+                  <Icon name="home-outline" size={20} tone="default" />
                   <Text variant="body" weight="medium">
                     Thêm địa chỉ Nhà
                   </Text>
                 </View>
-                <Ionicons name="chevron-forward" size={18} color="#9A9EA5" />
+                <Icon name="chevron-forward" size={18} tone="muted" />
               </Pressable>
 
               <View className="h-[1px] bg-line mx-3" />
@@ -121,12 +121,12 @@ export const AddressManagementScreen: React.FC<Props> = ({ navigation }) => {
                 onPress={() => navigation.navigate('AddAddress', { initialTag: 'Công ty' })}
               >
                 <View className="flex-row items-center gap-2.5">
-                  <Ionicons name="briefcase-outline" size={20} color="#1A1A1A" />
+                  <Icon name="briefcase-outline" size={20} tone="default" />
                   <Text variant="body" weight="medium">
                     Thêm địa chỉ Công ty
                   </Text>
                 </View>
-                <Ionicons name="chevron-forward" size={18} color="#9A9EA5" />
+                <Icon name="chevron-forward" size={18} tone="muted" />
               </Pressable>
             </View>
           </View>
@@ -138,7 +138,7 @@ export const AddressManagementScreen: React.FC<Props> = ({ navigation }) => {
             </Text>
             {filteredAddresses.length === 0 ? (
               <View className="items-center justify-center rounded-xl border border-line bg-surface p-8 shadow-card">
-                <Ionicons name="location-outline" size={36} color="#9A9EA5" />
+                <Icon name="location-outline" size={36} tone="muted" />
                 <Text variant="body" tone="muted" className="mt-2 text-center">
                   Chưa có địa chỉ nào phù hợp
                 </Text>
@@ -178,7 +178,7 @@ export const AddressManagementScreen: React.FC<Props> = ({ navigation }) => {
                         )}
                         {isSelected && (
                           <View className="flex-row items-center gap-1 rounded bg-success-soft px-2 py-0.5">
-                            <Ionicons name="checkmark-circle" size={13} color="#15803D" />
+                            <Icon name="checkmark-circle" size={13} tone="success" />
                             <Text variant="micro" weight="bold" tone="success">
                               Đang chọn
                             </Text>
@@ -201,7 +201,7 @@ export const AddressManagementScreen: React.FC<Props> = ({ navigation }) => {
                           onPress={() => handleDeleteAddress(addr.id, addr.label)}
                           className="p-1 active:opacity-70"
                         >
-                          <Ionicons name="trash-outline" size={18} color="#E5484D" />
+                          <Icon name="trash-outline" size={18} tone="danger" />
                         </Pressable>
                       </View>
                     </View>
