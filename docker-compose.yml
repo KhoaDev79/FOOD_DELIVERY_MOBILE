@@ -17,5 +17,24 @@ services:
       timeout: 5s
       retries: 10
 
+  backend:
+    build: ./backend
+    container_name: food_delivery_api
+    restart: unless-stopped
+    env_file:
+      - ./backend/.env
+    environment:
+      # Trong mạng Docker, backend gọi DB bằng tên service "postgres", cổng 5432
+      DATABASE_URL: postgresql://food:food_secret@postgres:5432/food_delivery?schema=public
+      NODE_ENV: production
+    ports:
+      - "3000:3000"
+    volumes:
+      # Giữ avatar người dùng upload khi build lại container
+      - ./backend/public/uploads:/app/public/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+
 volumes:
   pgdata:
