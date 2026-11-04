@@ -20,3 +20,7 @@ skills-lock.json
 backend/public/uploads/
 *.dump
 *.old
+
+# Báo cáo, slide đồ án (chỉ giữ trên máy, không đưa lên Git)
+docs/*.docx
+docs/*.pptx
