@@ -12,6 +12,7 @@ import {
 import { Role } from '@prisma/client';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
+import { AdminStatsService } from './admin-stats.service';
 import { AdminService } from './admin.service';
 import {
   AdminCreateRestaurantDto,
@@ -20,6 +21,8 @@ import {
   ChangeUserRoleDto,
   ListAdminOrdersQueryDto,
   ListAdminRestaurantsQueryDto,
+  ListAuditLogsQueryDto,
+  StatsOverviewQueryDto,
   ListRoleRequestsQueryDto,
   ListUsersQueryDto,
   RejectRestaurantDto,
@@ -33,11 +36,36 @@ import {
 @Roles(Role.ADMIN)
 @Controller('admin')
 export class AdminController {
-  constructor(private readonly adminService: AdminService) {}
+  constructor(
+    private readonly adminService: AdminService,
+    private readonly statsService: AdminStatsService,
+  ) {}
 
   @Get('stats')
   getStats() {
     return this.adminService.getDashboardStats();
+  }
+
+  /** Bảng điều khiển theo kỳ: KPI so với kỳ trước, biểu đồ, phễu, top quán, lý do huỷ, việc cần xử lý. */
+  @Get('stats/overview')
+  getOverview(@Query() q: StatsOverviewQueryDto) {
+    return this.statsService.getOverview(q.range);
+  }
+
+  /** Số việc đang chờ (nhẹ hơn overview): dùng cho tab Hệ thống. */
+  @Get('stats/attention')
+  getAttention() {
+    return this.statsService.getAttention();
+  }
+
+  @Get('audit-logs')
+  listAuditLogs(@Query() q: ListAuditLogsQueryDto) {
+    return this.statsService.listAuditLogs(q);
+  }
+
+  @Get('restaurants/:id/last-7-days')
+  restaurantLast7Days(@Param('id', ParseUUIDPipe) id: string) {
+    return this.statsService.restaurantLast7Days(id);
   }
 
   /* ------------------------------ Người dùng ------------------------------ */

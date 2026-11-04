@@ -1,4 +1,4 @@
-import { Logger, ValidationPipe } from '@nestjs/common';
+import { Logger, RequestMethod, ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
 import { NestExpressApplication } from '@nestjs/platform-express';
@@ -22,7 +22,15 @@ async function bootstrap() {
   const config = app.get(ConfigService);
 
   const corsOrigins = config.get<string[] | '*'>('corsOrigins') ?? '*';
-  app.setGlobalPrefix(GLOBAL_PREFIX);
+  // Link chia sẻ /s/r/:id, /s/d/:id để ngắn gọn, không nằm dưới /api/v1
+  app.setGlobalPrefix(GLOBAL_PREFIX, {
+    exclude: [
+      { path: 's/r/:id', method: RequestMethod.GET },
+      { path: 's/d/:id', method: RequestMethod.GET },
+    ],
+  });
+  // Sau reverse proxy (Caddy/Nginx) phải bật để req.ip là IP thật của người dùng (giới hạn tần suất theo IP)
+  app.set('trust proxy', config.get('security.trustProxy') ?? false);
   app.enableCors({ origin: corsOrigins === '*' ? true : corsOrigins, credentials: true });
   app.useBodyParser('json', { limit: '10mb' });
   app.useBodyParser('urlencoded', { limit: '10mb', extended: true });

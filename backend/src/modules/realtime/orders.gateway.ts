@@ -22,7 +22,16 @@ export const rooms = {
   order: (id: string) => `order_${id}`,
   drivers: 'drivers',
   admins: 'admins',
+  /** Người đang xem quán / có món của quán trong giỏ: nhận cập nhật món hết / mở bán lại */
+  restaurant: (id: string) => `restaurant_${id}`,
 };
+
+export interface MenuStockEventPayload {
+  restaurantId: string;
+  items: { id: string; isAvailable: boolean; soldOutUntil: string | null }[];
+}
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 type Ack = { ok: true; data?: any } | { ok: false; error: string };
 
@@ -32,6 +41,10 @@ export interface OrderEventPayload {
   paymentStatus: string;
   driverId: string | null;
   updatedAt: Date;
+  total?: number;
+  restaurantId?: string;
+  restaurantName?: string;
+  itemCount?: number;
 }
 
 const ACTIVE_DRIVER_ORDER_STATUSES = ['CONFIRMED', 'PREPARING', 'READY_FOR_PICKUP', 'PICKED_UP'] as const;
@@ -119,6 +132,22 @@ export class OrdersGateway implements OnGatewayConnection {
     if (!order || !canViewOrder(order, user)) return { ok: false, error: 'Forbidden' };
 
     await client.join(rooms.order(body.orderId));
+    return { ok: true };
+  }
+
+  /** Theo dõi tình trạng món của một quán (thông tin công khai, mọi tài khoản đã đăng nhập đều được). */
+  @SubscribeMessage('restaurant:watch')
+  async watchRestaurant(@ConnectedSocket() client: Socket, @MessageBody() body: { restaurantId?: string }): Promise<Ack> {
+    if (!client.data.user || !body?.restaurantId || !UUID_RE.test(body.restaurantId)) {
+      return { ok: false, error: 'Yêu cầu không hợp lệ' };
+    }
+    await client.join(rooms.restaurant(body.restaurantId));
+    return { ok: true };
+  }
+
+  @SubscribeMessage('restaurant:unwatch')
+  async unwatchRestaurant(@ConnectedSocket() client: Socket, @MessageBody() body: { restaurantId?: string }): Promise<Ack> {
+    if (body?.restaurantId && UUID_RE.test(body.restaurantId)) await client.leave(rooms.restaurant(body.restaurantId));
     return { ok: true };
   }
 
@@ -263,6 +292,8 @@ export class OrdersGateway implements OnGatewayConnection {
 
     const targets = [rooms.order(order.id), rooms.user(order.customerId), rooms.user(order.restaurant.ownerId)];
     if (order.driverId) targets.push(rooms.user(order.driverId));
+    // Admin theo dõi toàn sàn: bảng điều khiển cập nhật "Cần xử lý" và phễu đơn theo thời gian thực
+    targets.push(rooms.admins);
     // Socket.IO tự loại trùng khi 1 socket nằm ở nhiều room
     this.server?.to(targets).emit(event, this.toPayload(order));
   }
@@ -305,8 +336,23 @@ export class OrdersGateway implements OnGatewayConnection {
     }
   }
 
-  private toPayload(o: OrderEventPayload): OrderEventPayload {
-    return { id: o.id, status: o.status, paymentStatus: o.paymentStatus, driverId: o.driverId, updatedAt: o.updatedAt };
+  /** Phát thông báo mới đến người dùng qua socket riêng (user_<id>) */
+  emitNotification(userId: string, notification: unknown) {
+    this.server?.to(rooms.user(userId)).emit('notification:new', notification);
+  }
+
+  private toPayload(o: any): OrderEventPayload {
+    return {
+      id: o.id,
+      status: o.status,
+      paymentStatus: o.paymentStatus,
+      driverId: o.driverId,
+      updatedAt: o.updatedAt,
+      total: typeof o.total === 'number' ? o.total : undefined,
+      restaurantId: o.restaurantId ?? o.restaurant?.id,
+      restaurantName: o.restaurant?.name,
+      itemCount: Array.isArray(o.items) ? o.items.length : undefined,
+    };
   }
 
   private findParticipants(orderId: string) {
@@ -321,5 +367,11 @@ export class OrdersGateway implements OnGatewayConnection {
         this.logger.warn(`findParticipants failed: ${err}`);
         return null;
       });
+  }
+
+  /** Quán đổi tình trạng món (hết / mở bán lại) hoặc cron tự mở bán lại: báo cho người đang xem quán. */
+  emitMenuStock(payload: MenuStockEventPayload) {
+    if (payload.items.length === 0) return;
+    this.server?.to(rooms.restaurant(payload.restaurantId)).emit('menu:stock', payload);
   }
 }

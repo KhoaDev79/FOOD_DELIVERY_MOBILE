@@ -85,13 +85,13 @@ export class PaymentsService {
       const isCancelled = tx.order.status === 'CANCELLED';
       if (isCancelled) {
         this.logger.warn(
-          `VNPay IPN nhận thanh toán thành công cho đơn đã huỷ (${tx.orderId}). Đặt paymentStatus = REFUNDED.`,
+          `VNPay IPN nhận thanh toán thành công cho đơn đã huỷ (${tx.orderId}). Đặt paymentStatus = REFUND_PENDING.`,
         );
       }
 
       return prisma.order.update({
         where: { id: tx.orderId },
-        data: { paymentStatus: isCancelled ? 'REFUNDED' : 'PAID' },
+        data: { paymentStatus: isCancelled ? 'REFUND_PENDING' : 'PAID' },
         include: {
           restaurant: { select: { ownerId: true } },
         },

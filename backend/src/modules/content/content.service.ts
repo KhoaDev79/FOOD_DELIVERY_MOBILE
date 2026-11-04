@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import { MediaService } from '../media/media.service';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   assertSchedule,
@@ -15,7 +16,10 @@ const toDate = (v?: string | null) => (v === undefined ? undefined : v === null 
 /** Quản lý nội dung trang chủ (banner, danh mục ẩm thực) cho quản trị viên. Mọi thay đổi ghi nhật ký. */
 @Injectable()
 export class ContentService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly media: MediaService,
+  ) {}
 
   private audit(actorId: string, action: string, targetType: string, targetId: string, metadata?: Prisma.InputJsonValue) {
     return this.prisma.auditLog.create({ data: { actorId, action, targetType, targetId, metadata } });
@@ -50,7 +54,7 @@ export class ContentService {
     const banner = await this.prisma.banner.create({
       data: {
         title: dto.title.trim(),
-        imageUrl: dto.imageUrl.trim(),
+        imageUrl: (await this.media.resolveImage(dto.imageUrl, 'banners')) ?? dto.imageUrl.trim(),
         ...action,
         isActive: dto.isActive ?? true,
         startAt,
@@ -74,11 +78,14 @@ export class ContentService {
       : null;
     if (action) await this.assertActionTarget(action.actionType, action.actionValue);
 
+    const resolvedImageUrl =
+      dto.imageUrl !== undefined ? (await this.media.resolveImage(dto.imageUrl, 'banners')) ?? '' : undefined;
+
     const banner = await this.prisma.banner.update({
       where: { id },
       data: {
         ...(dto.title !== undefined ? { title: dto.title.trim() } : {}),
-        ...(dto.imageUrl !== undefined ? { imageUrl: dto.imageUrl.trim() } : {}),
+        ...(resolvedImageUrl !== undefined ? { imageUrl: resolvedImageUrl } : {}),
         ...(dto.isActive !== undefined ? { isActive: dto.isActive } : {}),
         ...(action ?? {}),
         startAt,
@@ -127,7 +134,7 @@ export class ContentService {
       data: {
         code: await this.uniqueCode(name),
         name,
-        imageUrl: dto.imageUrl.trim(),
+        imageUrl: (await this.media.resolveImage(dto.imageUrl, 'cuisines')) ?? dto.imageUrl.trim(),
         keywords,
         isActive: dto.isActive ?? true,
         sortOrder: (last._max.sortOrder ?? 0) + 1,
@@ -141,11 +148,14 @@ export class ContentService {
     const current = await this.prisma.cuisineCategory.findUnique({ where: { id } });
     if (!current) throw new NotFoundException('Không tìm thấy danh mục');
     // Giữ nguyên mã (code) khi đổi tên: banner đang trỏ tới danh mục này không bị hỏng
+    const resolvedImageUrl =
+      dto.imageUrl !== undefined ? (await this.media.resolveImage(dto.imageUrl, 'cuisines')) ?? '' : undefined;
+
     const cuisine = await this.prisma.cuisineCategory.update({
       where: { id },
       data: {
         ...(dto.name !== undefined ? { name: dto.name.trim() } : {}),
-        ...(dto.imageUrl !== undefined ? { imageUrl: dto.imageUrl.trim() } : {}),
+        ...(resolvedImageUrl !== undefined ? { imageUrl: resolvedImageUrl } : {}),
         ...(dto.keywords !== undefined ? { keywords: normalizeKeywords(dto.keywords) } : {}),
         ...(dto.isActive !== undefined ? { isActive: dto.isActive } : {}),
       },

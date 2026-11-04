@@ -116,4 +116,10 @@ export class UsersController {
   async removeAddress(@CurrentUser('id') userId: string, @Param('id', ParseUUIDPipe) id: string) {
     await this.users.deleteAddress(userId, id);
   }
+
+  @Delete()
+  @HttpCode(HttpStatus.OK)
+  deleteAccount(@CurrentUser('id') userId: string) {
+    return this.users.deleteAccount(userId);
+  }
 }

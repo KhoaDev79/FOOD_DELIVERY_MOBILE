@@ -23,7 +23,7 @@ describe('OrdersService (V4 C4 Ledger & C5 Failed Delivery)', () => {
     user: { findUnique: jest.Mock; update: jest.Mock };
     driverProfile: { update: jest.Mock; findMany: jest.Mock };
     driverLedger: { create: jest.Mock };
-    orderStatusHistory: { create: jest.Mock };
+    orderStatusHistory: { create: jest.Mock; findMany: jest.Mock };
     deliveryContactAttempt: { count: jest.Mock; findFirst: jest.Mock; create: jest.Mock };
     review: { create: jest.Mock; aggregate: jest.Mock };
     restaurant: { update: jest.Mock };
@@ -45,6 +45,8 @@ describe('OrdersService (V4 C4 Ledger & C5 Failed Delivery)', () => {
     notifyDriverReleased: jest.Mock;
     notifyDriversOrderAvailable: jest.Mock;
   };
+
+  let vouchers: { redeem: jest.Mock; releaseForOrder: jest.Mock };
 
   const baseOrder = {
     id: 'ord-11112222',
@@ -102,6 +104,7 @@ describe('OrdersService (V4 C4 Ledger & C5 Failed Delivery)', () => {
       },
       orderStatusHistory: {
         create: jest.fn().mockResolvedValue({}),
+        findMany: jest.fn().mockResolvedValue([]),
       },
       deliveryContactAttempt: {
         count: jest.fn().mockResolvedValue(3),
@@ -151,6 +154,8 @@ describe('OrdersService (V4 C4 Ledger & C5 Failed Delivery)', () => {
       notifyDriversOrderAvailable: jest.fn().mockResolvedValue(undefined),
     };
 
+    vouchers = { redeem: jest.fn(), releaseForOrder: jest.fn().mockResolvedValue(0) };
+
     service = new OrdersService(
       prisma as never,
       config as never,
@@ -158,6 +163,8 @@ describe('OrdersService (V4 C4 Ledger & C5 Failed Delivery)', () => {
       {} as never,
       notifications as never,
       {} as never,
+      vouchers as never,
+      { resolveImage: jest.fn(async (v: string) => v) } as never,
     );
   });
 
@@ -185,6 +192,20 @@ describe('OrdersService (V4 C4 Ledger & C5 Failed Delivery)', () => {
           }),
         }),
       );
+    });
+
+    it('đơn có voucher: nợ COD = tiền thực thu − thu nhập tài xế (phần giảm do sàn/quán bù)', async () => {
+      // Khách được giảm 30.000 tiền món + 25.000 phí ship: thực thu 70.000, tài xế vẫn nhận 20.000
+      prisma.order.findUnique.mockResolvedValue({ ...baseOrder, total: 70000, discountAmount: 30000, shippingDiscount: 25000 });
+      await service.updateStatus(
+        baseOrder.id,
+        { id: 'driver-1', email: 'd@test.com', role: Role.DRIVER },
+        { status: OrderStatus.DELIVERED },
+      );
+      expect(prisma.driverProfile.update).toHaveBeenCalledWith({
+        where: { userId: 'driver-1' },
+        data: { codBalance: { increment: 50000 } },
+      });
     });
 
     it('chặn nhận đơn (403) khi codBalance + nợ đơn mới vượt DRIVER_DEBT_LIMIT', async () => {
@@ -276,6 +297,8 @@ describe('OrdersService (V4 C4 Ledger & C5 Failed Delivery)', () => {
         where: { id: 'cust-1' },
         data: { failedDeliveryCount: { increment: 1 } },
       });
+      // Giao thất bại: trả lại lượt voucher
+      expect(vouchers.releaseForOrder).toHaveBeenCalledWith(prisma, baseOrder.id);
     });
   });
 
@@ -408,6 +431,28 @@ describe('OrdersService (V4 C4 Ledger & C5 Failed Delivery)', () => {
       });
     });
 
+    it('đánh giá kèm ảnh: tải ảnh lên (tối đa 3) và lưu link; ảnh lỗi thì bỏ qua', async () => {
+      prisma.order.findUnique.mockResolvedValue({
+        ...baseOrder,
+        status: OrderStatus.DELIVERED,
+        review: null,
+        statusHistory: [{ status: OrderStatus.DELIVERED, createdAt: new Date() }],
+      });
+      const media = (service as any).media;
+      media.resolveImage = jest
+        .fn()
+        .mockResolvedValueOnce('https://cdn/a.jpg')
+        .mockRejectedValueOnce(new Error('mạng lỗi'))
+        .mockResolvedValueOnce('https://cdn/c.jpg');
+
+      await service.review(baseOrder.id, 'cust-1', {
+        rating: 4,
+        images: ['data:image/jpeg;base64,AAA', 'data:image/jpeg;base64,BBB', 'data:image/png;base64,CCC'],
+      });
+      expect(media.resolveImage).toHaveBeenCalledWith('data:image/jpeg;base64,AAA', 'reviews');
+      expect(prisma.review.create.mock.calls.at(-1)[0].data.images).toEqual(['https://cdn/a.jpg', 'https://cdn/c.jpg']);
+    });
+
     it('từ chối (409) khi đơn đã được đánh giá trước đó', async () => {
       prisma.order.findUnique.mockResolvedValue({
         ...baseOrder,
@@ -437,6 +482,64 @@ describe('OrdersService (V4 C4 Ledger & C5 Failed Delivery)', () => {
       await expect(
         service.review(baseOrder.id, 'cust-1', { rating: 4 }),
       ).rejects.toThrow(/quá thời hạn đánh giá/);
+    });
+  });
+
+  describe('Chính sách huỷ & hoàn tiền', () => {
+    const customer = { id: 'cust-1', email: 'c@test.com', role: Role.CUSTOMER };
+
+    it('khách huỷ đơn đã trả online -> chờ hoàn tiền (không ghi đã hoàn)', async () => {
+      prisma.order.findUnique.mockResolvedValue({
+        ...baseOrder,
+        status: OrderStatus.PENDING,
+        driverId: null,
+        paymentMethod: PaymentMethod.VNPAY,
+        paymentStatus: 'PAID',
+      });
+      await service.updateStatus(baseOrder.id, customer, {
+        status: OrderStatus.CANCELLED,
+        cancelReason: 'CUSTOMER_WRONG_ADDRESS' as never,
+      });
+      expect(prisma.order.updateMany.mock.calls[0][0].data.paymentStatus).toBe('REFUND_PENDING');
+    });
+
+    it('khách tự huỷ 4 đơn trong 7 ngày -> không đặt được đơn mới (403 CANCEL_LIMIT)', async () => {
+      const now = Date.now();
+      prisma.orderStatusHistory.findMany.mockResolvedValue(
+        [1, 2, 3, 4].map((h) => ({ createdAt: new Date(now - h * 3_600_000) })),
+      );
+      prisma.user.findUnique.mockResolvedValue({ phone: '0912345678', fullName: 'Khách Test' });
+      await expect(
+        service.create('cust-1', { restaurantId: 'r', addressId: 'a', items: [], quoteToken: 'x'.repeat(20) } as never),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('thông tin huỷ đơn: nhắc khi đã huỷ 1 đơn, đơn quán đã nhận thì không tự huỷ được', async () => {
+      prisma.orderStatusHistory.findMany.mockResolvedValue([{ createdAt: new Date() }]);
+      prisma.order.findUnique.mockResolvedValue({ id: 'o1', customerId: 'cust-1', status: OrderStatus.PENDING, paymentStatus: 'UNPAID' });
+      const info = await service.getCancelInfo('o1', 'cust-1');
+      expect(info.canCancel).toBe(true);
+      expect(info.warning).toContain('Bạn đã huỷ 1 đơn');
+      expect(info.reasons.length).toBeGreaterThanOrEqual(5);
+
+      prisma.order.findUnique.mockResolvedValue({ id: 'o1', customerId: 'cust-1', status: OrderStatus.CONFIRMED, paymentStatus: 'UNPAID' });
+      const info2 = await service.getCancelInfo('o1', 'cust-1');
+      expect(info2.canCancel).toBe(false);
+    });
+
+    it('admin xác nhận hoàn tiền: chỉ áp dụng cho đơn đang chờ hoàn, ghi AuditLog', async () => {
+      prisma.order.updateMany.mockResolvedValueOnce({ count: 1 });
+      prisma.order.findUniqueOrThrow.mockResolvedValueOnce({ id: 'o1', customerId: 'cust-1', total: 125000 });
+      (notifications as any).sendToUsers = jest.fn();
+      await service.confirmRefund('o1', 'admin-1', 'Hoàn qua VNPay, mã HT123');
+      expect(prisma.order.updateMany.mock.calls.at(-1)[0]).toMatchObject({
+        where: { id: 'o1', paymentStatus: 'REFUND_PENDING' },
+        data: { paymentStatus: 'REFUNDED' },
+      });
+      expect(prisma.auditLog.create).toHaveBeenCalled();
+
+      prisma.order.updateMany.mockResolvedValueOnce({ count: 0 });
+      await expect(service.confirmRefund('o1', 'admin-1', 'lần 2')).rejects.toThrow(ConflictException);
     });
   });
 });

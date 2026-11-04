@@ -1,3 +1,7 @@
+import { ExportsModule } from './modules/exports/exports.module';
+import { MediaModule } from './modules/media/media.module';
+import { MailModule } from './modules/mail/mail.module';
+import { ShareModule } from './modules/share/share.module';
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
@@ -5,6 +9,8 @@ import { ScheduleModule } from '@nestjs/schedule';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { RolesGuard } from './common/guards/roles.guard';
+import { RateLimitGuard } from './common/rate-limit/rate-limit.guard';
+import { RateLimitModule } from './common/rate-limit/rate-limit.module';
 import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
 import { TransformResponseInterceptor } from './common/interceptors/transform-response.interceptor';
 import configuration, { validateEnv } from './config/configuration';
@@ -17,6 +23,8 @@ import { ContentModule } from './modules/content/content.module';
 import { CuisinesModule } from './modules/cuisines/cuisines.module';
 import { DriversModule } from './modules/drivers/drivers.module';
 import { JobsModule } from './modules/jobs/jobs.module';
+import { HelpModule } from './modules/help/help.module';
+import { VouchersModule } from './modules/vouchers/vouchers.module';
 import { MapsModule } from './modules/maps/maps.module';
 import { MenusModule } from './modules/menus/menus.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
@@ -33,6 +41,9 @@ import { UsersModule } from './modules/users/users.module';
     ConfigModule.forRoot({ isGlobal: true, load: [configuration], validate: validateEnv }),
     ScheduleModule.forRoot(),
     PrismaModule,
+    RateLimitModule,
+    MediaModule,
+    MailModule,
     AuthModule,
     AdminModule,
     MapsModule,
@@ -49,12 +60,17 @@ import { UsersModule } from './modules/users/users.module';
     NotificationsModule,
     PaymentsModule,
     JobsModule,
+    ShareModule,
+    ExportsModule,
+    HelpModule,
+    VouchersModule,
   ],
   controllers: [HealthController, PublicConfigController],
   providers: [
-    // Thứ tự quan trọng: xác thực (JWT) trước, phân quyền (Roles) sau
+    // Thứ tự quan trọng: xác thực (JWT) trước, phân quyền (Roles) sau, giới hạn tần suất cuối (cần biết người dùng)
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     { provide: APP_GUARD, useClass: RolesGuard },
+    { provide: APP_GUARD, useClass: RateLimitGuard },
     { provide: APP_INTERCEPTOR, useClass: LoggingInterceptor },
     { provide: APP_INTERCEPTOR, useClass: TransformResponseInterceptor },
     { provide: APP_FILTER, useClass: AllExceptionsFilter },

@@ -41,6 +41,14 @@ import {
   channelRecipients,
   senderSideIn,
 } from './order-chat';
+import { VouchersService } from '../vouchers/vouchers.service';
+import { MediaService } from '../media/media.service';
+import {
+  CancelLimitConfig,
+  CUSTOMER_CANCEL_REASONS,
+  DEFAULT_CANCEL_LIMIT,
+  evaluateCancelLimit,
+} from './cancel-policy';
 import { OrderPricingService } from './order-pricing.service';
 import {
   actorMayTransition,
@@ -96,6 +104,12 @@ export type OrderDetail = Prisma.OrderGetPayload<{
 
 const ACTIVE_DELIVERY_STATUSES: OrderStatus[] = ['CONFIRMED', 'PREPARING', 'READY_FOR_PICKUP', 'PICKED_UP'];
 
+/**
+ * Công nợ COD của tài xế cho một đơn = tiền thực thu của khách − thu nhập tài xế.
+ * Không có voucher thì bằng tiền món + hoa hồng sàn (công thức cũ); có voucher thì phần giảm do sàn/quán bù.
+ */
+export const codDebtOf = (o: { total: number; driverEarning: number }) => o.total - o.driverEarning;
+
 @Injectable()
 export class OrdersService {
   constructor(
@@ -105,6 +119,8 @@ export class OrdersService {
     private readonly restaurants: RestaurantsService,
     private readonly notifications: NotificationsService,
     private readonly orderPricing: OrderPricingService,
+    private readonly vouchers: VouchersService,
+    private readonly media: MediaService,
   ) {}
 
   // =========================================================================
@@ -143,6 +159,12 @@ export class OrdersService {
       throw new BadRequestException('Tài khoản chưa cập nhật họ tên người nhận. Vui lòng cập nhật trước khi đặt hàng.');
     }
 
+    // Khách tự huỷ quá nhiều đơn gần đây: tạm hạn chế đặt đơn mới
+    const cancelStatus = await this.getCustomerCancelStatus(customerId);
+    if (cancelStatus.restricted) {
+      throw new ForbiddenException({ code: 'CANCEL_LIMIT', message: cancelStatus.warning });
+    }
+
     // Kiểm tra số lần giao thất bại trong 30 ngày gần nhất của khách (C5)
     const maxFailed = Number(this.config.get<number>('business.customerMaxFailedDeliveries') ?? 2);
     const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
@@ -161,8 +183,10 @@ export class OrdersService {
     try {
       order = await this.prisma.$transaction(async (tx) => {
         const priced = await this.orderPricing.verifyAndPriceOrder(customerId, dto, tx);
+        const discountVoucher = priced.appliedVouchers.find((a) => a.voucher.discountType !== 'FREE_SHIP');
+        const freeshipVoucher = priced.appliedVouchers.find((a) => a.voucher.discountType === 'FREE_SHIP');
 
-        return tx.order.create({
+        const created = await tx.order.create({
           data: {
             customerId,
             restaurantId: dto.restaurantId,
@@ -173,6 +197,13 @@ export class OrdersService {
             platformCommission: priced.platformCommission,
             driverEarning: priced.driverEarning,
             total: priced.quote.total,
+            discountAmount: priced.quote.itemDiscount,
+            shippingDiscount: priced.quote.shippingDiscount,
+            restaurantDiscount: priced.restaurantDiscount,
+            voucherId: discountVoucher?.voucher.id,
+            voucherCode: discountVoucher?.voucher.code,
+            freeshipVoucherId: freeshipVoucher?.voucher.id,
+            freeshipVoucherCode: freeshipVoucher?.voucher.code,
             distanceKm: priced.quote.distanceKm,
             distanceSource: priced.quote.distanceSource,
             deliveryAddress: priced.deliveryAddress,
@@ -188,6 +219,9 @@ export class OrdersService {
           },
           include: ORDER_DETAIL_INCLUDE,
         });
+        // Giữ lượt voucher trong cùng transaction: hết lượt thì huỷ toàn bộ việc tạo đơn
+        await this.vouchers.redeem(tx, priced.appliedVouchers, customerId, created.id);
+        return created;
       });
     } catch (err: any) {
       if (cleanIdemKey && err?.code === 'P2002') {
@@ -209,6 +243,107 @@ export class OrdersService {
     this.gateway.emitOrderUpdated('order:created', order);
     this.notifications.notifyOrderCreated(order);
     return order;
+  }
+
+  // =========================================================================
+  //  CHÍNH SÁCH HUỶ CỦA KHÁCH + HOÀN TIỀN
+  // =========================================================================
+
+  /** Số lần khách TỰ huỷ đơn gần đây và trạng thái hạn chế đặt đơn. */
+  async getCustomerCancelStatus(customerId: string, now = new Date()) {
+    const cfg: CancelLimitConfig = {
+      windowDays: Number(this.config.get('CUSTOMER_CANCEL_WINDOW_DAYS') ?? DEFAULT_CANCEL_LIMIT.windowDays),
+      warnAt: Number(this.config.get('CUSTOMER_CANCEL_WARN_AT') ?? DEFAULT_CANCEL_LIMIT.warnAt),
+      limit: Number(this.config.get('CUSTOMER_CANCEL_LIMIT') ?? DEFAULT_CANCEL_LIMIT.limit),
+    };
+    const since = new Date(now.getTime() - cfg.windowDays * 24 * 60 * 60 * 1000);
+    const rows = await this.prisma.orderStatusHistory.findMany({
+      where: { status: OrderStatus.CANCELLED, changedBy: customerId, createdAt: { gte: since } },
+      select: { createdAt: true },
+    });
+    return evaluateCancelLimit(
+      rows.map((r) => r.createdAt),
+      now,
+      cfg,
+    );
+  }
+
+  /** Thông tin cho hộp thoại huỷ đơn của khách: còn huỷ được không, các lý do, lời nhắc nếu huỷ nhiều. */
+  async getCancelInfo(orderId: string, customerId: string) {
+    const order = await this.prisma.order.findUnique({
+      where: { id: orderId },
+      select: { id: true, customerId: true, status: true, paymentStatus: true },
+    });
+    if (!order || order.customerId !== customerId) throw new NotFoundException('Không tìm thấy đơn hàng');
+    const status = await this.getCustomerCancelStatus(customerId);
+    const canCancel = order.status === OrderStatus.PENDING;
+    return {
+      canCancel,
+      reason: canCancel
+        ? undefined
+        : ['CANCELLED', 'DELIVERY_FAILED', 'DELIVERED'].includes(order.status)
+          ? 'Đơn hàng đã kết thúc nên không thể huỷ.'
+          : 'Quán đã nhận đơn nên bạn không tự huỷ được. Hãy gửi yêu cầu hỗ trợ để nhân viên liên hệ quán.',
+      reasons: CUSTOMER_CANCEL_REASONS,
+      cancelCount: status.count,
+      limit: status.limit,
+      windowDays: status.windowDays,
+      warning: status.warning,
+      refundNotice: order.paymentStatus === 'PAID' ? 'Tiền đã thanh toán online sẽ được hoàn trong 3–7 ngày làm việc.' : undefined,
+    };
+  }
+
+  /** Admin: danh sách đơn đã thanh toán online cần hoàn tiền / đã hoàn. */
+  async listRefunds(status: 'pending' | 'done') {
+    return this.prisma.order.findMany({
+      where: { paymentStatus: status === 'pending' ? 'REFUND_PENDING' : 'REFUNDED' },
+      orderBy: status === 'pending' ? { updatedAt: 'asc' } : { refundedAt: 'desc' },
+      take: 100,
+      select: {
+        id: true,
+        status: true,
+        paymentMethod: true,
+        paymentStatus: true,
+        total: true,
+        cancelReason: true,
+        failedReason: true,
+        cancelNote: true,
+        refundedAt: true,
+        refundNote: true,
+        createdAt: true,
+        updatedAt: true,
+        customer: { select: { id: true, fullName: true, phone: true } },
+        restaurant: { select: { id: true, name: true } },
+        transactions: { where: { status: 'SUCCESS' }, select: { txnRef: true, providerTxnNo: true, amount: true, bankCode: true } },
+      },
+    });
+  }
+
+  /** Admin xác nhận đã hoàn tiền thủ công (VNPay sandbox không gọi API hoàn tiền thật). */
+  async confirmRefund(orderId: string, adminId: string, note: string) {
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const { count } = await tx.order.updateMany({
+        where: { id: orderId, paymentStatus: 'REFUND_PENDING' },
+        data: { paymentStatus: 'REFUNDED', refundedAt: new Date(), refundNote: note.trim() },
+      });
+      if (count === 0) throw new ConflictException('Đơn không ở trạng thái chờ hoàn tiền');
+      await tx.auditLog.create({
+        data: {
+          actorId: adminId,
+          action: 'ORDER_REFUND_CONFIRMED',
+          targetType: 'ORDER',
+          targetId: orderId,
+          metadata: { note: note.trim() },
+        },
+      });
+      return tx.order.findUniqueOrThrow({ where: { id: orderId }, select: { id: true, customerId: true, total: true } });
+    });
+    void this.notifications.sendToUsers([updated.customerId], {
+      title: 'Đã hoàn tiền đơn hàng',
+      body: `ZomZom đã hoàn ${updated.total.toLocaleString('vi-VN')} ₫ cho đơn #${orderId.slice(0, 8).toUpperCase()}. Tiền về tài khoản trong 3–7 ngày làm việc tuỳ ngân hàng.`,
+      data: { type: 'order', orderId },
+    });
+    return updated;
   }
 
   // =========================================================================
@@ -294,13 +429,15 @@ export class OrdersService {
                 cancelReason: payload.cancelReason,
                 cancelNote: payload.cancelNote?.trim() || null,
                 cancelledById: changedBy,
-                ...(order.paymentStatus === 'PAID' ? { paymentStatus: 'REFUNDED' as const } : {}),
+                // Đã trả online: chưa hoàn thật nên chỉ ghi "chờ hoàn tiền", admin xác nhận khi đã hoàn
+                ...(order.paymentStatus === 'PAID' ? { paymentStatus: 'REFUND_PENDING' as const } : {}),
               }
             : {}),
           ...(to === 'DELIVERY_FAILED'
             ? {
                 failedReason: payload.failedReason,
                 cancelNote: payload.cancelNote?.trim() || null,
+                ...(order.paymentStatus === 'PAID' ? { paymentStatus: 'REFUND_PENDING' as const } : {}),
               }
             : {}),
         },
@@ -317,9 +454,14 @@ export class OrdersService {
         },
       });
 
+      // Đơn không thành: trả lại lượt voucher cho khách
+      if (to === 'CANCELLED' || to === 'DELIVERY_FAILED') {
+        await this.vouchers.releaseForOrder(tx, orderId);
+      }
+
       // C4: Ghi công nợ COD khi giao thành công (cùng transaction)
       if (to === 'DELIVERED' && order.paymentMethod === 'COD' && order.driverId) {
-        const debtAmount = order.subtotal + order.platformCommission;
+        const debtAmount = codDebtOf(order);
         await tx.$queryRaw`SELECT "id" FROM "driver_profiles" WHERE "userId" = ${order.driverId}::uuid FOR UPDATE`;
         const updatedProfile = await tx.driverProfile.update({
           where: { userId: order.driverId },
@@ -401,11 +543,11 @@ export class OrdersService {
   async acceptByDriver(orderId: string, driverId: string): Promise<OrderDetail> {
     const targetOrder = await this.prisma.order.findUnique({
       where: { id: orderId },
-      select: { id: true, subtotal: true, platformCommission: true },
+      select: { id: true, total: true, driverEarning: true },
     });
     if (!targetOrder) throw new NotFoundException('Không tìm thấy đơn hàng');
 
-    const orderDebt = targetOrder.subtotal + targetOrder.platformCommission;
+    const orderDebt = codDebtOf(targetOrder);
     await this.assertDriverCanAccept(driverId, orderDebt);
 
     const maxActive = Number(this.config.get<number>('business.driverMaxActiveOrders') ?? 2);
@@ -740,7 +882,7 @@ export class OrdersService {
           deliveryDistanceKm: row.distanceKm,
           driverEarning: row.driverEarning,
           codToCollect: row.total,
-          debtAfterAccept: profile.codBalance + row.subtotal + row.platformCommission,
+          debtAfterAccept: profile.codBalance + codDebtOf(row),
           _rawDistKm: distKm,
         };
       })
@@ -782,7 +924,7 @@ export class OrdersService {
       const maxActive = Number(this.config.get<number>('business.driverMaxActiveOrders') ?? 2);
 
       const staleCutoff = new Date(Date.now() - staleMinutes * 60 * 1000);
-      const orderDebt = order.subtotal + order.platformCommission;
+      const orderDebt = codDebtOf(order);
       const restPos = {
         lat: order.restaurant.latitude,
         lng: order.restaurant.longitude,
@@ -951,6 +1093,13 @@ export class OrdersService {
 
     const hasDriver = Boolean(order.driverId);
 
+    // Tải ảnh lên trước (ngoài transaction vì gọi mạng); ảnh lỗi thì bỏ qua thay vì làm hỏng cả đánh giá
+    const images = (
+      await Promise.all(
+        (dto.images ?? []).slice(0, 3).map((img) => this.media.resolveImage(img, 'reviews').catch(() => null)),
+      )
+    ).filter((u): u is string => Boolean(u));
+
     try {
       return await this.prisma.$transaction(async (tx) => {
         const review = await tx.review.create({
@@ -960,6 +1109,7 @@ export class OrdersService {
             restaurantId: order.restaurantId,
             rating: dto.rating,
             comment: dto.comment?.trim() || null,
+            images,
             driverId: hasDriver ? order.driverId : null,
             driverRating: hasDriver && dto.driverRating ? dto.driverRating : null,
             driverComment: hasDriver && dto.driverComment ? dto.driverComment.trim() || null : null,

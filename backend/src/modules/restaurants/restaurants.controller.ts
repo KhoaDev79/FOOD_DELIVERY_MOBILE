@@ -8,12 +8,17 @@ import {
   ParseUUIDPipe,
   Patch,
   Post,
+  Put,
   Query,
 } from '@nestjs/common';
 import { Role } from '@prisma/client';
 import { AuthUser, CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Public } from '../../common/decorators/public.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
+import {
+  CreateSpecialClosingDto,
+  UpdateWeeklyScheduleDto,
+} from './dto/restaurant-schedule.dto';
 import {
   CreateRestaurantDto,
   ListRestaurantReviewsQueryDto,
@@ -132,5 +137,42 @@ export class RestaurantsController {
   @Delete(':id')
   delete(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: AuthUser) {
     return this.restaurants.delete(id, user);
+  }
+// ==================== GIỜ MỞ CỬA 7 NGÀY & NGÀY NGHỈ ĐẶC BIỆT ====================
+
+  @Public()
+  @Get(':id/schedule')
+  getSchedule(@Param('id', ParseUUIDPipe) id: string) {
+    return this.restaurants.getSchedule(id);
+  }
+
+  @Roles(Role.RESTAURANT_OWNER, Role.ADMIN)
+  @Put(':id/schedule')
+  updateWeeklySchedule(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: AuthUser,
+    @Body() dto: UpdateWeeklyScheduleDto,
+  ) {
+    return this.restaurants.updateWeeklySchedule(id, user, dto);
+  }
+
+  @Roles(Role.RESTAURANT_OWNER, Role.ADMIN)
+  @Post(':id/special-closings')
+  addSpecialClosing(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: AuthUser,
+    @Body() dto: CreateSpecialClosingDto,
+  ) {
+    return this.restaurants.addSpecialClosing(id, user, dto);
+  }
+
+  @Roles(Role.RESTAURANT_OWNER, Role.ADMIN)
+  @Delete(':id/special-closings/:closingId')
+  removeSpecialClosing(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('closingId', ParseUUIDPipe) closingId: string,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.restaurants.removeSpecialClosing(id, user, closingId);
   }
 }

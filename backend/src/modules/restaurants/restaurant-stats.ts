@@ -9,6 +9,8 @@ export type StatsRange = (typeof STATS_RANGES)[number];
 export interface StatsOrderInput {
   status: OrderStatus;
   subtotal: number;
+  /** Phần voucher do quán chịu, trừ vào doanh thu */
+  restaurantDiscount?: number;
   createdAt: Date;
   items: { menuItemId: string; name: string; quantity: number; lineTotal: number }[];
 }
@@ -17,7 +19,7 @@ export interface RestaurantStats {
   days: number;
   from: string; // YYYY-MM-DD (giờ VN), ngày đầu của khoảng
   to: string; // YYYY-MM-DD (giờ VN), hôm nay
-  /** Doanh thu = tổng tiền món (subtotal) của đơn đã giao thành công; không gồm phí giao hàng. */
+  /** Doanh thu = tiền món của đơn giao thành công trừ phần voucher quán chịu; không gồm phí giao hàng. */
   revenue: number;
   totalOrders: number;
   deliveredOrders: number;
@@ -67,10 +69,11 @@ export function buildRestaurantStats(
     if (o.status !== 'DELIVERED') continue;
 
     delivered++;
-    revenue += o.subtotal;
+    const net = o.subtotal - (o.restaurantDiscount ?? 0);
+    revenue += net;
     const day = daily.get(vnDateKey(o.createdAt, offsetMinutes));
     if (day) {
-      day.revenue += o.subtotal;
+      day.revenue += net;
       day.orders += 1;
     }
     for (const it of o.items) {

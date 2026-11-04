@@ -63,20 +63,5 @@ export function normalizeKeywords(list: string[] | undefined): string[] {
   return out.slice(0, 15);
 }
 
-export const IMAGE_MIME = ['image/jpeg', 'image/png', 'image/webp'] as const;
-export const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
-
-/** Kiểm tra ảnh gửi lên dạng data URI: chỉ JPG/PNG/WebP, tối đa 5 MB. */
-export function parseImageDataUri(dataUri: string): { mime: string; buffer: Buffer; ext: string } {
-  const m = /^data:(image\/[a-z+]+);base64,([A-Za-z0-9+/=\s]+)$/.exec(dataUri ?? '');
-  if (!m) throw new BadRequestException('Ảnh không hợp lệ');
-  const mime = m[1] === 'image/jpg' ? 'image/jpeg' : m[1];
-  if (!(IMAGE_MIME as readonly string[]).includes(mime)) {
-    throw new BadRequestException('Chỉ hỗ trợ ảnh JPG, PNG hoặc WebP');
-  }
-  const buffer = Buffer.from(m[2], 'base64');
-  if (buffer.length === 0) throw new BadRequestException('Ảnh rỗng');
-  if (buffer.length > MAX_IMAGE_BYTES) throw new BadRequestException('Ảnh tối đa 5 MB');
-  const ext = mime === 'image/png' ? 'png' : mime === 'image/webp' ? 'webp' : 'jpg';
-  return { mime, buffer, ext };
-}
+export { IMAGE_MIME, MAX_IMAGE_BYTES } from '../media/media.types';
+export { parseImageDataUri } from '../media/media.util';

@@ -29,11 +29,14 @@ export class RegisterDto {
   @Matches(/\p{L}/u, { message: 'Họ tên phải có chữ cái' })
   fullName: string;
 
-  /** Không bắt buộc. "0912 345 678", "+84912345678"... đều được lưu thành "0912345678". */
+  /**
+   * Bắt buộc: tài xế/quán cần gọi được khách khi giao hàng.
+   * "0912 345 678", "+84912345678"... đều được lưu thành "0912345678"; chuỗi rỗng coi như chưa nhập.
+   */
   @Transform(({ value }) => transformOptionalPhone(value))
-  @IsOptional()
+  @IsString({ message: 'Vui lòng nhập số điện thoại' })
   @Matches(VN_MOBILE_REGEX, { message: 'Số điện thoại di động không hợp lệ (10 số, vd. 0912345678)' })
-  phone?: string;
+  phone: string;
 }
 
 export class LoginDto {
@@ -58,4 +61,53 @@ export class LoginDto {
 export class RefreshTokenDto {
   @IsString()
   refreshToken: string;
+}
+
+export class LogoutDto {
+  @IsOptional()
+  @IsString()
+  refreshToken?: string;
+}
+
+const normalizeEmail = ({ value }: { value: unknown }) => (typeof value === 'string' ? value.trim().toLowerCase() : value);
+
+export class ForgotPasswordDto {
+  @Transform(normalizeEmail)
+  @IsEmail({}, { message: 'Email không đúng định dạng' })
+  @MaxLength(254, { message: 'Email quá dài' })
+  email: string;
+}
+
+export class VerifyResetOtpDto {
+  @Transform(normalizeEmail)
+  @IsEmail({}, { message: 'Email không đúng định dạng' })
+  @MaxLength(254, { message: 'Email quá dài' })
+  email: string;
+
+  @Transform(({ value }) => (typeof value === 'string' ? value.replace(/\s+/g, '') : value))
+  @IsString({ message: 'Vui lòng nhập mã xác nhận' })
+  @Matches(/^\d{6}$/, { message: 'Mã xác nhận gồm 6 chữ số' })
+  otp: string;
+}
+
+export class ResetPasswordDto {
+  @IsString()
+  @MinLength(10)
+  @MaxLength(2000)
+  resetToken: string;
+
+  /** Cùng quy tắc với lúc đăng ký */
+  @IsString({ message: 'Vui lòng nhập mật khẩu mới' })
+  @MinLength(8, { message: 'Mật khẩu phải từ 8 ký tự trở lên' })
+  @MaxLength(72, { message: 'Mật khẩu tối đa 72 ký tự' })
+  @Matches(/\S/, { message: 'Mật khẩu không được chỉ gồm dấu cách' })
+  newPassword: string;
+}
+
+export class GoogleLoginDto {
+  /** idToken (JWT) Google trả cho app sau khi người dùng chọn tài khoản */
+  @IsString({ message: 'Thiếu mã xác thực Google' })
+  @MinLength(20, { message: 'Mã xác thực Google không hợp lệ' })
+  @MaxLength(4096, { message: 'Mã xác thực Google không hợp lệ' })
+  idToken: string;
 }

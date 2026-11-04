@@ -10,8 +10,11 @@ import { createHmac, timingSafeEqual } from 'crypto';
 import { calcDeliveryFeeBreakdown, ceil1000, haversineKm } from '../../common/utils/geo.util';
 import { estimateDeliveryWindow } from '../../common/utils/delivery-time';
 import { isWithinOpeningHours } from '../../common/utils/opening-hours';
+import { isDishWithinServingHours } from '../../common/utils/dish-availability.util';
 import { MapsService } from '../maps/maps.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { AppliedVoucher, normalizeVoucherCode } from '../vouchers/voucher-rules';
+import { VouchersService } from '../vouchers/vouchers.service';
 import { CreateOrderDto, OrderItemInputDto, QuoteOrderDto } from './dto/orders.dto';
 import { lineKey, OrderPricingError, priceOrderLine, SelectedOptions } from './order-pricing';
 
@@ -39,6 +42,14 @@ export interface OrderQuoteResponse {
   peakSurcharge: number;
   deliveryFee: number;
   isPeak: boolean;
+  /** Giảm trên tiền món (mã giảm giá) */
+  itemDiscount: number;
+  /** Giảm trên phí giao (mã freeship) */
+  shippingDiscount: number;
+  appliedVouchers: { code: string; title: string; discountType: string; amount: number }[];
+  /** Mã khách nhập nhưng không áp dụng được, kèm lý do để hiển thị */
+  rejectedVouchers: { code: string; reason: string }[];
+  /** Số tiền khách phải trả = tiền món + phí giao − giảm giá */
   total: number;
   paymentMethod: 'COD';
 }
@@ -51,6 +62,8 @@ export interface PricedOrderContext {
   platformCommission: number;
   driverEarning: number;
   estimatedDeliveryAt: Date;
+  appliedVouchers: AppliedVoucher[];
+  restaurantDiscount: number;
   dbLines: {
     menuItemId: string;
     name: string;
@@ -77,6 +90,7 @@ export class OrderPricingService {
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
     private readonly maps: MapsService,
+    private readonly vouchers: VouchersService,
   ) {}
 
   /** Báo giá tập trung cho màn Checkout (POST /orders/quote) */
@@ -97,7 +111,7 @@ export class OrderPricingService {
     now = new Date(),
   ): Promise<PricedOrderContext> {
     const merged = this.mergeItems(dto.items);
-    const expectedCartHash = this.buildCartHash(customerId, dto.restaurantId, dto.addressId, merged);
+    const expectedCartHash = this.buildCartHash(customerId, dto.restaurantId, dto.addressId, merged, dto.voucherCodes);
     const parsedToken = this.verifyQuoteTokenSignature(customerId, dto.restaurantId, dto.addressId, expectedCartHash, dto.quoteToken);
 
     const freshCtx = await this.computeOrderPricing(customerId, dto, tx, now);
@@ -135,6 +149,9 @@ export class OrderPricingService {
     if (!restaurant.isOpen) {
       throw new BadRequestException('Nhà hàng hiện đang đóng cửa');
     }
+    if (restaurant.pausedUntil && restaurant.pausedUntil.getTime() > now.getTime()) {
+      throw new BadRequestException('Quán đang tạm nghỉ, vui lòng quay lại sau.');
+    }
     if (!isWithinOpeningHours(restaurant.openTime, restaurant.closeTime, now)) {
       throw new BadRequestException(
         `Quán chỉ nhận đơn từ ${restaurant.openTime} đến ${restaurant.closeTime}. Vui lòng quay lại sau.`,
@@ -167,7 +184,7 @@ export class OrderPricingService {
         isAvailable: true,
         isArchived: false,
       },
-      select: { id: true, name: true, price: true, discountPrice: true, options: true },
+      select: { id: true, name: true, price: true, discountPrice: true, options: true, availableFrom: true, availableTo: true },
     });
     if (menuItems.length !== menuItemIds.length) {
       const found = new Set(menuItems.map((m) => m.id));
@@ -175,6 +192,14 @@ export class OrderPricingService {
         message: 'Một số món không tồn tại hoặc đã hết',
         unavailableItemIds: menuItemIds.filter((id) => !found.has(id)),
       });
+    }
+
+    for (const m of menuItems) {
+      if (!isDishWithinServingHours(m.availableFrom, m.availableTo, now)) {
+        throw new BadRequestException(
+          `Món "${m.name}" chỉ bán trong khung giờ ${m.availableFrom} – ${m.availableTo}. Vui lòng chọn món khác.`,
+        );
+      }
     }
 
     const byId = new Map(menuItems.map((m) => [m.id, m]));
@@ -223,7 +248,16 @@ export class OrderPricingService {
     const businessCfg = this.config.get('business');
     const feeBreakdown = calcDeliveryFeeBreakdown(road.distanceKm, deliveryCfg, now);
 
-    const total = subtotal + feeBreakdown.deliveryFee;
+    // Voucher: giảm cho khách; thu nhập tài xế và hoa hồng vẫn tính trên phí giao gốc
+    const selection = await this.vouchers.priceSelection(db, {
+      userId: customerId,
+      restaurantId: restaurant.id,
+      subtotal,
+      deliveryFee: feeBreakdown.deliveryFee,
+      codes: dto.voucherCodes ?? [],
+      now,
+    });
+    const total = Math.max(0, subtotal - selection.discount + feeBreakdown.deliveryFee - selection.shippingDiscount);
     const commissionRate = Number(businessCfg?.platformCommissionRate ?? 0.2);
     const platformCommission = ceil1000(feeBreakdown.deliveryFee * commissionRate);
     const driverEarning = Math.max(0, feeBreakdown.deliveryFee - platformCommission);
@@ -240,7 +274,7 @@ export class OrderPricingService {
     const expiresAtMs = now.getTime() + quoteTtlMinutes * 60 * 1000;
     const expiresAt = new Date(expiresAtMs).toISOString();
 
-    const cartHash = this.buildCartHash(customerId, dto.restaurantId, dto.addressId, requested);
+    const cartHash = this.buildCartHash(customerId, dto.restaurantId, dto.addressId, requested, dto.voucherCodes);
     const quoteToken = this.signQuoteToken(
       customerId,
       dto.restaurantId,
@@ -267,6 +301,15 @@ export class OrderPricingService {
         peakSurcharge: feeBreakdown.peakSurcharge,
         deliveryFee: feeBreakdown.deliveryFee,
         isPeak: feeBreakdown.isPeak,
+        itemDiscount: selection.discount,
+        shippingDiscount: selection.shippingDiscount,
+        appliedVouchers: selection.applied.map((a) => ({
+          code: a.voucher.code,
+          title: a.voucher.title,
+          discountType: a.voucher.discountType,
+          amount: a.discount + a.shippingDiscount,
+        })),
+        rejectedVouchers: selection.rejected,
         total,
         paymentMethod: 'COD',
       },
@@ -276,6 +319,8 @@ export class OrderPricingService {
       platformCommission,
       driverEarning,
       estimatedDeliveryAt,
+      appliedVouchers: selection.applied,
+      restaurantDiscount: selection.restaurantDiscount,
       dbLines,
     };
   }
@@ -322,12 +367,15 @@ export class OrderPricingService {
     restaurantId: string,
     addressId: string,
     merged: Map<string, MergedInputLine>,
+    voucherCodes?: string[],
   ): string {
     const sortedLines = [...merged.entries()]
       .sort(([k1], [k2]) => k1.localeCompare(k2))
       .map(([k, v]) => `${k}|${v.quantity}`)
       .join(';');
-    const canonical = `${customerId}|${restaurantId}|${addressId}|${sortedLines}`;
+    // Mã voucher nằm trong chữ ký: đổi mã sau khi báo giá thì phải báo giá lại
+    const codes = [...new Set((voucherCodes ?? []).map(normalizeVoucherCode).filter(Boolean))].sort().join(',');
+    const canonical = `${customerId}|${restaurantId}|${addressId}|${sortedLines}|v:${codes}`;
     return createHmac('sha256', this.getQuoteSecret()).update(canonical).digest('hex').slice(0, 32);
   }
 

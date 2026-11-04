@@ -4,6 +4,8 @@ import { PassportModule } from '@nestjs/passport';
 import { AuthStateService } from './auth-state.service';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
+import { GoogleAuthService } from './google-auth.service';
+import { PasswordResetService } from './password-reset.service';
 import { JwtStrategy } from './strategies/jwt.strategy';
 
 @Global()
@@ -11,7 +13,7 @@ import { JwtStrategy } from './strategies/jwt.strategy';
   // Secret được truyền tường minh khi sign/verify (access và refresh dùng 2 secret khác nhau)
   imports: [PassportModule, JwtModule.register({})],
   controllers: [AuthController],
-  providers: [AuthService, AuthStateService, JwtStrategy],
+  providers: [AuthService, AuthStateService, JwtStrategy, PasswordResetService, GoogleAuthService],
   exports: [JwtModule, AuthStateService],
 })
 export class AuthModule {}

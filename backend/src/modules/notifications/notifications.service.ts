@@ -1,14 +1,26 @@
-import { Injectable, Logger } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  NotFoundException,
+  Optional,
+  Inject,
+  forwardRef,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { CancelReason, FailedDeliveryReason, OrderStatus } from '@prisma/client';
+import { CancelReason, FailedDeliveryReason, OrderStatus, Prisma } from '@prisma/client';
 import { Expo, ExpoPushMessage, ExpoPushTicket } from 'expo-server-sdk';
 import { CANCEL_REASON_LABELS, FAILED_DELIVERY_REASON_LABELS } from '../orders/order-state-machine';
 import { PrismaService } from '../prisma/prisma.service';
+import { OrdersGateway } from '../realtime/orders.gateway';
+import { ListNotificationsQueryDto } from './dto/notifications.dto';
 
 export interface PushPayload {
   title: string;
   body: string;
   data?: Record<string, unknown>;
+  channelId?: string;
+  sound?: 'default' | null;
+  priority?: 'default' | 'normal' | 'high';
 }
 
 const CUSTOMER_STATUS_MESSAGES: Partial<Record<OrderStatus, string>> = {
@@ -22,8 +34,8 @@ const CUSTOMER_STATUS_MESSAGES: Partial<Record<OrderStatus, string>> = {
 };
 
 /**
- * Gửi Expo Push Notification.
- * Mọi hàm public đều "fire-and-forget": không bao giờ throw để không làm hỏng luồng nghiệp vụ.
+ * Gửi và lưu trữ Thông báo (Push qua Expo, Realtime Socket và Lưu Database).
+ * Mọi hàm thông báo đều "fire-and-forget": không bao giờ throw để không làm hỏng luồng nghiệp vụ.
  */
 @Injectable()
 export class NotificationsService {
@@ -33,15 +45,30 @@ export class NotificationsService {
   constructor(
     private readonly prisma: PrismaService,
     config: ConfigService,
+    @Optional()
+    @Inject(forwardRef(() => OrdersGateway))
+    private readonly gateway?: OrdersGateway,
   ) {
     this.expo = new Expo({ accessToken: config.get<string>('expo.accessToken') });
   }
 
   notifyOrderCreated(order: { id: string; total: number; restaurant: { ownerId: string; name: string } }) {
     return this.sendToUsers([order.restaurant.ownerId], {
-      title: 'Đơn hàng mới',
-      body: `Bạn có đơn mới trị giá ${order.total.toLocaleString('vi-VN')}đ`,
+      title: '🔔 Đơn hàng mới!',
+      body: `Quán ${order.restaurant.name} có đơn mới trị giá ${order.total.toLocaleString('vi-VN')}đ`,
       data: { type: 'order', orderId: order.id },
+      channelId: 'order_alerts',
+      priority: 'high',
+    });
+  }
+
+  notifyPendingOrderReminder(order: { id: string; total: number; restaurant: { ownerId: string; name: string } }) {
+    return this.sendToUsers([order.restaurant.ownerId], {
+      title: '⚠️ Đơn hàng mới chưa xác nhận!',
+      body: `Đơn #${order.id.slice(0, 8).toUpperCase()} (${order.total.toLocaleString('vi-VN')}đ) đang chờ quán xác nhận. Vui lòng mở ứng dụng xử lý ngay!`,
+      data: { type: 'order_reminder', orderId: order.id },
+      channelId: 'order_alerts',
+      priority: 'high',
     });
   }
 
@@ -210,21 +237,49 @@ export class NotificationsService {
     ]).then(() => undefined);
   }
 
+  /**
+   * Lưu thông báo vào CSDL, phát socket realtime và gửi push Expo tới người dùng
+   */
   async sendToUsers(userIds: string[], payload: PushPayload): Promise<void> {
+    const validUserIds = Array.from(new Set(userIds.filter(Boolean)));
+    if (!validUserIds.length) return;
+
+    // 1. Lưu bản ghi Notification vào database & phát Socket.IO
+    await Promise.all(
+      validUserIds.map(async (userId) => {
+        try {
+          const record = await this.prisma.notification.create({
+            data: {
+              userId,
+              type: (payload.data?.type as string) || 'system',
+              title: payload.title,
+              body: payload.body,
+              data: payload.data ? (payload.data as Prisma.InputJsonValue) : Prisma.JsonNull,
+            },
+          });
+          this.gateway?.emitNotification(userId, record);
+        } catch (err) {
+          this.logger.warn(`Lưu thông báo database thất bại cho user ${userId}: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }),
+    );
+
+    // 2. Gửi Expo Push Notification nếu user có token
     try {
       const users = await this.prisma.user.findMany({
-        where: { id: { in: userIds }, expoPushToken: { not: null } },
+        where: { id: { in: validUserIds }, expoPushToken: { not: null } },
         select: { id: true, expoPushToken: true },
       });
       const messages: ExpoPushMessage[] = users
         .filter((u) => Expo.isExpoPushToken(u.expoPushToken))
         .map((u) => ({
           to: u.expoPushToken as string,
-          sound: 'default',
+          sound: payload.sound !== undefined ? payload.sound : 'default',
           title: payload.title,
           body: payload.body,
           data: payload.data,
-          channelId: 'orders',
+          channelId: payload.channelId || 'orders',
+          priority: payload.priority || 'high',
         }));
       if (!messages.length) return;
 
@@ -235,6 +290,92 @@ export class NotificationsService {
     } catch (err) {
       this.logger.warn(`Push notification failed: ${err instanceof Error ? err.message : String(err)}`);
     }
+  }
+
+  /** Lấy danh sách thông báo của người dùng có phân trang */
+  async list(userId: string, query: ListNotificationsQueryDto) {
+    const page = query.page || 1;
+    const limit = query.limit || 20;
+    const skip = (page - 1) * limit;
+
+    const [items, total, unreadCount] = await Promise.all([
+      this.prisma.notification.findMany({
+        where: { userId },
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take: limit,
+      }),
+      this.prisma.notification.count({ where: { userId } }),
+      this.prisma.notification.count({ where: { userId, readAt: null } }),
+    ]);
+
+    return {
+      items,
+      total,
+      unreadCount,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+      hasMore: skip + items.length < total,
+    };
+  }
+
+  /** Lấy số lượng thông báo chưa đọc */
+  async getUnreadCount(userId: string) {
+    const unreadCount = await this.prisma.notification.count({
+      where: { userId, readAt: null },
+    });
+    return { unreadCount };
+  }
+
+  /** Đánh dấu một thông báo là đã đọc */
+  async markAsRead(userId: string, id: string) {
+    const notification = await this.prisma.notification.findFirst({
+      where: { id, userId },
+    });
+    if (!notification) {
+      throw new NotFoundException('Thông báo không tồn tại');
+    }
+    if (notification.readAt) {
+      return notification;
+    }
+    return this.prisma.notification.update({
+      where: { id },
+      data: { readAt: new Date() },
+    });
+  }
+
+  /** Xoá một thông báo */
+  async delete(userId: string, id: string) {
+    const notification = await this.prisma.notification.findFirst({
+      where: { id, userId },
+    });
+    if (!notification) {
+      throw new NotFoundException('Thông báo không tồn tại');
+    }
+    await this.prisma.notification.delete({
+      where: { id },
+    });
+    return { success: true };
+  }
+
+  /** Đánh dấu tất cả thông báo của người dùng là đã đọc */
+  async markAllAsRead(userId: string) {
+    const result = await this.prisma.notification.updateMany({
+      where: { userId, readAt: null },
+      data: { readAt: new Date() },
+    });
+    return { count: result.count };
+  }
+
+  /** Dọn dẹp các thông báo cũ hơn N ngày (mặc định 90 ngày) */
+  async cleanOldNotifications(days = 90) {
+    const threshold = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+    const result = await this.prisma.notification.deleteMany({
+      where: { createdAt: { lt: threshold } },
+    });
+    this.logger.log(`Đã dọn dẹp ${result.count} thông báo cũ hơn ${days} ngày`);
+    return result.count;
   }
 
   /** Token không còn hợp lệ (app bị gỡ) -> xóa để lần sau không gửi nữa. */

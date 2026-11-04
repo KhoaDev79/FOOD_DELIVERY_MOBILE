@@ -5,6 +5,7 @@ import {
   IsEnum,
   IsIn,
   IsInt,
+  IsISO8601,
   IsNotEmpty,
   IsOptional,
   IsString,
@@ -14,11 +15,17 @@ import {
   Min,
   MinLength,
 } from 'class-validator';
+import { STATS_RANGES, StatsRange } from '../admin-stats.util';
 
 export class ListUsersQueryDto {
   @IsOptional()
   @IsEnum(Role)
   role?: Role;
+
+  /** locked: chỉ tài khoản đang bị khoá; active: chỉ tài khoản đang hoạt động. */
+  @IsOptional()
+  @IsIn(['active', 'locked'])
+  status?: 'active' | 'locked';
 
   @IsOptional()
   @IsString()
@@ -38,10 +45,22 @@ export class ListUsersQueryDto {
   limit: number = 20;
 }
 
+export const ADMIN_ORDER_GROUPS = ['active', 'stalled', 'done', 'failed'] as const;
+export type AdminOrderGroup = (typeof ADMIN_ORDER_GROUPS)[number];
+
 export class ListAdminOrdersQueryDto {
   @IsOptional()
   @IsString()
   status?: string;
+
+  /** Nhóm tab: đang chạy / ứ đọng / hoàn thành / huỷ-thất bại. */
+  @IsOptional()
+  @IsIn(ADMIN_ORDER_GROUPS)
+  group?: AdminOrderGroup;
+
+  @IsOptional()
+  @IsUUID()
+  restaurantId?: string;
 
   @IsOptional()
   @Transform(({ value }) => value === true || value === 'true')
@@ -152,6 +171,8 @@ export enum RestaurantFilter {
   UNASSIGNED = 'unassigned',
   PENDING = 'pending',
   SUSPENDED = 'suspended',
+  /** Đã duyệt và đang hoạt động (không tính công tắc mở/đóng cửa của chủ quán). */
+  ACTIVE = 'active',
 }
 
 export class ListAdminRestaurantsQueryDto {
@@ -222,6 +243,50 @@ export class UpdateReviewVisibilityDto {
   @IsNotEmpty({ message: 'Vui lòng nhập lý do ẩn/hiện đánh giá' })
   @MaxLength(500)
   reason: string;
+}
+
+export class StatsOverviewQueryDto {
+  @IsOptional()
+  @IsIn(STATS_RANGES)
+  range: StatsRange = 'today';
+}
+
+export class ListAuditLogsQueryDto {
+  @IsOptional()
+  @IsUUID()
+  actorId?: string;
+
+  /** Tiền tố hành động: "USER_", "RESTAURANT_", "ORDER_"… hoặc tên đầy đủ. */
+  @IsOptional()
+  @IsString()
+  @MaxLength(60)
+  action?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(30)
+  targetType?: string;
+
+  @IsOptional()
+  @IsISO8601()
+  from?: string;
+
+  @IsOptional()
+  @IsISO8601()
+  to?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  page: number = 1;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(100)
+  limit: number = 30;
 }
 
 export class UnassignDriverDto {

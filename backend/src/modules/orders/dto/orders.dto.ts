@@ -1,15 +1,17 @@
 import { Type } from 'class-transformer';
 import {
   ArrayMaxSize,
-  IsArray,
   ArrayMinSize,
+  IsArray,
   IsEnum,
+  IsIn,
   IsInt,
   IsLatitude,
   IsLongitude,
   IsOptional,
   IsString,
   IsUUID,
+  Matches,
   Max,
   MaxLength,
   Min,
@@ -68,6 +70,14 @@ export class QuoteOrderDto {
   /** Bắt buộc dùng địa chỉ đã lưu trong sổ địa chỉ của khách */
   @IsUUID()
   addressId: string;
+
+  /** Mã voucher khách chọn: tối đa 1 mã giảm giá + 1 mã freeship */
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(2)
+  @IsString({ each: true })
+  @MaxLength(30, { each: true })
+  voucherCodes?: string[];
 }
 
 export class CreateOrderDto extends QuoteOrderDto {
@@ -142,6 +152,17 @@ export class ReviewOrderDto {
   @IsString()
   @MaxLength(300)
   driverComment?: string;
+
+  /** Tối đa 3 ảnh món (data URI base64 từ máy, backend tải lên Cloudinary) */
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(3, { message: 'Tối đa 3 ảnh cho mỗi đánh giá' })
+  @IsString({ each: true })
+  @Matches(/^(data:image\/(jpeg|jpg|png|webp);base64,|https?:\/\/)/, {
+    each: true,
+    message: 'Ảnh đánh giá không hợp lệ (chỉ nhận JPG, PNG, WEBP)',
+  })
+  images?: string[];
 }
 
 export class ReleaseOrderDto {
@@ -189,3 +210,44 @@ export class SendOrderMessageDto extends ChatChannelDto {
   @MaxLength(1000)
   content: string;
 }
+
+export class ListRefundsQueryDto {
+  @IsOptional()
+  @IsIn(['pending', 'done'])
+  status?: 'pending' | 'done';
+}
+
+export class ConfirmRefundDto {
+  /** Mã giao dịch hoàn / kênh hoàn tiền để đối chiếu */
+  @IsString()
+  @MinLength(3)
+  @MaxLength(300)
+  note: string;
+}
+
+/** Một dòng giỏ hàng gửi lên để kiểm tra (giỏ lưu trên máy khách). */
+export class CartCheckItemDto extends OrderItemInputDto {
+  /** Mã dòng do app đặt, trả lại nguyên vẹn để app biết dòng nào có vấn đề */
+  @IsString()
+  @MaxLength(100)
+  lineKey: string;
+
+  /** Đơn giá app đang hiển thị (để báo đổi giá) */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  unitPrice?: number;
+}
+
+export class CartCheckDto {
+  @IsUUID()
+  restaurantId: string;
+
+  @ValidateNested({ each: true })
+  @Type(() => CartCheckItemDto)
+  @ArrayMinSize(1)
+  @ArrayMaxSize(50)
+  items: CartCheckItemDto[];
+}
+

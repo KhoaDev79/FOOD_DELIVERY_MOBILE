@@ -1,4 +1,5 @@
 import { CancelReason, FailedDeliveryReason, OrderStatus } from '@prisma/client';
+import { CUSTOMER_CANCEL_REASON_VALUES } from './cancel-policy';
 
 export type OrderActor = 'CUSTOMER' | 'OWNER' | 'DRIVER' | 'ADMIN' | 'SYSTEM';
 
@@ -73,8 +74,11 @@ export function validateCancellationInput(
   }
 
   if (actor === 'CUSTOMER') {
-    if (cancelReason !== CancelReason.CUSTOMER_CHANGED_MIND) {
+    if (!CUSTOMER_CANCEL_REASON_VALUES.includes(cancelReason)) {
       return 'Lý do huỷ đơn của khách hàng không hợp lệ';
+    }
+    if (cancelReason === CancelReason.CUSTOMER_OTHER && (cancelNote?.trim().length ?? 0) < 5) {
+      return 'Vui lòng ghi rõ lý do huỷ (ít nhất 5 ký tự)';
     }
     return null;
   }
@@ -119,6 +123,11 @@ export function validateCancellationInput(
 
 export const CANCEL_REASON_LABELS: Record<CancelReason, string> = {
   CUSTOMER_CHANGED_MIND: 'Khách hàng đổi ý',
+  CUSTOMER_WRONG_ITEMS: 'Khách đặt nhầm món / số lượng',
+  CUSTOMER_WRONG_ADDRESS: 'Khách nhập sai địa chỉ',
+  CUSTOMER_WAIT_TOO_LONG: 'Khách chờ quán xác nhận quá lâu',
+  CUSTOMER_FOUND_ALTERNATIVE: 'Khách chọn quán khác',
+  CUSTOMER_OTHER: 'Khách huỷ vì lý do khác',
   RESTAURANT_OUT_OF_STOCK: 'Nhà hàng hết món / nguyên liệu',
   RESTAURANT_CLOSED: 'Nhà hàng đóng cửa đột xuất',
   RESTAURANT_OTHER: 'Nhà hàng quá tải / lý do khác',

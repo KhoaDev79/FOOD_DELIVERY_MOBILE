@@ -1,4 +1,6 @@
 import { BadRequestException, UnauthorizedException, ValidationPipe } from '@nestjs/common';
+import { RateLimitedException } from '../../common/rate-limit/rate-limit.exception';
+import { RateLimitService } from '../../common/rate-limit/rate-limit.service';
 import { Role } from '@prisma/client';
 import { hashSecret } from '../../common/utils/password.util';
 import { generateUniqueUsername, normalizeUsername } from '../../common/utils/username.util';
@@ -33,12 +35,17 @@ describe('AuthService.login & register', () => {
         create: jest.fn(({ data }) => Promise.resolve({ id: 'new-u', isActive: true, createdAt: new Date(), ...data })),
         update: jest.fn(),
       },
+      authSession: {
+        create: jest.fn().mockResolvedValue({}),
+        findMany: jest.fn().mockResolvedValue([]),
+        updateMany: jest.fn().mockResolvedValue({ count: 0 }),
+      },
     };
-    const jwt = { signAsync: jest.fn().mockResolvedValue('token') };
+    const jwt = { signAsync: jest.fn().mockResolvedValue('token'), decode: jest.fn().mockReturnValue(null) };
     const config = {
       getOrThrow: jest.fn().mockReturnValue({ accessSecret: 'a', refreshSecret: 'r', accessExpiresIn: '15m', refreshExpiresIn: '7d' }),
     };
-    service = new AuthService(prisma, jwt as any, config as any);
+    service = new AuthService(prisma, jwt as any, config as any, new RateLimitService({ get: () => true } as any));
   });
 
   it('đăng ký mới luôn gán role CUSTOMER', async () => {
@@ -46,6 +53,7 @@ describe('AuthService.login & register', () => {
       email: 'newuser@fooddelivery.com',
       password: 'Password123!',
       fullName: 'Khách Mới',
+      phone: '0987654321',
     });
     expect(res.user.role).toBe(Role.CUSTOMER);
     expect(prisma.user.create).toHaveBeenCalledWith(
@@ -76,7 +84,12 @@ describe('AuthService.login & register', () => {
 
   it('email đã đăng ký → 409 với thông báo rõ ràng', async () => {
     await expect(
-      service.register({ email: 'admin@fooddelivery.com', password: 'Password123!', fullName: 'Trùng Email' }),
+      service.register({
+        email: 'admin@fooddelivery.com',
+        password: 'Password123!',
+        fullName: 'Trùng Email',
+        phone: '0912345678',
+      }),
     ).rejects.toThrow('Email này đã được đăng ký');
     expect(prisma.user.create).not.toHaveBeenCalled();
   });
@@ -84,7 +97,7 @@ describe('AuthService.login & register', () => {
   describe('RegisterDto qua ValidationPipe', () => {
     const pipe = new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true });
     const run = (body: Record<string, unknown>) => pipe.transform(body, { type: 'body', metatype: RegisterDto });
-    const base = { email: 'a@b.vn', password: 'Password123!', fullName: 'Nguyễn Văn A' };
+    const base = { email: 'a@b.vn', password: 'Password123!', fullName: 'Nguyễn Văn A', phone: '0912345678' };
     const messagesOf = async (body: Record<string, unknown>) => {
       try {
         await run(body);
@@ -94,11 +107,16 @@ describe('AuthService.login & register', () => {
       }
     };
 
-    it('chuẩn hoá số điện thoại về dạng 0xxxxxxxxx, chuỗi rỗng coi như không nhập', async () => {
+    it('chuẩn hoá số điện thoại về dạng 0xxxxxxxxx', async () => {
       await expect(run({ ...base, phone: '+84 912 345 678' })).resolves.toMatchObject({ phone: '0912345678' });
       await expect(run({ ...base, phone: '0912.345.678' })).resolves.toMatchObject({ phone: '0912345678' });
-      const empty = (await run({ ...base, phone: '' })) as RegisterDto;
-      expect(empty.phone).toBeUndefined();
+    });
+
+    it('số điện thoại bắt buộc: thiếu hoặc rỗng đều bị từ chối', async () => {
+      const noPhone: Record<string, unknown> = { ...base };
+      delete noPhone.phone;
+      expect(await messagesOf(noPhone)).toEqual(expect.arrayContaining(['Vui lòng nhập số điện thoại']));
+      expect(await messagesOf({ ...base, phone: '   ' })).toEqual(expect.arrayContaining(['Vui lòng nhập số điện thoại']));
     });
 
     it('từ chối số 11 chữ số và đầu số không tồn tại', async () => {
@@ -141,6 +159,38 @@ describe('AuthService.login & register', () => {
     await expect(service.login({ username: 'khongton', password: 'Password123!' })).rejects.toBeInstanceOf(
       UnauthorizedException,
     );
+  });
+
+  describe('giới hạn đăng nhập sai', () => {
+    const wrong = (ip = '1.1.1.1') => service.login({ username: 'admin', password: 'sai' }, undefined, ip);
+
+    it('nhắc số lần còn lại, sai lần thứ 5 thì tạm khoá; đang khoá thì nhập đúng cũng bị chặn', async () => {
+      await expect(wrong()).rejects.toThrow(/^Tên đăng nhập hoặc mật khẩu không đúng$/);
+      await expect(wrong()).rejects.toThrow(/^Tên đăng nhập hoặc mật khẩu không đúng$/);
+      await expect(wrong()).rejects.toThrow('Còn 2 lần thử');
+      await expect(wrong()).rejects.toThrow('Còn 1 lần thử');
+      await expect(wrong()).rejects.toThrow('tạm khoá đăng nhập 15 phút');
+      await expect(
+        service.login({ username: 'admin', password: 'Password123!' }, undefined, '1.1.1.1'),
+      ).rejects.toBeInstanceOf(RateLimitedException);
+      // Thiết bị khác (IP khác) của chủ tài khoản vẫn đăng nhập được
+      await expect(service.login({ username: 'admin', password: 'Password123!' }, undefined, '2.2.2.2')).resolves.toBeTruthy();
+    });
+
+    it('tài khoản không tồn tại cũng bị đếm như nhau (không lộ tài khoản có thật)', async () => {
+      for (let i = 0; i < 3; i++) {
+        await expect(service.login({ username: 'khongton', password: 'x' }, undefined, '3.3.3.3')).rejects.toBeInstanceOf(
+          UnauthorizedException,
+        );
+      }
+      await expect(service.login({ username: 'khongton', password: 'x' }, undefined, '3.3.3.3')).rejects.toThrow('Còn 1 lần thử');
+    });
+
+    it('đăng nhập đúng thì xoá đếm sai của tài khoản', async () => {
+      for (let i = 0; i < 4; i++) await expect(wrong()).rejects.toBeInstanceOf(UnauthorizedException);
+      await service.login({ username: 'admin', password: 'Password123!' }, undefined, '1.1.1.1');
+      await expect(wrong()).rejects.toThrow(/^Tên đăng nhập hoặc mật khẩu không đúng$/);
+    });
   });
 });
 

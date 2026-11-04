@@ -70,6 +70,14 @@ describe('order-state-machine (V4)', () => {
     ).not.toBeNull();
   });
 
+  it('CUSTOMER chọn được các lý do của khách; "Lý do khác" bắt buộc ghi chú', () => {
+    expect(validateCancellationInput('CUSTOMER', 'PENDING', CancelReason.CUSTOMER_WRONG_ADDRESS)).toBeNull();
+    expect(validateCancellationInput('CUSTOMER', 'PENDING', CancelReason.CUSTOMER_WAIT_TOO_LONG)).toBeNull();
+    expect(validateCancellationInput('CUSTOMER', 'PENDING', CancelReason.CUSTOMER_OTHER)).toContain('ghi rõ lý do');
+    expect(validateCancellationInput('CUSTOMER', 'PENDING', CancelReason.CUSTOMER_OTHER, 'Bận việc đột xuất')).toBeNull();
+    expect(validateCancellationInput('CUSTOMER', 'PENDING', CancelReason.ADMIN_INTERVENTION)).not.toBeNull();
+  });
+
   it('SYSTEM chỉ được tự động huỷ đơn PENDING với lý do RESTAURANT_TIMEOUT', () => {
     expect(actorMayTransition('SYSTEM', 'PENDING', 'CANCELLED')).toBe(true);
     expect(actorMayTransition('SYSTEM', 'CONFIRMED', 'CANCELLED')).toBe(false);

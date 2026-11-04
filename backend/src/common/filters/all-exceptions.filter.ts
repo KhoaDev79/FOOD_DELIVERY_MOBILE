@@ -25,6 +25,8 @@ export class AllExceptionsFilter implements ExceptionFilter {
     let status = HttpStatus.INTERNAL_SERVER_ERROR;
     let message = 'Internal server error';
     let errors: unknown;
+    let code: string | undefined;
+    let retryAfterSec: number | undefined;
 
     if (exception instanceof HttpException) {
       status = exception.getStatus();
@@ -32,7 +34,10 @@ export class AllExceptionsFilter implements ExceptionFilter {
       if (typeof body === 'string') {
         message = body;
       } else {
-        const b = body as { message?: string | string[] };
+        const b = body as { message?: string | string[]; code?: unknown; retryAfterSec?: unknown };
+        // Mã lỗi nghiệp vụ (vd RATE_LIMITED, CANCEL_LIMIT) để app xử lý riêng, không phải dò theo câu chữ
+        if (typeof b.code === 'string') code = b.code;
+        if (typeof b.retryAfterSec === 'number') retryAfterSec = b.retryAfterSec;
         if (Array.isArray(b.message)) {
           // Lỗi kiểm tra dữ liệu: đưa lý do cụ thể (đã viết tiếng Việt trong DTO) lên message để app hiển thị
           message = b.message.join('. ');
@@ -66,9 +71,13 @@ export class AllExceptionsFilter implements ExceptionFilter {
       );
     }
 
+    if (retryAfterSec !== undefined) res.setHeader('Retry-After', String(retryAfterSec));
+
     res.status(status).json({
       success: false,
       statusCode: status,
+      ...(code ? { code } : {}),
+      ...(retryAfterSec !== undefined ? { retryAfterSec } : {}),
       message,
       ...(errors ? { errors } : {}),
       path: req.url,

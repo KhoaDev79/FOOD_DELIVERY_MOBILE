@@ -20,6 +20,7 @@ export interface BusinessConfig {
   driverOfflineAfterMinutes: number;
   maxActiveDeliveries: number;
   orderPendingTimeoutMinutes: number;
+  orderPendingReminderMinutes: number;
   orderStalledPickupMinutes: number;
   failedDeliveryMinWaitMinutes: number;
   failedDeliveryMinCalls: number;
@@ -71,6 +72,22 @@ export interface AppConfig {
   sentry: {
     dsn?: string;
   };
+  /** Client ID OAuth của Google (web, Android, iOS) được chấp nhận làm "audience" của idToken */
+  googleClientIds: string[];
+  mail: {
+    host: string;
+    port: number;
+    secure: boolean;
+    user: string;
+    pass: string;
+    fromName: string;
+  };
+  security: {
+    /** Tắt giới hạn tần suất (chỉ nên dùng khi chạy thử tải / test e2e) */
+    rateLimitEnabled: boolean;
+    /** Giá trị cho Express 'trust proxy' khi chạy sau Caddy/Nginx, để lấy đúng IP người dùng */
+    trustProxy: boolean | number | string;
+  };
 }
 
 const REQUIRED = ['DATABASE_URL', 'JWT_ACCESS_SECRET', 'JWT_REFRESH_SECRET', 'QUOTE_SECRET'] as const;
@@ -116,6 +133,14 @@ export function parsePeakWindows(raw: string): PeakWindow[] {
 }
 
 /** Fail fast khi thiếu biến môi trường bắt buộc hoặc cấu hình số âm (dùng cho ConfigModule.validate). */
+/** Các khoá bí mật còn để giá trị mẫu "change_me…" khi NODE_ENV=production. */
+export function sampleSecretsInProduction(env: Record<string, unknown>): string[] {
+  if (env.NODE_ENV !== 'production') return [];
+  return (['JWT_ACCESS_SECRET', 'JWT_REFRESH_SECRET', 'QUOTE_SECRET'] as const).filter((k) =>
+    String(env[k] ?? '').startsWith('change_me'),
+  );
+}
+
 export function validateEnv(env: Record<string, unknown>): Record<string, unknown> {
   const missing = REQUIRED.filter((k) => !env[k]);
   if (missing.length) {
@@ -125,6 +150,14 @@ export function validateEnv(env: Record<string, unknown>): Record<string, unknow
     if (String(env[k]).length < 32) {
       throw new Error(`${k} must be at least 32 characters`);
     }
+  }
+  // Production mà vẫn dùng khoá mẫu của .env.example (ai đọc repo cũng biết) → cảnh báo to trong log.
+  // Không chặn khởi động vì docker compose ở máy dev cũng chạy NODE_ENV=production.
+  const sample = sampleSecretsInProduction(env);
+  if (sample.length) {
+    console.warn(
+      `[CẢNH BÁO BẢO MẬT] ${sample.join(', ')} vẫn là khoá mẫu. Khi deploy thật phải thay bằng chuỗi ngẫu nhiên (xem docs/DEPLOY.md).`,
+    );
   }
   for (const k of NUMERIC_BUSINESS_KEYS) {
     const raw = env[k];
@@ -178,6 +211,7 @@ export default (): AppConfig => {
       driverOfflineAfterMinutes: parseInt(process.env.DRIVER_OFFLINE_AFTER_MINUTES ?? '15', 10),
       maxActiveDeliveries: parseInt(process.env.MAX_ACTIVE_DELIVERIES ?? '2', 10),
       orderPendingTimeoutMinutes: parseInt(process.env.ORDER_PENDING_TIMEOUT_MINUTES ?? '5', 10),
+      orderPendingReminderMinutes: parseInt(process.env.ORDER_PENDING_REMINDER_MINUTES ?? '2', 10),
       orderStalledPickupMinutes: parseInt(process.env.ORDER_STALLED_PICKUP_MINUTES ?? '10', 10),
       failedDeliveryMinWaitMinutes: parseInt(process.env.FAILED_DELIVERY_MIN_WAIT_MINUTES ?? '10', 10),
       failedDeliveryMinCalls: parseInt(process.env.FAILED_DELIVERY_MIN_CALLS ?? '3', 10),
@@ -209,5 +243,31 @@ export default (): AppConfig => {
     sentry: {
       dsn: process.env.SENTRY_DSN || undefined,
     },
+    googleClientIds: (process.env.GOOGLE_CLIENT_IDS ?? '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean),
+    mail: {
+      host: process.env.SMTP_HOST || 'smtp.gmail.com',
+      port: parseInt(process.env.SMTP_PORT || '465', 10),
+      secure: (process.env.SMTP_SECURE ?? 'true').toLowerCase() !== 'false',
+      user: process.env.SMTP_USER ?? '',
+      // Mật khẩu ứng dụng Gmail hay được dán kèm dấu cách ("abcd efgh ...")
+      pass: (process.env.SMTP_PASS ?? '').replace(/\s+/g, ''),
+      fromName: process.env.MAIL_FROM_NAME || 'ZomZom',
+    },
+    security: {
+      rateLimitEnabled: (process.env.RATE_LIMIT_ENABLED ?? 'true').toLowerCase() !== 'false',
+      trustProxy: parseTrustProxy(process.env.TRUST_PROXY),
+    },
   };
 };
+
+/** TRUST_PROXY: trống/false = không tin proxy; true; số lớp proxy (vd 1); hoặc danh sách IP/subnet. */
+export function parseTrustProxy(raw?: string): boolean | number | string {
+  const v = (raw ?? '').trim();
+  if (!v || v.toLowerCase() === 'false') return false;
+  if (v.toLowerCase() === 'true') return true;
+  if (/^\d+$/.test(v)) return parseInt(v, 10);
+  return v;
+}

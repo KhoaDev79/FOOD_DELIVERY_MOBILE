@@ -11,10 +11,17 @@ import { Prisma, Restaurant, RestaurantStatus, Role } from '@prisma/client';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { boundingBox, calcDeliveryFee, estimateDelivery, haversineKm } from '../../common/utils/geo.util';
 import { isAcceptingOrders } from '../../common/utils/opening-hours';
+import { computePauseUntil } from '../../common/utils/restaurant-pause.util';
 import { foldVietnamese, VI_ACCENTED, VI_PLAIN } from '../../common/utils/vietnamese';
 import { BusinessConfig } from '../../config/configuration';
+import { MediaService } from '../media/media.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { PrismaService } from '../prisma/prisma.service';
+import {
+  CreateSpecialClosingDto,
+  UpdateWeeklyScheduleDto,
+  UpdateWeeklyScheduleItemDto,
+} from './dto/restaurant-schedule.dto';
 import {
   CreateRestaurantDto,
   ListRestaurantReviewsQueryDto,
@@ -24,6 +31,8 @@ import {
 import { buildRestaurantStats, StatsRange, statsRangeStart } from './restaurant-stats';
 import { rankSuggestions, SUGGESTION_WINDOW_DAYS } from './restaurant-suggestions';
 import { LruCache } from '../../common/utils/lru-cache.util';
+import { maxDistanceForFee, promoLabelFor } from './search-filters';
+import { toggleHiddenImage, visibleImages } from './review-images';
 
 export interface NearbyRestaurant {
   id: string;
@@ -43,6 +52,7 @@ export interface NearbyRestaurant {
   openTime: string;
   closeTime: string;
   distanceKm: number;
+  pausedUntil?: Date | string | null;
 }
 
 /** Phạm vi tối đa khi khách tìm theo từ khoá (km): quán xa hơn coi như không liên quan. */
@@ -50,7 +60,7 @@ const SEARCH_MAX_KM = 50;
 
 const RESTAURANT_COLUMNS = Prisma.sql`
   r.id, r.name, r.description, r."imageUrl", r.phone, r.address,
-  r.latitude, r.longitude, r."deliveryRadiusKm", r.status, r."isOpen", r.rating, r."ratingCount", r."openTime", r."closeTime"`;
+  r.latitude, r.longitude, r."deliveryRadiusKm", r.status, r."isOpen", r.rating, r."ratingCount", r."openTime", r."closeTime", r."pausedUntil"`;
 
 /** Biểu thức SQL bỏ dấu + viết thường, khớp với foldVietnamese() ở JS. */
 const fold = (col: Prisma.Sql) => Prisma.sql`lower(translate(${col}, ${VI_ACCENTED}, ${VI_PLAIN}))`;
@@ -68,6 +78,7 @@ export class RestaurantsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
+    private readonly media: MediaService,
     @Optional() private readonly notifications?: NotificationsService,
   ) {}
 
@@ -75,7 +86,7 @@ export class RestaurantsService {
    * Tìm quán cho khách hàng (chỉ quán có status = ACTIVE).
    */
   async findNearby(query: NearbyRestaurantsQueryDto) {
-    const { lat, lng, radiusKm, q, openOnly, page, limit } = query;
+    const { lat, lng, radiusKm, q, openOnly, page, limit, sort, minRating, maxDistanceKm, maxDeliveryFee, hasPromo } = query;
     const term = q?.trim();
     if (term && term.length >= 2) {
       this.prisma.searchLog.create({ data: { query: term } }).catch(() => {});
@@ -101,10 +112,47 @@ export class RestaurantsService {
       )`);
     }
     if (openOnly) filters.push(Prisma.sql`r."isOpen" = true`);
+    if (minRating) filters.push(Prisma.sql`r.rating >= ${minRating}`);
+    if (hasPromo) {
+      // Quán có mã giảm giá của quán còn hiệu lực, hoặc có món đang giảm giá
+      filters.push(Prisma.sql`(
+        EXISTS (
+          SELECT 1 FROM vouchers v
+          WHERE v."restaurantId" = r.id AND v."isActive" = true AND v."userId" IS NULL
+            AND v."startDate" <= NOW() AND v."endDate" > NOW() AND v."usedCount" < v."maxUsage"
+        )
+        OR EXISTS (
+          SELECT 1 FROM menu_items mi
+          WHERE mi."restaurantId" = r.id AND mi."isArchived" = false AND mi."isAvailable" = true
+            AND mi."discountPrice" IS NOT NULL AND mi."discountPrice" < mi.price
+        )
+      )`);
+    }
 
-    const reach = term
+    // Khoảng cách tối đa: theo lựa chọn của khách và/hoặc theo phí ship tối đa (phí tăng theo khoảng cách)
+    let distanceCap = Number.POSITIVE_INFINITY;
+    if (maxDistanceKm) distanceCap = Math.min(distanceCap, maxDistanceKm);
+    if (maxDeliveryFee !== undefined) {
+      const feeKm = maxDistanceForFee(maxDeliveryFee, (km) => this.computeEstimatedFee(km).estimatedDeliveryFee);
+      if (feeKm < 0) return { items: [], page, limit, hasMore: false, isExpandedRadius: false };
+      distanceCap = Math.min(distanceCap, feeKm);
+    }
+
+    const reachBase = term
       ? Prisma.sql`"distanceKm" <= ${SEARCH_MAX_KM}`
       : Prisma.sql`"distanceKm" <= ${radiusKm} AND "distanceKm" <= "deliveryRadiusKm"`;
+    const reach = Number.isFinite(distanceCap)
+      ? Prisma.sql`${reachBase} AND "distanceKm" <= ${distanceCap}`
+      : reachBase;
+    const hasFilters = Boolean(minRating || hasPromo || Number.isFinite(distanceCap));
+
+    // Thứ tự: quán giao tới được và đang mở luôn lên trước, sau đó theo lựa chọn sắp xếp
+    const orderBy =
+      sort === 'rating'
+        ? Prisma.sql`("distanceKm" <= "deliveryRadiusKm") DESC, "isOpen" DESC, rating DESC, "ratingCount" DESC, "distanceKm" ASC`
+        : sort === 'popular'
+          ? Prisma.sql`("distanceKm" <= "deliveryRadiusKm") DESC, "isOpen" DESC, "ratingCount" DESC, rating DESC, "distanceKm" ASC`
+          : Prisma.sql`("distanceKm" <= "deliveryRadiusKm") DESC, "isOpen" DESC, "distanceKm" ASC`;
 
     const rows = await this.prisma.$queryRaw<NearbyRestaurant[]>`
       SELECT * FROM (
@@ -113,7 +161,7 @@ export class RestaurantsService {
         WHERE ${Prisma.join(filters, ' AND ')}
       ) AS candidates
       WHERE ${reach}
-      ORDER BY ("distanceKm" <= "deliveryRadiusKm") DESC, "isOpen" DESC, "distanceKm" ASC
+      ORDER BY ${orderBy}
       LIMIT ${limit + 1} OFFSET ${offset}
     `;
 
@@ -139,7 +187,10 @@ export class RestaurantsService {
       items = items.map((r) => ({ ...r, matchedDishes: byRestaurant.get(r.id) ?? [] }));
     }
 
-    if (!term && items.length === 0 && page === 1) {
+    items = await this.attachPromoLabels(items);
+
+    // Không có quán trong vùng giao: gợi ý quán gần nhất (chỉ khi khách không tự đặt bộ lọc)
+    if (!term && !hasFilters && items.length === 0 && page === 1) {
       const nearest = await this.prisma.$queryRaw<NearbyRestaurant[]>`
         SELECT ${RESTAURANT_COLUMNS}, ${distanceSql(lat, lng)} AS "distanceKm"
         FROM restaurants r
@@ -162,6 +213,32 @@ export class RestaurantsService {
     return { items, page, limit, hasMore, isExpandedRadius: false };
   }
 
+  /** Gắn nhãn ưu đãi ("Giảm 15K", "Freeship", "Món giảm giá") cho các quán trong trang kết quả. */
+  private async attachPromoLabels<T extends { id: string }>(items: T[]): Promise<(T & { promoLabel: string | null })[]> {
+    if (items.length === 0) return [];
+    const ids = items.map((r) => r.id);
+    const now = new Date();
+    const [vouchers, discounted] = await Promise.all([
+      this.prisma.voucher.findMany({
+        where: { restaurantId: { in: ids }, isActive: true, userId: null, startDate: { lte: now }, endDate: { gt: now } },
+        select: { restaurantId: true, discountType: true, discountValue: true, maxDiscountAmount: true, usedCount: true, maxUsage: true },
+      }),
+      this.prisma.$queryRaw<{ restaurantId: string }[]>`
+        SELECT DISTINCT mi."restaurantId" FROM menu_items mi
+        WHERE mi."restaurantId"::text = ANY(${ids}) AND mi."isArchived" = false AND mi."isAvailable" = true
+          AND mi."discountPrice" IS NOT NULL AND mi."discountPrice" < mi.price
+      `,
+    ]);
+    const discountedSet = new Set(discounted.map((d) => d.restaurantId));
+    return items.map((r) => ({
+      ...r,
+      promoLabel: promoLabelFor(
+        vouchers.filter((v) => v.restaurantId === r.id && v.usedCount < v.maxUsage),
+        discountedSet.has(r.id),
+      ),
+    }));
+  }
+
   /** Dữ liệu quán cho khách: khoảng cách làm tròn, phí ship ước tính từ backend, đang nhận đơn hay không. */
   private toPublicRestaurant(r: NearbyRestaurant) {
     const distanceKm = Math.round(Number(r.distanceKm) * 100) / 100;
@@ -173,6 +250,7 @@ export class RestaurantsService {
       estimatedMinutes: est.estimatedMinutes,
       canDeliver: distanceKm <= r.deliveryRadiusKm,
       isOpen: isAcceptingOrders(r),
+      pausedUntil: r.pausedUntil ? new Date(r.pausedUntil).toISOString() : null,
     };
   }
 
@@ -285,6 +363,8 @@ export class RestaurantsService {
           },
         },
         menuItems: { where: { isArchived: false, categoryId: null }, orderBy: { name: 'asc' } },
+        openingHours: { orderBy: { dayOfWeek: 'asc' } },
+        specialClosings: { orderBy: { date: 'asc' } },
       },
     });
     if (!restaurant) throw new NotFoundException('Không tìm thấy nhà hàng');
@@ -372,7 +452,8 @@ export class RestaurantsService {
   }
 
   async create(user: AuthUser, dto: CreateRestaurantDto) {
-    const { ownerId: requestedOwnerId, ...data } = dto;
+    const { ownerId: requestedOwnerId, imageUrl: rawImageUrl, ...data } = dto;
+    const imageUrl = await this.media.resolveImage(rawImageUrl, 'restaurants');
     const isAdmin = user.role === Role.ADMIN;
     const ownerId = isAdmin && requestedOwnerId ? requestedOwnerId : user.id;
     const status = isAdmin ? RestaurantStatus.ACTIVE : RestaurantStatus.PENDING_APPROVAL;
@@ -381,6 +462,7 @@ export class RestaurantsService {
       const created = await tx.restaurant.create({
         data: {
           ...data,
+          imageUrl,
           ownerId,
           status,
           ...(isAdmin ? { approvedAt: new Date(), approvedById: user.id } : {}),
@@ -416,11 +498,29 @@ export class RestaurantsService {
     const revertToPending =
       isOwner && existing.status === RestaurantStatus.ACTIVE && changedCriticalFields.length > 0;
 
+    const { pauseMode, imageUrl: rawImageUrl, ...dtoFields } = dto;
+    let resolvedImageUrl: string | null | undefined = undefined;
+    if (rawImageUrl !== undefined) {
+      resolvedImageUrl = await this.media.resolveImage(rawImageUrl, 'restaurants');
+    }
+    let resolvedPausedUntil: Date | null | undefined = undefined;
+    if (pauseMode === 'cancel') {
+      resolvedPausedUntil = null;
+    } else if (pauseMode) {
+      resolvedPausedUntil = computePauseUntil(pauseMode);
+    } else if (dtoFields.pausedUntil !== undefined) {
+      resolvedPausedUntil = dtoFields.pausedUntil ? new Date(dtoFields.pausedUntil) : null;
+    } else if (dtoFields.isOpen === true) {
+      resolvedPausedUntil = null;
+    }
+
     return this.prisma.$transaction(async (tx) => {
       const updated = await tx.restaurant.update({
         where: { id },
         data: {
-          ...dto,
+          ...dtoFields,
+          ...(resolvedImageUrl !== undefined ? { imageUrl: resolvedImageUrl } : {}),
+          ...(resolvedPausedUntil !== undefined ? { pausedUntil: resolvedPausedUntil } : {}),
           ...(dto.name !== undefined ? { name: dto.name.trim() } : {}),
           ...(dto.address !== undefined ? { address: dto.address.trim() } : {}),
           ...(dto.phone !== undefined ? { phone: dto.phone?.trim() || null } : {}),
@@ -497,6 +597,7 @@ export class RestaurantsService {
       select: {
         status: true,
         subtotal: true,
+        restaurantDiscount: true,
         createdAt: true,
         items: { select: { menuItemId: true, name: true, quantity: true, lineTotal: true } },
       },
@@ -540,19 +641,22 @@ export class RestaurantsService {
 
     const page = Number(query.page) || 1;
     const limit = Number(query.limit) || 20;
+    const visible = { restaurantId, isHidden: false };
     const where: Prisma.ReviewWhereInput = {
-      restaurantId,
-      isHidden: false,
+      ...visible,
       ...(query.rating ? { rating: Number(query.rating) } : {}),
+      ...(query.withPhotos ? { images: { isEmpty: false } } : {}),
     };
 
-    const [rows, total] = await Promise.all([
+    const [rows, total, byStar, photoCount, commentCount] = await Promise.all([
       this.prisma.review.findMany({
         where,
         select: {
           id: true,
           rating: true,
           comment: true,
+          images: true,
+          hiddenImages: true,
           ownerReply: true,
           ownerRepliedAt: true,
           createdAt: true,
@@ -563,15 +667,29 @@ export class RestaurantsService {
         take: limit,
       }),
       this.prisma.review.count({ where }),
+      this.prisma.review.groupBy({ by: ['rating'], where: visible, _count: { _all: true } }),
+      this.prisma.review.count({ where: { ...visible, images: { isEmpty: false } } }),
+      this.prisma.review.count({ where: { ...visible, comment: { not: null } } }),
     ]);
+
+    // Số đánh giá theo từng mức sao (5 → 1) cho biểu đồ, giống trang đánh giá của các app lớn
+    const breakdown = [5, 4, 3, 2, 1].map((star) => ({
+      star,
+      count: byStar.find((b) => b.rating === star)?._count._all ?? 0,
+    }));
 
     return {
       rating: rest.rating,
       ratingCount: rest.ratingCount,
+      breakdown,
+      photoCount,
+      commentCount,
       items: rows.map((r) => ({
         id: r.id,
         rating: r.rating,
         comment: r.comment,
+        // Ảnh bị ẩn không hiện công khai
+        images: visibleImages(r.images, r.hiddenImages),
         ownerReply: r.ownerReply,
         ownerRepliedAt: r.ownerRepliedAt,
         createdAt: r.createdAt,
@@ -595,6 +713,7 @@ export class RestaurantsService {
       restaurantId,
       ...(query.rating ? { rating: Number(query.rating) } : {}),
       ...(query.unrepliedOnly ? { ownerReply: null } : {}),
+      ...(query.withPhotos ? { images: { isEmpty: false } } : {}),
     };
 
     const [rows, total] = await Promise.all([
@@ -607,6 +726,8 @@ export class RestaurantsService {
           comment: true,
           driverRating: true,
           driverComment: true,
+          images: true,
+          hiddenImages: true,
           ownerReply: true,
           ownerRepliedAt: true,
           isHidden: true,
@@ -629,6 +750,48 @@ export class RestaurantsService {
       limit,
       hasMore: page * limit < total,
     };
+  }
+
+  /**
+   * Ẩn một ảnh đánh giá không phù hợp (không liên quan món, phản cảm, lộ thông tin cá nhân, spam).
+   * Chủ quán chỉ ẩn ảnh trong đánh giá của quán mình; bắt buộc lý do và ghi nhật ký để admin kiểm tra lại.
+   */
+  async setReviewImageHidden(
+    reviewId: string,
+    user: AuthUser,
+    imageUrl: string,
+    hidden: boolean,
+    reason?: string,
+  ) {
+    const review = await this.prisma.review.findUnique({
+      where: { id: reviewId },
+      include: { restaurant: { select: { ownerId: true } } },
+    });
+    if (!review) throw new NotFoundException('Không tìm thấy đánh giá');
+    if (user.role !== 'ADMIN' && review.restaurant.ownerId !== user.id) {
+      throw new ForbiddenException('Bạn không phải chủ nhà hàng của đánh giá này');
+    }
+    if (!review.images.includes(imageUrl)) throw new NotFoundException('Ảnh không thuộc đánh giá này');
+
+    const hiddenImages = toggleHiddenImage(review.hiddenImages, imageUrl, hidden);
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const res = await tx.review.update({
+        where: { id: reviewId },
+        data: { hiddenImages },
+        select: { id: true, images: true, hiddenImages: true },
+      });
+      await tx.auditLog.create({
+        data: {
+          actorId: user.id,
+          action: hidden ? 'REVIEW_IMAGE_HIDE' : 'REVIEW_IMAGE_UNHIDE',
+          targetType: 'REVIEW',
+          targetId: reviewId,
+          metadata: { imageUrl, reason: reason ?? null, restaurantId: review.restaurantId },
+        },
+      });
+      return res;
+    });
+    return updated;
   }
 
   /** E3: Chủ quán phản hồi đánh giá (chỉ được trả lời đúng 1 lần) */
@@ -675,5 +838,109 @@ export class RestaurantsService {
       });
     }
     return updated;
+  }
+// =========================================================================
+  //  GIỜ MỞ CỬA THEO NGÀY TRONG TUẦN & NGÀY NGHỈ ĐẶC BIỆT
+  // =========================================================================
+
+  /** Lấy lịch mở cửa 7 ngày và danh sách ngày nghỉ đặc biệt của quán */
+  async getSchedule(restaurantId: string) {
+    const restaurant = await this.prisma.restaurant.findUnique({
+      where: { id: restaurantId },
+      select: { id: true, name: true, openTime: true, closeTime: true },
+    });
+    if (!restaurant) throw new NotFoundException('Không tìm thấy nhà hàng');
+
+    const [openingHours, specialClosings] = await Promise.all([
+      this.prisma.restaurantOpeningHour.findMany({
+        where: { restaurantId },
+        orderBy: { dayOfWeek: 'asc' },
+      }),
+      this.prisma.restaurantSpecialClosing.findMany({
+        where: { restaurantId },
+        orderBy: { date: 'asc' },
+      }),
+    ]);
+
+    return {
+      defaultOpenTime: restaurant.openTime,
+      defaultCloseTime: restaurant.closeTime,
+      openingHours,
+      specialClosings,
+    };
+  }
+
+  /** Cập nhật lịch mở cửa 7 ngày trong tuần của quán (có hỗ trợ áp dụng cho tất cả ngày) */
+  async updateWeeklySchedule(restaurantId: string, user: AuthUser, dto: UpdateWeeklyScheduleDto) {
+    await this.assertCanManage(restaurantId, user);
+
+    let itemsToSave: UpdateWeeklyScheduleItemDto[] = dto.schedule;
+    if (dto.applyToAllDays && dto.schedule.length > 0) {
+      const template = dto.schedule[0];
+      itemsToSave = Array.from({ length: 7 }, (_, dayOfWeek) => ({
+        dayOfWeek,
+        openTime: template.openTime,
+        closeTime: template.closeTime,
+        isClosed: Boolean(template.isClosed),
+      }));
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      await tx.restaurantOpeningHour.deleteMany({
+        where: { restaurantId },
+      });
+
+      await tx.restaurantOpeningHour.createMany({
+        data: itemsToSave.map((item: UpdateWeeklyScheduleItemDto) => ({
+          restaurantId,
+          dayOfWeek: item.dayOfWeek,
+          openTime: item.openTime,
+          closeTime: item.closeTime,
+          isClosed: Boolean(item.isClosed),
+        })),
+      });
+
+      return tx.restaurantOpeningHour.findMany({
+        where: { restaurantId },
+        orderBy: { dayOfWeek: 'asc' },
+      });
+    });
+  }
+
+  /** Thêm ngày nghỉ đặc biệt (lễ, Tết, sửa chữa) */
+  async addSpecialClosing(restaurantId: string, user: AuthUser, dto: CreateSpecialClosingDto) {
+    await this.assertCanManage(restaurantId, user);
+    const dateObj = new Date(dto.date);
+
+    return this.prisma.restaurantSpecialClosing.upsert({
+      where: {
+        restaurantId_date: {
+          restaurantId,
+          date: dateObj,
+        },
+      },
+      create: {
+        restaurantId,
+        date: dateObj,
+        reason: dto.reason?.trim() || null,
+      },
+      update: {
+        reason: dto.reason?.trim() || null,
+      },
+    });
+  }
+
+  /** Xoá ngày nghỉ đặc biệt */
+  async removeSpecialClosing(restaurantId: string, user: AuthUser, closingId: string) {
+    await this.assertCanManage(restaurantId, user);
+    const closing = await this.prisma.restaurantSpecialClosing.findFirst({
+      where: { id: closingId, restaurantId },
+    });
+    if (!closing) throw new NotFoundException('Không tìm thấy ngày nghỉ đặc biệt');
+
+    await this.prisma.restaurantSpecialClosing.delete({
+      where: { id: closingId },
+    });
+    return { success: true };
   }
 }

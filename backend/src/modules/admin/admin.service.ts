@@ -16,8 +16,10 @@ import { AuthStateService } from '../auth/auth-state.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { OrdersGateway } from '../realtime/orders.gateway';
+import { attachHistoryActors, parseOrderCodeTerm } from './admin-order.util';
 import {
   AdminCreateRestaurantDto,
+  AdminOrderGroup,
   AdminUpdateRestaurantDto,
   ChangeUserRoleDto,
   ListAdminOrdersQueryDto,
@@ -46,6 +48,32 @@ const UNASSIGNED_WHERE: Prisma.RestaurantWhereInput = {
 };
 
 const OWNER_SELECT = { id: true, fullName: true, email: true, phone: true, role: true, isActive: true } as const;
+
+const RUNNING_STATUSES: OrderStatus[] = [
+  OrderStatus.PENDING,
+  OrderStatus.CONFIRMED,
+  OrderStatus.PREPARING,
+  OrderStatus.READY_FOR_PICKUP,
+  OrderStatus.PICKED_UP,
+];
+
+/** Nhóm tab ở màn Điều hành đơn. "Ứ đọng" chỉ tính đơn còn đang chạy (đơn đã kết thúc không cần xử lý nữa). */
+const ORDER_GROUP_WHERE: Record<AdminOrderGroup, Prisma.OrderWhereInput> = {
+  active: { status: { in: RUNNING_STATUSES } },
+  stalled: { stalledAt: { not: null }, status: { in: RUNNING_STATUSES } },
+  done: { status: OrderStatus.DELIVERED },
+  failed: { status: { in: [OrderStatus.CANCELLED, OrderStatus.DELIVERY_FAILED] } },
+};
+
+const RESTAURANT_FILTER_WHERE: Record<RestaurantFilter, Prisma.RestaurantWhereInput> = {
+  [RestaurantFilter.ALL]: {},
+  [RestaurantFilter.OPEN]: { isOpen: true, status: RestaurantStatus.ACTIVE },
+  [RestaurantFilter.CLOSED]: { isOpen: false },
+  [RestaurantFilter.PENDING]: { status: RestaurantStatus.PENDING_APPROVAL },
+  [RestaurantFilter.SUSPENDED]: { status: RestaurantStatus.SUSPENDED },
+  [RestaurantFilter.ACTIVE]: { status: RestaurantStatus.ACTIVE },
+  [RestaurantFilter.UNASSIGNED]: UNASSIGNED_WHERE,
+};
 
 const needsOwner = (owner: { role: Role; isActive: boolean }) =>
   owner.role !== Role.RESTAURANT_OWNER || !owner.isActive;
@@ -102,6 +130,7 @@ export class AdminService {
   async listUsers(q: ListUsersQueryDto) {
     const where: Prisma.UserWhereInput = {
       ...(q.role ? { role: q.role } : {}),
+      ...(q.status ? { isActive: q.status === 'active' } : {}),
       ...(q.q?.trim()
         ? {
             OR: [
@@ -290,17 +319,22 @@ export class AdminService {
 
   /** Lấy danh sách toàn bộ nhà hàng trong hệ thống (tìm kiếm + lọc nhanh + lọc theo status) */
   async listRestaurants(q: ListAdminRestaurantsQueryDto) {
+    const search: Prisma.RestaurantWhereInput = q.q?.trim()
+      ? { name: { contains: q.q.trim(), mode: 'insensitive' } }
+      : {};
     const where: Prisma.RestaurantWhereInput = {
-      ...(q.q?.trim() ? { name: { contains: q.q.trim(), mode: 'insensitive' } } : {}),
-      ...(q.status ? { status: q.status } : {}),
-      ...(q.filter === RestaurantFilter.OPEN ? { isOpen: true, status: RestaurantStatus.ACTIVE } : {}),
-      ...(q.filter === RestaurantFilter.CLOSED ? { isOpen: false } : {}),
-      ...(q.filter === RestaurantFilter.PENDING ? { status: RestaurantStatus.PENDING_APPROVAL } : {}),
-      ...(q.filter === RestaurantFilter.SUSPENDED ? { status: RestaurantStatus.SUSPENDED } : {}),
-      ...(q.filter === RestaurantFilter.UNASSIGNED ? UNASSIGNED_WHERE : {}),
+      AND: [search, q.status ? { status: q.status } : {}, q.filter ? RESTAURANT_FILTER_WHERE[q.filter] : {}],
     };
+    // Số đếm từng tab (theo cùng từ khoá tìm kiếm) để hiện trên thanh tab
+    const tabKeys = [
+      RestaurantFilter.ALL,
+      RestaurantFilter.PENDING,
+      RestaurantFilter.ACTIVE,
+      RestaurantFilter.SUSPENDED,
+      RestaurantFilter.UNASSIGNED,
+    ];
 
-    const [items, total] = await Promise.all([
+    const [items, total, tabCounts] = await Promise.all([
       this.prisma.restaurant.findMany({
         where,
         include: {
@@ -312,11 +346,15 @@ export class AdminService {
         take: q.limit,
       }),
       this.prisma.restaurant.count({ where }),
+      Promise.all(
+        tabKeys.map((k) => this.prisma.restaurant.count({ where: { AND: [search, RESTAURANT_FILTER_WHERE[k]] } })),
+      ),
     ]);
 
     return {
       items: items.map((r) => ({ ...r, needsOwner: needsOwner(r.owner) })),
       total,
+      counts: Object.fromEntries(tabKeys.map((k, i) => [k, tabCounts[i]])),
       page: q.page,
       limit: q.limit,
       hasMore: q.page * q.limit < total,
@@ -560,16 +598,27 @@ export class AdminService {
     });
   }
 
+  /** Tìm id đơn theo tiền tố mã đơn. Cột id kiểu UUID nên Prisma không lọc "bắt đầu bằng" được → dùng SQL. */
+  private async findOrderIdsByCode(term?: string): Promise<string[]> {
+    const code = parseOrderCodeTerm(term);
+    if (!code) return [];
+    const rows = await this.prisma.$queryRaw<{ id: string }[]>`
+      SELECT id::text AS id FROM orders WHERE id::text LIKE ${`${code}%`} ORDER BY "createdAt" DESC LIMIT 50`;
+    return rows.map((r) => r.id);
+  }
+
   /** Lấy danh sách toàn bộ đơn hàng toàn sàn */
   async listOrders(q: ListAdminOrdersQueryDto) {
     const term = q.q?.trim();
-    const where: Prisma.OrderWhereInput = {
-      ...(q.status ? { status: q.status as OrderStatus } : {}),
-      ...(q.stalled ? { stalledAt: { not: null } } : {}),
+    const codeIds = term ? await this.findOrderIdsByCode(term) : [];
+
+    // Điều kiện chung (tìm kiếm, quán) dùng cho cả danh sách lẫn số đếm từng nhóm tab
+    const base: Prisma.OrderWhereInput = {
+      ...(q.restaurantId ? { restaurantId: q.restaurantId } : {}),
       ...(term
         ? {
             OR: [
-              ...(term.length === 36 ? [{ id: term }] : []),
+              ...(codeIds.length ? [{ id: { in: codeIds } }] : []),
               { customer: { phone: { contains: term, mode: 'insensitive' } } },
               { customer: { fullName: { contains: term, mode: 'insensitive' } } },
               { restaurant: { name: { contains: term, mode: 'insensitive' } } },
@@ -577,13 +626,23 @@ export class AdminService {
           }
         : {}),
     };
+    const where: Prisma.OrderWhereInput = {
+      AND: [
+        base,
+        q.group ? ORDER_GROUP_WHERE[q.group] : {},
+        q.status ? { status: q.status as OrderStatus } : {},
+        q.stalled ? ORDER_GROUP_WHERE.stalled : {},
+      ],
+    };
 
-    const [items, total] = await Promise.all([
+    const groupKeys = Object.keys(ORDER_GROUP_WHERE) as AdminOrderGroup[];
+    const [items, total, groupCounts] = await Promise.all([
       this.prisma.order.findMany({
         where,
         include: {
           customer: { select: { id: true, fullName: true, phone: true } },
-          restaurant: { select: { id: true, name: true, phone: true, address: true } },
+          restaurant: { select: { id: true, name: true, phone: true, address: true, imageUrl: true } },
+          statusHistory: { select: { status: true, createdAt: true }, orderBy: { createdAt: 'desc' }, take: 1 },
           driver: {
             select: {
               id: true,
@@ -600,11 +659,17 @@ export class AdminService {
         take: q.limit,
       }),
       this.prisma.order.count({ where }),
+      Promise.all(groupKeys.map((g) => this.prisma.order.count({ where: { AND: [base, ORDER_GROUP_WHERE[g]] } }))),
     ]);
 
     return {
-      items,
+      items: items.map(({ statusHistory, ...o }) => ({
+        ...o,
+        // Thời điểm đơn bước vào trạng thái hiện tại: để hiện "Kẹt 23 phút ở bước Chờ tài xế"
+        statusSince: statusHistory[0]?.createdAt ?? o.updatedAt,
+      })),
       total,
+      counts: Object.fromEntries(groupKeys.map((g, i) => [g, groupCounts[i]])) as Record<AdminOrderGroup, number>,
       page: q.page,
       limit: q.limit,
       hasMore: q.page * q.limit < total,
@@ -617,13 +682,25 @@ export class AdminService {
       where: { id: orderId },
       include: {
         items: true,
-        customer: { select: { id: true, fullName: true, phone: true, email: true } },
-        restaurant: { select: { id: true, name: true, phone: true, address: true, latitude: true, longitude: true } },
+        customer: { select: { id: true, fullName: true, phone: true, email: true, avatarUrl: true } },
+        restaurant: {
+          select: {
+            id: true,
+            name: true,
+            phone: true,
+            address: true,
+            latitude: true,
+            longitude: true,
+            imageUrl: true,
+            ownerId: true,
+          },
+        },
         driver: {
           select: {
             id: true,
             fullName: true,
             phone: true,
+            avatarUrl: true,
             driverProfile: {
               select: {
                 vehicleType: true,
@@ -641,7 +718,16 @@ export class AdminService {
       },
     });
     if (!order) throw new NotFoundException('Không tìm thấy đơn hàng');
-    return order;
+
+    // Lịch sử chỉ lưu id người đổi trạng thái → tra tên + vai trò để giao diện hiện "Tài xế Ryan", "Quán ZomZom"…
+    const actorIds = [...new Set(order.statusHistory.map((h) => h.changedBy).filter((id): id is string => !!id))];
+    const actors = actorIds.length
+      ? await this.prisma.user.findMany({
+          where: { id: { in: actorIds } },
+          select: { id: true, fullName: true, role: true },
+        })
+      : [];
+    return { ...order, statusHistory: attachHistoryActors(order.statusHistory, actors) };
   }
 
   /** Admin gỡ tài xế khỏi đơn đang giao (khi CONFIRMED/PREPARING/READY_FOR_PICKUP) và phát lại đơn */

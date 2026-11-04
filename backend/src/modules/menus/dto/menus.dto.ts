@@ -1,4 +1,5 @@
-import { Type } from 'class-transformer';
+import { STOCK_STATUSES, StockStatus } from '../menu-stock.util';
+import { Transform, Type } from 'class-transformer';
 import { DISCOUNT_PERCENTS } from '../menu-discount';
 import { MAX_LEVELS, MAX_OPTION_PRICE, MAX_SIZES, MAX_TOPPINGS } from '../menu-options';
 import {
@@ -14,8 +15,12 @@ import {
   MaxLength,
   Min,
   MinLength,
+  Matches,
+  ValidateIf,
   ValidateNested,
 } from 'class-validator';
+
+const TIME_HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
 
 /** Một lựa chọn có giá (size hoặc topping). id chỉ gửi khi sửa lựa chọn đã có. */
 export class MenuOptionInputDto {
@@ -122,6 +127,20 @@ export class CreateMenuItemDto {
   @ValidateNested()
   @Type(() => MenuItemOptionsDto)
   options?: MenuItemOptionsDto | null;
+
+  /** Khung giờ bán từ HH:mm (null = bán suốt giờ mở cửa) */
+  @IsOptional()
+  @Transform(({ value }) => (value === '' ? null : value))
+  @ValidateIf((_o, v) => v !== null && v !== undefined)
+  @Matches(TIME_HHMM, { message: 'Giờ bắt đầu bán phải có định dạng HH:mm' })
+  availableFrom?: string | null;
+
+  /** Khung giờ bán đến HH:mm */
+  @IsOptional()
+  @Transform(({ value }) => (value === '' ? null : value))
+  @ValidateIf((_o, v) => v !== null && v !== undefined)
+  @Matches(TIME_HHMM, { message: 'Giờ kết thúc bán phải có định dạng HH:mm' })
+  availableTo?: string | null;
 }
 
 export class UpdateMenuItemDto {
@@ -166,4 +185,24 @@ export class UpdateMenuItemDto {
   @ValidateNested()
   @Type(() => MenuItemOptionsDto)
   options?: MenuItemOptionsDto | null;
+
+  /** Khung giờ bán từ HH:mm (null = bán suốt giờ mở cửa) */
+  @IsOptional()
+  @Transform(({ value }) => (value === '' ? null : value))
+  @ValidateIf((_o, v) => v !== null && v !== undefined)
+  @Matches(TIME_HHMM, { message: 'Giờ bắt đầu bán phải có định dạng HH:mm' })
+  availableFrom?: string | null;
+
+  /** Khung giờ bán đến HH:mm */
+  @IsOptional()
+  @Transform(({ value }) => (value === '' ? null : value))
+  @ValidateIf((_o, v) => v !== null && v !== undefined)
+  @Matches(TIME_HHMM, { message: 'Giờ kết thúc bán phải có định dạng HH:mm' })
+  availableTo?: string | null;
+}
+
+/** Đổi tình trạng món: còn hàng / hết hôm nay (tự mở lại 04:00 sáng mai) / hết đến khi bật lại. */
+export class UpdateMenuItemStockDto {
+  @IsIn(STOCK_STATUSES, { message: 'Tình trạng món không hợp lệ' })
+  status: StockStatus;
 }

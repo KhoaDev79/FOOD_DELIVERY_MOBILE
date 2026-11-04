@@ -80,10 +80,15 @@ describe('OrderPricingService', () => {
         source: 'ROAD',
       }),
     };
-    service = new OrderPricingService(prisma as never, config as never, maps as never);
+    // Không chọn voucher: không giảm gì
+    vouchers = {
+      priceSelection: jest.fn().mockResolvedValue({ applied: [], rejected: [], discount: 0, shippingDiscount: 0, restaurantDiscount: 0 }),
+    };
+    service = new OrderPricingService(prisma as never, config as never, maps as never, vouchers as never);
   });
 
   // 03:00 UTC = 10:00 giờ VN (ngoài giờ cao điểm, trong giờ mở cửa)
+  let vouchers: { priceSelection: jest.Mock };
   const normalTime = new Date('2026-10-30T03:00:00.000Z');
   // 05:00 UTC = 12:00 giờ VN (trong giờ cao điểm 11:00-13:00)
   const peakTime = new Date('2026-10-30T05:00:00.000Z');
@@ -109,6 +114,38 @@ describe('OrderPricingService', () => {
     expect(quote.distanceSource).toBe('ROAD');
     expect(quote.paymentMethod).toBe('COD');
     expect(quote.quoteToken).toBeTruthy();
+  });
+
+  it('áp voucher: giảm tiền món + freeship, thu nhập tài xế giữ nguyên, mã nằm trong chữ ký báo giá', async () => {
+    vouchers.priceSelection.mockResolvedValue({
+      applied: [
+        { voucher: { code: 'GIAM20K', title: 'Giảm 20k', discountType: 'FIXED_AMOUNT' }, discount: 20000, shippingDiscount: 0 },
+        { voucher: { code: 'FREESHIP', title: 'Freeship', discountType: 'FREE_SHIP' }, discount: 0, shippingDiscount: 22000 },
+      ],
+      rejected: [{ code: 'SAIMA', reason: 'Mã không tồn tại' }],
+      discount: 20000,
+      shippingDiscount: 22000,
+      restaurantDiscount: 0,
+    });
+    const dto = {
+      restaurantId: 'rest-1',
+      addressId: 'addr-1',
+      items: [{ menuItemId: 'item-1', quantity: 2, sizeId: 'l', toppingIds: ['egg'] }],
+      voucherCodes: ['GIAM20K', 'FREESHIP'],
+    };
+    const ctx = await service.computeOrderPricing('cust-1', dto, prisma as never, normalTime);
+
+    // 136.000 − 20.000 + 22.000 − 22.000
+    expect(ctx.quote.total).toBe(116000);
+    expect(ctx.quote.itemDiscount).toBe(20000);
+    expect(ctx.quote.shippingDiscount).toBe(22000);
+    expect(ctx.quote.rejectedVouchers).toEqual([{ code: 'SAIMA', reason: 'Mã không tồn tại' }]);
+    expect(ctx.driverEarning).toBe(22000 - ctx.platformCommission);
+
+    // Đổi mã sau khi báo giá -> chữ ký không khớp
+    await expect(
+      service.verifyAndPriceOrder('cust-1', { ...dto, voucherCodes: ['KHAC'], quoteToken: ctx.quote.quoteToken }, prisma as never, normalTime),
+    ).rejects.toThrow('không khớp');
   });
 
   it('tính phụ phí cao điểm làm tròn lên 1.000đ và chiết khấu sàn 20%', async () => {
@@ -191,5 +228,53 @@ describe('OrderPricingService', () => {
       expect(res.code).toBe('QUOTE_CHANGED');
       expect(res.quote.quoteToken).toBeTruthy();
     }
+  });
+
+  it('chặn đặt món nếu đang ngoài khung giờ mở bán của món (availableFrom - availableTo)', async () => {
+    prisma.menuItem.findMany.mockResolvedValueOnce([
+      {
+        ...baseMenuItem,
+        availableFrom: '06:00',
+        availableTo: '10:00',
+      },
+    ]);
+
+    // normalTime là 14:00 VN (ngoài khung giờ 06:00 - 10:00)
+    await expect(
+      service.quote(
+        'cust-1',
+        {
+          restaurantId: 'rest-1',
+          addressId: 'addr-1',
+          items: [{ menuItemId: 'item-1', quantity: 1 }],
+        },
+        normalTime,
+      ),
+    ).rejects.toThrow('chỉ bán trong khung giờ 06:00 – 10:00');
+  });
+
+  it('cho phép đặt món nếu đang trong khung giờ mở bán của món', async () => {
+    prisma.menuItem.findMany.mockResolvedValueOnce([
+      {
+        ...baseMenuItem,
+        availableFrom: '06:00',
+        availableTo: '10:00',
+      },
+    ]);
+
+    // Giả lập thời điểm 08:00 sáng VN
+    const morningTime = new Date('2026-11-03T08:00:00+07:00');
+    const quote = await service.quote(
+      'cust-1',
+      {
+        restaurantId: 'rest-1',
+        addressId: 'addr-1',
+        items: [{ menuItemId: 'item-1', quantity: 1 }],
+      },
+      morningTime,
+    );
+
+    expect(quote).toBeDefined();
+    expect(quote.subtotal).toBe(50000);
   });
 });

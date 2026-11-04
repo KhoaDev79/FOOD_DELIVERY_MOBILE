@@ -40,6 +40,11 @@ enum CancelReason {
   RESTAURANT_CLOSED
   RESTAURANT_OTHER
   ADMIN_INTERVENTION
+  CUSTOMER_WRONG_ITEMS // khách đặt nhầm món / số lượng
+  CUSTOMER_WRONG_ADDRESS // khách nhập sai địa chỉ
+  CUSTOMER_WAIT_TOO_LONG // khách chờ quán xác nhận quá lâu
+  CUSTOMER_FOUND_ALTERNATIVE // khách tìm được quán khác
+  CUSTOMER_OTHER // lý do khác, bắt buộc ghi chú
 }
 
 enum FailedDeliveryReason {
@@ -70,6 +75,7 @@ enum PaymentStatus {
   PAID
   FAILED
   REFUNDED
+  REFUND_PENDING // đã thanh toán online nhưng đơn huỷ/giao thất bại: chờ admin hoàn tiền tay
 }
 
 enum PaymentTransactionStatus {
@@ -82,6 +88,18 @@ enum VoucherType {
   FIXED_AMOUNT
   PERCENTAGE
   FREE_SHIP
+}
+
+/// Ai chịu chi phí giảm giá: sàn (PLATFORM) hay quán (RESTAURANT, trừ vào doanh thu quán)
+enum VoucherFunding {
+  PLATFORM
+  RESTAURANT
+}
+
+/// CAMPAIGN: mã khuyến mãi phát hành chung; COMPENSATION: voucher cá nhân bồi thường khiếu nại
+enum VoucherKind {
+  CAMPAIGN
+  COMPENSATION
 }
 
 enum VehicleType {
@@ -111,6 +129,8 @@ model User {
   /// Tên đăng nhập (chữ thường), mặc định lấy phần trước @ của email
   username            String?  @unique
   phone               String?  @unique
+  /// Mã tài khoản Google (sub) khi đăng nhập bằng Google; null nếu chưa liên kết
+  googleId            String?  @unique
   passwordHash        String
   fullName            String
   role                Role     @default(CUSTOMER)
@@ -141,6 +161,15 @@ model User {
   favorites            Favorite[]
   sentOrderMessages    OrderMessage[]           @relation("SentOrderMessages")
   chatReads            OrderChatRead[]
+  notifications        Notification[]
+  helpFeedbacks        HelpArticleFeedback[]
+  supportTickets       SupportTicket[]
+  supportMessages      SupportMessage[]
+  botConversations     BotConversation[]
+  passwordResets       PasswordResetOtp[]
+  personalVouchers     Voucher[]                @relation("PersonalVouchers")
+  voucherUsages        VoucherUsage[]           @relation("VoucherUsages")
+  authSessions         AuthSession[]
 
   @@map("users")
 }
@@ -182,6 +211,8 @@ model Restaurant {
   approvedById     String?          @db.Uuid
   suspendReason    String?
   isOpen           Boolean          @default(true)
+  /// Mốc thời gian tạm nghỉ có hẹn giờ. Hết thời gian này quán tự mở lại theo giờ.
+  pausedUntil      DateTime?
   rating           Float            @default(0)
   ratingCount      Int              @default(0)
   openTime         String           @default("07:00")
@@ -192,17 +223,21 @@ model Restaurant {
   createdAt        DateTime         @default(now())
   updatedAt        DateTime         @updatedAt
 
-  owner       User       @relation("RestaurantOwner", fields: [ownerId], references: [id])
-  approvedBy  User?      @relation("RestaurantApprover", fields: [approvedById], references: [id], onDelete: SetNull)
-  categories  Category[]
-  menuItems   MenuItem[]
-  orders      Order[]
-  reviews     Review[]
-  favoritedBy Favorite[]
+  owner           User                       @relation("RestaurantOwner", fields: [ownerId], references: [id])
+  approvedBy      User?                      @relation("RestaurantApprover", fields: [approvedById], references: [id], onDelete: SetNull)
+  categories      Category[]
+  menuItems       MenuItem[]
+  orders          Order[]
+  reviews         Review[]
+  favoritedBy     Favorite[]
+  openingHours    RestaurantOpeningHour[]
+  specialClosings RestaurantSpecialClosing[]
+  vouchers        Voucher[]
 
   @@index([latitude, longitude])
   @@index([ownerId])
   @@index([status])
+  @@index([pausedUntil])
   @@map("restaurants")
 }
 
@@ -231,6 +266,11 @@ model MenuItem {
   imageUrl      String?
   options       Json?
   isAvailable   Boolean  @default(true)
+  /// "Hết hôm nay": thời điểm tự mở bán lại (cron đặt lại isAvailable = true). null = hết đến khi quán bật lại
+  soldOutUntil  DateTime?
+  /// Khung giờ mở bán trong ngày dạng HH:mm (null = bán suốt giờ mở cửa của quán)
+  availableFrom String?
+  availableTo   String?
   /// Soft delete: giữ lại để OrderItem cũ vẫn tham chiếu được
   isArchived    Boolean  @default(false)
   createdAt     DateTime @default(now())
@@ -241,6 +281,7 @@ model MenuItem {
   orderItems OrderItem[]
 
   @@index([restaurantId])
+  @@index([soldOutUntil])
   @@map("menu_items")
 }
 
@@ -257,9 +298,17 @@ model Order {
   peakSurcharge       Int                   @default(0)
   platformCommission  Int                   @default(0)
   driverEarning       Int                   @default(0)
+  /// Giảm trên tiền món (mã giảm giá)
   discountAmount      Int                   @default(0)
+  /// Giảm trên phí giao (mã freeship)
+  shippingDiscount    Int                   @default(0)
+  /// Phần giảm giá do quán chịu (trừ vào doanh thu quán)
+  restaurantDiscount  Int                   @default(0)
   total               Int
   voucherId           String?               @db.Uuid
+  voucherCode         String?               @db.VarChar(30)
+  freeshipVoucherId   String?               @db.Uuid
+  freeshipVoucherCode String?               @db.VarChar(30)
   distanceKm          Float
   distanceSource      DistanceSource        @default(ESTIMATED)
   deliveryAddress     String
@@ -270,6 +319,10 @@ model Order {
   cancelNote          String?
   cancelledById       String?               @db.Uuid
   failedReason        FailedDeliveryReason?
+  /// Thời điểm admin xác nhận đã hoàn tiền (đơn thanh toán online bị huỷ/giao thất bại)
+  refundedAt          DateTime?
+  /// Ghi chú hoàn tiền: mã giao dịch hoàn, kênh hoàn...
+  refundNote          String?
   arrivedAt           DateTime?
   stalledAt           DateTime?
   estimatedDeliveryAt DateTime?
@@ -281,7 +334,9 @@ model Order {
   driver          User?                    @relation("DriverOrders", fields: [driverId], references: [id])
   cancelledBy     User?                    @relation("OrderCanceller", fields: [cancelledById], references: [id], onDelete: SetNull)
   restaurant      Restaurant               @relation(fields: [restaurantId], references: [id])
-  voucher         Voucher?                 @relation(fields: [voucherId], references: [id])
+  voucher         Voucher?                 @relation("OrderDiscountVoucher", fields: [voucherId], references: [id])
+  freeshipVoucher Voucher?                 @relation("OrderFreeshipVoucher", fields: [freeshipVoucherId], references: [id])
+  voucherUsages   VoucherUsage[]
   items           OrderItem[]
   statusHistory   OrderStatusHistory[]
   transactions    PaymentTransaction[]
@@ -290,6 +345,7 @@ model Order {
   ledgerEntry     DriverLedger?
   messages        OrderMessage[]
   chatReads       OrderChatRead[]
+  supportTickets  SupportTicket[]
 
   @@unique([customerId, idempotencyKey])
   @@index([customerId, createdAt])
@@ -319,25 +375,63 @@ model OrderItem {
 }
 
 model Voucher {
-  id                String      @id @default(uuid()) @db.Uuid
-  code              String      @unique
+  id                String         @id @default(uuid()) @db.Uuid
+  code              String         @unique
   title             String
   description       String?
-  discountType      VoucherType @default(FIXED_AMOUNT)
+  discountType      VoucherType    @default(FIXED_AMOUNT)
+  /// FIXED_AMOUNT: số tiền; PERCENTAGE: % (1–100); FREE_SHIP: mức giảm phí ship tối đa (0 = miễn toàn bộ)
   discountValue     Int
   maxDiscountAmount Int?
-  minOrderAmount    Int         @default(0)
-  maxUsage          Int         @default(100)
-  usedCount         Int         @default(0)
-  startDate         DateTime    @default(now())
+  minOrderAmount    Int            @default(0)
+  /// Tổng số lượt dùng tối đa của mã
+  maxUsage          Int            @default(100)
+  usedCount         Int            @default(0)
+  startDate         DateTime       @default(now())
   endDate           DateTime
-  isActive          Boolean     @default(true)
-  createdAt         DateTime    @default(now())
-  updatedAt         DateTime    @updatedAt
+  isActive          Boolean        @default(true)
+  /// null = áp dụng toàn sàn; có giá trị = chỉ dùng ở quán này
+  restaurantId      String?        @db.Uuid
+  /// Voucher cá nhân (bồi thường): chỉ chủ tài khoản này dùng được
+  userId            String?        @db.Uuid
+  perUserLimit      Int            @default(1)
+  onlyNewCustomer   Boolean        @default(false)
+  fundedBy          VoucherFunding @default(PLATFORM)
+  kind              VoucherKind    @default(CAMPAIGN)
+  createdById       String?        @db.Uuid
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
 
-  orders Order[]
+  restaurant     Restaurant?    @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  user           User?          @relation("PersonalVouchers", fields: [userId], references: [id], onDelete: Cascade)
+  orders         Order[]        @relation("OrderDiscountVoucher")
+  freeshipOrders Order[]        @relation("OrderFreeshipVoucher")
+  usages         VoucherUsage[]
 
+  @@index([isActive, endDate])
+  @@index([restaurantId])
+  @@index([userId])
   @@map("vouchers")
+}
+
+/// Mỗi lần một đơn dùng voucher. releasedAt != null nghĩa là đã hoàn lượt (đơn huỷ/giao thất bại).
+model VoucherUsage {
+  id             String    @id @default(uuid()) @db.Uuid
+  voucherId      String    @db.Uuid
+  userId         String    @db.Uuid
+  orderId        String    @db.Uuid
+  discountAmount Int
+  createdAt      DateTime  @default(now())
+  releasedAt     DateTime?
+
+  voucher Voucher @relation(fields: [voucherId], references: [id], onDelete: Cascade)
+  user    User    @relation("VoucherUsages", fields: [userId], references: [id], onDelete: Cascade)
+  order   Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@unique([voucherId, orderId])
+  @@index([voucherId, userId])
+  @@index([orderId])
+  @@map("voucher_usages")
 }
 
 model Banner {
@@ -360,21 +454,25 @@ model Banner {
 }
 
 model Review {
-  id             String    @id @default(uuid()) @db.Uuid
-  restaurantId   String    @db.Uuid
-  customerId     String?   @db.Uuid
-  orderId        String?   @unique @db.Uuid
-  driverId       String?   @db.Uuid
-  rating         Int       @default(5)
-  comment        String?
-  driverRating   Int?
-  driverComment  String?
+  id              String    @id @default(uuid()) @db.Uuid
+  restaurantId    String    @db.Uuid
+  customerId      String?   @db.Uuid
+  orderId         String?   @unique @db.Uuid
+  driverId        String?   @db.Uuid
+  rating          Int       @default(5)
+  comment         String?
+  driverRating    Int?
+  driverComment   String?
+  /// Ảnh khách đính kèm (tối đa 3, link Cloudinary thư mục reviews)
+  images          String[]  @default([])
+  /// Ảnh bị chủ quán/admin ẩn vì không phù hợp (vẫn giữ để admin xem lại / hiện lại)
+  hiddenImages    String[]  @default([])
   ownerReply      String?
   ownerRepliedAt  DateTime?
   driverReply     String?
   driverRepliedAt DateTime?
   isHidden        Boolean   @default(false)
-  createdAt      DateTime  @default(now())
+  createdAt       DateTime  @default(now())
 
   restaurant Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
   customer   User?      @relation("CustomerReviews", fields: [customerId], references: [id], onDelete: SetNull)
@@ -400,10 +498,10 @@ model OrderMessage {
   channel    ChatChannel
   /// Tài xế của cuộc trò chuyện (chỉ với kênh có tài xế). Tài xế trả đơn thì tài xế mới không đọc được tin cũ.
   driverId   String?     @db.Uuid
-  senderId   String   @db.Uuid
+  senderId   String      @db.Uuid
   senderRole Role
-  content    String   @db.VarChar(1000)
-  createdAt  DateTime @default(now())
+  content    String      @db.VarChar(1000)
+  createdAt  DateTime    @default(now())
 
   order  Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
   sender User  @relation("SentOrderMessages", fields: [senderId], references: [id], onDelete: Cascade)
@@ -417,7 +515,7 @@ model OrderChatRead {
   orderId    String      @db.Uuid
   userId     String      @db.Uuid
   channel    ChatChannel
-  lastReadAt DateTime @default(now())
+  lastReadAt DateTime    @default(now())
 
   order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
   user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -607,3 +705,262 @@ model SearchLog {
   @@map("search_logs")
 }
 
+/// Trung tâm thông báo hệ thống (đơn hàng, đánh giá, hệ thống, tài xế)
+model Notification {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @db.Uuid
+  type      String    @db.VarChar(50)
+  title     String    @db.VarChar(200)
+  body      String    @db.Text
+  data      Json?
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([userId, readAt])
+  @@map("notifications")
+}
+
+/// Giờ mở cửa theo ngày trong tuần (0 = Chủ nhật, 1 = Thứ hai, ..., 6 = Thứ bảy). Hỗ trợ khung giờ qua đêm.
+model RestaurantOpeningHour {
+  id           String   @id @default(uuid()) @db.Uuid
+  restaurantId String   @db.Uuid
+  dayOfWeek    Int // 0 = Chủ nhật, 1 = Thứ hai, ..., 6 = Thứ bảy
+  openTime     String   @db.VarChar(5) // "07:00"
+  closeTime    String   @db.VarChar(5) // "22:00"
+  isClosed     Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  restaurant Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+
+  @@unique([restaurantId, dayOfWeek])
+  @@index([restaurantId])
+  @@map("restaurant_opening_hours")
+}
+
+/// Ngày nghỉ đặc biệt của quán (nghỉ lễ, Tết, sửa chữa...).
+model RestaurantSpecialClosing {
+  id           String   @id @default(uuid()) @db.Uuid
+  restaurantId String   @db.Uuid
+  date         DateTime @db.Date
+  reason       String?  @db.VarChar(200)
+  createdAt    DateTime @default(now())
+
+  restaurant Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+
+  @@unique([restaurantId, date])
+  @@index([restaurantId, date])
+  @@map("restaurant_special_closings")
+}
+
+// ============================ TRUNG TÂM TRỢ GIÚP & CHATBOT ============================
+
+enum HelpAudience {
+  CUSTOMER
+  DRIVER
+  OWNER
+}
+
+enum SupportTicketStatus {
+  NEW
+  IN_PROGRESS
+  WAITING_CUSTOMER
+  RESOLVED
+  CLOSED
+}
+
+enum SupportTicketPriority {
+  LOW
+  NORMAL
+  HIGH
+  URGENT
+}
+
+enum SupportMessageRole {
+  CUSTOMER
+  ADMIN
+  BOT
+  SYSTEM
+}
+
+/// Danh mục câu hỏi thường gặp (FAQ)
+model HelpCategory {
+  id        String       @id @default(uuid()) @db.Uuid
+  code      String       @unique @db.VarChar(50)
+  name      String       @db.VarChar(100)
+  icon      String?      @db.VarChar(50)
+  sortOrder Int          @default(0)
+  isActive  Boolean      @default(true)
+  audience  HelpAudience @default(CUSTOMER)
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+
+  articles HelpArticle[]
+
+  @@index([audience, isActive, sortOrder])
+  @@map("help_categories")
+}
+
+/// Bài viết trợ giúp / FAQ
+model HelpArticle {
+  id              String   @id @default(uuid()) @db.Uuid
+  categoryId      String   @db.Uuid
+  title           String   @db.VarChar(200)
+  body            String   @db.Text
+  keywords        String[]
+  sortOrder       Int      @default(0)
+  isActive        Boolean  @default(true)
+  helpfulCount    Int      @default(0)
+  notHelpfulCount Int      @default(0)
+  viewCount       Int      @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  category  HelpCategory          @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  feedbacks HelpArticleFeedback[]
+
+  @@index([categoryId, isActive, sortOrder])
+  @@index([isActive, viewCount(sort: Desc)])
+  @@map("help_articles")
+}
+
+/// Đánh giá độ hữu ích của bài viết (mỗi user 1 lần/bài)
+model HelpArticleFeedback {
+  id        String   @id @default(uuid()) @db.Uuid
+  articleId String   @db.Uuid
+  userId    String   @db.Uuid
+  helpful   Boolean
+  createdAt DateTime @default(now())
+
+  article HelpArticle @relation(fields: [articleId], references: [id], onDelete: Cascade)
+  user    User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([articleId, userId])
+  @@index([articleId])
+  @@map("help_article_feedbacks")
+}
+
+/// Phiếu yêu cầu hỗ trợ (Ticket)
+model SupportTicket {
+  id              String                @id @default(uuid()) @db.Uuid
+  code            String                @unique @db.VarChar(20) // "HT-XXXX"
+  userId          String                @db.Uuid
+  orderId         String?               @db.Uuid
+  category        String                @db.VarChar(50)
+  subject         String                @db.VarChar(200)
+  status          SupportTicketStatus   @default(NEW)
+  priority        SupportTicketPriority @default(NORMAL)
+  resolution      Json?
+  csatScore       Int? // 1 - 5 sao
+  csatComment     String?               @db.Text
+  firstResponseAt DateTime?
+  resolvedAt      DateTime?
+  closedAt        DateTime?
+  createdAt       DateTime              @default(now())
+  updatedAt       DateTime              @updatedAt
+
+  user     User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  order    Order?           @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  messages SupportMessage[]
+
+  @@index([userId, status, createdAt(sort: Desc)])
+  @@index([status, priority, createdAt])
+  @@index([orderId])
+  @@map("support_tickets")
+}
+
+/// Tin nhắn trao đổi trong phiếu hỗ trợ
+model SupportMessage {
+  id          String             @id @default(uuid()) @db.Uuid
+  ticketId    String             @db.Uuid
+  senderId    String?            @db.Uuid
+  senderRole  SupportMessageRole
+  content     String             @db.Text
+  attachments String[]
+  createdAt   DateTime           @default(now())
+
+  ticket SupportTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  sender User?         @relation(fields: [senderId], references: [id], onDelete: SetNull)
+
+  @@index([ticketId, createdAt])
+  @@map("support_messages")
+}
+
+/// Cuộc hội thoại với Trợ lý ảo (Chatbot)
+model BotConversation {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @db.Uuid
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user     User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages BotMessage[]
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@map("bot_conversations")
+}
+
+/// Tin nhắn của Chatbot và khách (đã ẩn danh thông tin cá nhân)
+model BotMessage {
+  id             String   @id @default(uuid()) @db.Uuid
+  conversationId String   @db.Uuid
+  role           String   @db.VarChar(20) // user | assistant | system
+  content        String   @db.Text
+  source         String?  @db.VarChar(20) // GEMINI | SCRIPT | CACHE
+  latencyMs      Int?
+  feedback       String?  @db.VarChar(20) // HELPFUL | UNHELPFUL
+  /// Thẻ hành động + gợi ý nhanh của tin bot, để mở lại lịch sử vẫn thấy nút
+  meta           Json?
+  createdAt      DateTime @default(now())
+
+  conversation BotConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId, createdAt])
+  @@map("bot_messages")
+}
+
+/// Phiên đăng nhập theo từng thiết bị (cho đăng nhập nhiều thiết bị cùng lúc).
+/// epoch phải trùng users.refreshTokenHash: các chỗ "thu hồi mọi phiên" (khoá tài khoản, đổi vai trò,
+/// đổi mật khẩu, xoá tài khoản) đặt cột đó về null nên mọi phiên cũ tự hết hiệu lực.
+model AuthSession {
+  id         String    @id @default(uuid()) @db.Uuid
+  userId     String    @db.Uuid
+  /// Băm của refresh token hiện tại của phiên (xoay vòng mỗi lần làm mới)
+  tokenHash  String
+  epoch      String    @db.VarChar(64)
+  deviceInfo String?   @db.VarChar(200)
+  createdAt  DateTime  @default(now())
+  lastUsedAt DateTime  @default(now())
+  expiresAt  DateTime
+  revokedAt  DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, revokedAt])
+  @@index([expiresAt])
+  @@map("auth_sessions")
+}
+
+/// Mã OTP quên mật khẩu gửi qua email. Chỉ lưu bản băm; mỗi lần gửi mã mới thì mã cũ hết hiệu lực.
+model PasswordResetOtp {
+  id         String    @id @default(uuid()) @db.Uuid
+  userId     String    @db.Uuid
+  codeHash   String
+  /// Số lần nhập sai; đủ 5 lần thì mã bị khoá
+  attempts   Int       @default(0)
+  expiresAt  DateTime
+  /// Lúc nhập đúng mã (bước 2); sau đó mới được đặt mật khẩu mới
+  verifiedAt DateTime?
+  /// Lúc đã đổi mật khẩu xong, hoặc bị thay bằng mã mới
+  consumedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([expiresAt])
+  @@map("password_reset_otps")
+}
