@@ -1,0 +1,2 @@
+# Script chạy trong container Linux phải giữ xuống dòng LF (CRLF làm sh báo lỗi "not found")
+*.sh text eol=lf
