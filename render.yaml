@@ -1,0 +1,80 @@
+# Render Blueprint cho backend ZomZom (NestJS chạy bằng Docker).
+# Tạo trên Render: New → Blueprint → chọn repo này. Biến có "sync: false" sẽ được hỏi khi tạo
+# (dán giá trị từ backend/.env trên máy; DATABASE_URL lấy từ Neon, dùng chuỗi kết nối TRỰC TIẾP, không qua pooler).
+# Container tự chạy `prisma migrate deploy` khi khởi động (xem backend/docker-entrypoint.sh).
+services:
+  - type: web
+    name: zomzom-api
+    runtime: docker
+    plan: free
+    region: singapore
+    branch: redesign/nativewind-ui
+    rootDir: backend
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /api/v1/health
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      # Render đứng sau proxy: cần để giới hạn tần suất theo IP thấy đúng IP người dùng
+      - key: TRUST_PROXY
+        value: '1'
+      # Bản web trên Vercel; app di động không gửi Origin nên không bị ảnh hưởng
+      - key: CORS_ORIGINS
+        value: https://zomzom-puce.vercel.app
+      # Khoá mới, ngẫu nhiên, chỉ dùng cho bản chạy thật (không dùng giá trị change_me của máy dev)
+      - key: JWT_ACCESS_SECRET
+        generateValue: true
+      - key: JWT_REFRESH_SECRET
+        generateValue: true
+      - key: QUOTE_SECRET
+        generateValue: true
+      - key: JWT_ACCESS_EXPIRES_IN
+        value: 15m
+      - key: JWT_REFRESH_EXPIRES_IN
+        value: 30d
+      - key: DATABASE_URL
+        sync: false
+      # Ảnh lên Cloudinary (máy chủ Render không giữ file khi build lại)
+      - key: CLOUDINARY_CLOUD_NAME
+        sync: false
+      - key: CLOUDINARY_API_KEY
+        sync: false
+      - key: CLOUDINARY_API_SECRET
+        sync: false
+      # Bản đồ Goong
+      - key: MAP_PROVIDER
+        value: goong
+      - key: GOONG_API_KEY
+        sync: false
+      # Chatbot hỗ trợ
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GEMINI_MODEL
+        value: gemini-3.5-flash-lite
+      - key: SUPPORT_BOT_DAILY_LIMIT
+        value: '20'
+      # Email OTP quên mật khẩu (Gmail)
+      - key: SMTP_HOST
+        value: smtp.gmail.com
+      - key: SMTP_PORT
+        value: '465'
+      - key: SMTP_SECURE
+        value: 'true'
+      - key: MAIL_FROM_NAME
+        value: ZomZom
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASS
+        sync: false
+      # Đăng nhập Google
+      - key: GOOGLE_CLIENT_IDS
+        sync: false
+      # VNPay sandbox: link trả về phải là địa chỉ công khai của chính dịch vụ này
+      - key: VNPAY_URL
+        value: https://sandbox.vnpayment.vn/paymentv2/vpcpay.html
+      - key: VNPAY_RETURN_URL
+        value: https://zomzom-api.onrender.com/api/v1/payments/vnpay/return
+      - key: MOBILE_PAYMENT_REDIRECT
+        value: fooddelivery://payment-result
