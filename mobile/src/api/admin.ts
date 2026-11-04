@@ -41,6 +41,75 @@ export interface AdminStats {
   roleRequests: { pending: number };
 }
 
+export type StatsRange = 'today' | '7d' | '30d';
+
+export interface KpiValue {
+  value: number;
+  previous: number;
+  /** % thay đổi (hoặc điểm % với các chỉ số tỉ lệ); null = kỳ trước không có dữ liệu. */
+  changePct: number | null;
+}
+
+export type KpiKey = 'gmv' | 'orders' | 'aov' | 'successRate' | 'cancelRate' | 'deliveryFee' | 'commission';
+
+export interface AdminAttention {
+  stalled: { count: number; oldestSince: string | null; oldestMinutes: number };
+  roleRequests: number;
+  restaurantsPending: number;
+  restaurantsUnassigned: number;
+  vehiclesPending: number;
+  driversOverDebt: number;
+  driversNearDebt: number;
+  debtLimit: number;
+}
+
+export interface AdminOverview {
+  range: StatsRange;
+  generatedAt: string;
+  period: { start: string; end: string; prevStart: string; prevEnd: string; bucket: 'hour' | 'day' };
+  kpis: Record<KpiKey, KpiValue>;
+  series: { at: string; label: string; gmv: number; orders: number }[];
+  funnel: { statuses: Partial<Record<OrderStatus, number>>; stalled: number };
+  topRestaurants: { id: string; name: string; imageUrl?: string | null; gmv: number; orders: number }[];
+  cancelReasons: { kind: 'cancel' | 'failed'; reason: string; count: number }[];
+  attention: AdminAttention;
+}
+
+export type AdminOrderGroup = 'active' | 'stalled' | 'done' | 'failed';
+
+export type AdminOrderListItem = OrderDetail & {
+  _count?: { contactAttempts: number };
+  /** Thời điểm đơn bước vào trạng thái hiện tại. */
+  statusSince?: string;
+};
+
+/** Chi tiết đơn cho admin: thêm ảnh/avatar và vị trí cuối của tài xế. */
+export type AdminOrderDetail = Omit<OrderDetail, 'driver' | 'customer'> & {
+  customer: OrderDetail['customer'] & { email?: string | null; avatarUrl?: string | null };
+  driver?:
+    | (Omit<NonNullable<OrderDetail['driver']>, 'driverProfile'> & {
+        driverProfile?: {
+          vehicleType?: 'MOTORBIKE' | 'ELECTRIC_MOTORBIKE' | 'BICYCLE' | null;
+          licensePlate?: string | null;
+          lastLatitude?: number | null;
+          lastLongitude?: number | null;
+          lastLocationAt?: string | null;
+        } | null;
+      })
+    | null;
+};
+
+export interface AdminAuditLog extends AuditLogEntry {
+  actor?: { id: string; fullName: string; role?: Role; avatarUrl?: string | null } | null;
+}
+
+export interface RestaurantLast7Days {
+  gmv: number;
+  orders: number;
+  delivered: number;
+  series: { at: string; label: string; gmv: number; orders: number }[];
+}
+
 export interface AdminRestaurantOwner {
   id: string;
   fullName: string;
@@ -115,7 +184,7 @@ export interface AdminUserActivity {
   roleRequests: RoleUpgradeRequest[];
 }
 
-export type RestaurantFilter = 'all' | 'open' | 'closed' | 'unassigned' | 'pending' | 'suspended';
+export type RestaurantFilter = 'all' | 'open' | 'closed' | 'unassigned' | 'pending' | 'suspended' | 'active';
 
 export interface AdminRoleRequest extends RoleUpgradeRequest {
   user: Pick<User, 'id' | 'fullName' | 'email' | 'phone' | 'role' | 'avatarUrl' | 'isActive'>;
@@ -125,8 +194,30 @@ export interface AdminRoleRequest extends RoleUpgradeRequest {
 export const adminApi = {
   getStats: () => apiClient.get<any, AdminStats>('/admin/stats'),
 
+  getOverview: (range: StatsRange) =>
+    apiClient.get<any, AdminOverview>('/admin/stats/overview', { params: { range } }),
+
+  /** CSV toàn bộ đơn trong kỳ (from/to: YYYY-MM-DD giờ VN). Trả chuỗi CSV thô. */
+  exportOrdersCsv: (from: string, to: string) =>
+    apiClient.get<any, string>('/admin/export/orders', { params: { from, to }, responseType: 'text' }),
+
+  getAttention: () => apiClient.get<any, AdminAttention>('/admin/stats/attention'),
+
+  listAuditLogs: (params?: {
+    actorId?: string;
+    action?: string;
+    targetType?: string;
+    from?: string;
+    to?: string;
+    page?: number;
+    limit?: number;
+  }) => apiClient.get<any, PaginatedResult<AdminAuditLog> & { total: number }>('/admin/audit-logs', { params }),
+
+  getRestaurantLast7Days: (id: string) =>
+    apiClient.get<any, RestaurantLast7Days>(`/admin/restaurants/${id}/last-7-days`),
+
   /* ------------------------------ Người dùng ------------------------------ */
-  listUsers: (params?: { role?: Role; q?: string; page?: number; limit?: number }) =>
+  listUsers: (params?: { role?: Role; status?: 'active' | 'locked'; q?: string; page?: number; limit?: number }) =>
     apiClient.get<any, PaginatedResult<User> & { total: number }>('/admin/users', { params }),
 
   toggleUserActive: (id: string, reason?: string) =>
@@ -138,7 +229,10 @@ export const adminApi = {
 
   /* ------------------------------- Quán ăn ------------------------------- */
   listRestaurants: (params?: { page?: number; limit?: number; q?: string; filter?: RestaurantFilter }) =>
-    apiClient.get<any, PaginatedResult<AdminRestaurantItem> & { total: number }>('/admin/restaurants', {
+    apiClient.get<
+      any,
+      PaginatedResult<AdminRestaurantItem> & { total: number; counts?: Partial<Record<RestaurantFilter, number>> }
+    >('/admin/restaurants', {
       params: params?.filter === 'all' ? { ...params, filter: undefined } : params,
     }),
 
@@ -178,19 +272,21 @@ export const adminApi = {
 
   /* -------------------------------- Đơn hàng -------------------------------- */
   listOrders: (params?: {
+    group?: AdminOrderGroup;
     status?: OrderStatus;
+    restaurantId?: string;
     stalled?: boolean;
     q?: string;
     page?: number;
     limit?: number;
   }) =>
-    apiClient.get<any, PaginatedResult<OrderDetail & { _count?: { contactAttempts: number } }> & { total: number }>(
-      '/admin/orders',
-      { params },
-    ),
+    apiClient.get<
+      any,
+      PaginatedResult<AdminOrderListItem> & { total: number; counts?: Record<AdminOrderGroup, number> }
+    >('/admin/orders', { params }),
 
   getOrderDetail: (orderId: string) =>
-    apiClient.get<any, OrderDetail>(`/admin/orders/${orderId}`),
+    apiClient.get<any, AdminOrderDetail>(`/admin/orders/${orderId}`),
 
   unassignDriver: (orderId: string, reason?: string) =>
     apiClient.post<any, { id: string; status: OrderStatus }>(

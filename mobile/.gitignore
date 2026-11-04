@@ -27,3 +27,6 @@ GoogleService-Info.plist
 npm-debug.*
 yarn-error.*
 *.tsbuildinfo
+
+# Vercel (liên kết dự án trên máy)
+.vercel

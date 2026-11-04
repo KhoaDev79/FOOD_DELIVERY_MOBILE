@@ -25,12 +25,17 @@ const processQueue = (error: Error | null) => {
   failedQueue = [];
 };
 
+/**
+ * Làm mới phiên đăng nhập. Không bao giờ ném lỗi: thất bại thì trả null (store đã tự đăng xuất).
+ * Nơi gọi (vd socket `connect_error`) thường không có try/catch, ném lỗi sẽ thành "Uncaught (in promise) 401".
+ */
 export async function refreshAuthTokens(): Promise<string | null> {
   if (isRefreshing) {
-    return new Promise((resolve, reject) => {
+    return new Promise<string | null>((resolve) => {
       failedQueue.push({
         resolve: () => resolve(useAuthStore.getState().accessToken),
-        reject,
+        // Lần làm mới đang chạy thất bại (vd tài khoản đăng nhập ở thiết bị khác): coi như hết phiên
+        reject: () => resolve(null),
       });
     });
   }

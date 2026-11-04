@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { CancelReason } from '../types/api';
 import { CreateOrderPayload, ordersApi } from '../api/orders';
 import { queryKeys } from '../constants/queryKeys';
 import { useSocketConnected } from '../hooks/useSocket';
@@ -37,11 +38,30 @@ export function useCreateOrder() {
 export function useCancelOrder() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (orderId: string) => ordersApi.cancel(orderId),
-    onSuccess: (_, orderId) => {
+    mutationFn: ({ orderId, reason, note }: { orderId: string; reason: CancelReason; note?: string }) =>
+      ordersApi.cancel(orderId, reason, note),
+    onSuccess: (_, { orderId }) => {
       queryClient.invalidateQueries({ queryKey: queryKeys.orders.detail(orderId) });
       queryClient.invalidateQueries({ queryKey: queryKeys.orders.all });
     },
   });
 }
 
+/** Admin: đơn chờ hoàn tiền / đã hoàn */
+export function useRefunds(status: 'pending' | 'done') {
+  return useQuery({
+    queryKey: ['admin', 'refunds', status],
+    queryFn: () => ordersApi.listRefunds(status),
+    staleTime: 15 * 1000,
+  });
+}
+
+export function useConfirmRefund() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ orderId, note }: { orderId: string; note: string }) => ordersApi.confirmRefund(orderId, note),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin', 'refunds'] });
+    },
+  });
+}

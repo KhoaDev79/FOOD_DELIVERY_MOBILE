@@ -4,51 +4,57 @@ import { StatusBar } from 'expo-status-bar';
 import React, { useState } from 'react';
 import { FlatList, Pressable, RefreshControl, ScrollView, View } from 'react-native';
 import { adminApi } from '../../api/admin';
+import {
+  ContentWidth,
+  DetailPlaceholder,
+  ListSkeleton,
+  RoleAvatar,
+  TabStrip,
+  useIsWide,
+} from '../../components/modules/admin/AdminKit';
 import { DRIVER_STATUS_META, DriverVerifySheet } from '../../components/modules/admin/DriverVerifySheet';
 import { RoleRequestsSheet } from '../../components/modules/admin/RoleRequestsSheet';
 import { UserActivitySheet } from '../../components/modules/admin/UserActivitySheet';
+import { debtTone, UserAction, UserProfilePanel } from '../../components/modules/admin/UserProfilePanel';
 import { ROLE_META, RoleBadge } from '../../components/modules/admin/adminShared';
+import { NoticeCard } from '../../components/modules/partner/PartnerKit';
 import {
-  Avatar,
-  Badge,
   BottomSheet,
   Button,
   cn,
   ConfirmDialog,
-  CountBadge,
-  Divider,
   EmptyState,
   ErrorState,
-  FilterChip,
   Icon,
-  IconButton,
   Input,
-  ListRow,
-  LoadingSpinner,
   SearchBar,
   TAB_BAR_CLEARANCE,
   TabHeader,
   Text,
   useToast,
 } from '../../components/ui';
+import { useDebounce } from '../../hooks/useDebounce';
 import { useAuthStore } from '../../store/useAuthStore';
 import { palette } from '../../theme';
 import { Role, User } from '../../types/api';
 import { AdminTabParamList } from '../../types/navigation';
-import { formatDate } from '../../utils/format';
+import { formatVND } from '../../utils/format';
 
-const ROLE_FILTERS: { label: string; value?: Role }[] = [
-  { label: 'Tất cả' },
-  { label: 'Khách hàng', value: 'CUSTOMER' },
-  { label: 'Chủ quán', value: 'RESTAURANT_OWNER' },
-  { label: 'Tài xế', value: 'DRIVER' },
-  { label: 'Quản trị viên', value: 'ADMIN' },
+type UserTab = 'ALL' | Role | 'LOCKED';
+
+const TABS: { key: UserTab; label: string }[] = [
+  { key: 'ALL', label: 'Tất cả' },
+  { key: 'CUSTOMER', label: 'Khách' },
+  { key: 'RESTAURANT_OWNER', label: 'Chủ quán' },
+  { key: 'DRIVER', label: 'Tài xế' },
+  { key: 'ADMIN', label: 'Admin' },
+  { key: 'LOCKED', label: 'Đã khoá' },
 ];
 
 /** Vai trò admin được đổi trực tiếp (không cấp quyền Admin từ app). */
 const ASSIGNABLE_ROLES: Role[] = ['CUSTOMER', 'RESTAURANT_OWNER', 'DRIVER'];
 
-type SheetMode = 'actions' | 'role' | 'lock' | 'activity' | 'driver';
+type SheetMode = 'profile' | 'role' | 'lock' | 'activity' | 'driver';
 
 /** Đợi Modal trước đóng hẳn rồi mới mở Modal sau (iOS không mở được 2 Modal chồng nhau). */
 const MODAL_SWAP_DELAY = 350;
@@ -60,9 +66,14 @@ export const AdminUsersScreen: React.FC = () => {
   const navigation = useNavigation<any>();
   const route = useRoute<RouteProp<AdminTabParamList, 'AdminUsersTab'>>();
   const me = useAuthStore((s) => s.user);
+  const wide = useIsWide();
 
-  const [role, setRole] = useState<Role | undefined>(undefined);
+  // Tab trong tham số route để Tổng quan mở thẳng "Tài xế" (vượt hạn mức công nợ, xe chờ duyệt)
+  const tab: UserTab = route.params?.tab ?? 'ALL';
+  const setTab = (t: UserTab) => navigation.setParams({ tab: t });
+
   const [search, setSearch] = useState('');
+  const q = useDebounce(search.trim(), 350);
   const [refreshing, setRefreshing] = useState(false);
   const [target, setTarget] = useState<User | null>(null);
   const [mode, setMode] = useState<SheetMode | null>(null);
@@ -73,32 +84,59 @@ export const AdminUsersScreen: React.FC = () => {
   const requestsOpen = !!route.params?.openRequests;
   const setRequestsOpen = (open: boolean) => navigation.setParams({ openRequests: open || undefined });
 
-  const { data, isLoading, isError, refetch } = useQuery({
-    queryKey: ['admin', 'users', role, search.trim()],
-    queryFn: () => adminApi.listUsers({ role, q: search.trim() || undefined, limit: 50 }),
+  const listQuery = useQuery({
+    queryKey: ['admin', 'users', tab, q],
+    queryFn: () =>
+      adminApi.listUsers({
+        role: tab !== 'ALL' && tab !== 'LOCKED' ? tab : undefined,
+        status: tab === 'LOCKED' ? 'locked' : undefined,
+        q: q || undefined,
+        limit: 50,
+      }),
+    placeholderData: (prev) => prev,
   });
   const { data: stats } = useQuery({ queryKey: ['admin', 'stats'], queryFn: () => adminApi.getStats() });
+  const { data: attention } = useQuery({ queryKey: ['admin', 'attention'], queryFn: () => adminApi.getAttention() });
   const pendingRequests = stats?.roleRequests.pending ?? 0;
-  const users = data?.items ?? [];
+  const debtLimit = attention?.debtLimit ?? 0;
+  const users = listQuery.data?.items ?? [];
+
+  const countOf = (t: UserTab): number | undefined => {
+    if (!stats) return undefined;
+    if (t === 'ALL') return stats.users.total;
+    if (t === 'LOCKED') return stats.users.inactive;
+    return stats.users.roles[t];
+  };
+
+  // Màn rộng: hồ sơ hiện ở cột phải, mặc định người đầu danh sách
+  const shown = wide ? (target && users.some((u) => u.id === target.id) ? target : users[0] ?? null) : target;
+  const fresh = shown ? users.find((u) => u.id === shown.id) ?? shown : null;
 
   const onRefresh = async () => {
     setRefreshing(true);
-    await Promise.all([refetch(), queryClient.invalidateQueries({ queryKey: ['admin', 'stats'] })]);
+    await Promise.all([listQuery.refetch(), queryClient.invalidateQueries({ queryKey: ['admin', 'stats'] })]);
     setRefreshing(false);
   };
 
   const close = () => setMode(null);
-  /** Đóng bảng hành động rồi mở bảng/hộp thoại tiếp theo. */
-  const switchTo = (next: SheetMode) => {
+  /** Đóng bảng hiện tại rồi mở bảng/hộp thoại tiếp theo (điện thoại); màn rộng mở thẳng. */
+  const openAction = (next: UserAction) => {
+    if (fresh) {
+      setTarget(fresh);
+      setNewRole(fresh.role);
+      setLockReason('');
+    }
+    if (wide) {
+      setMode(next);
+      return;
+    }
     setMode(null);
     setTimeout(() => setMode(next), MODAL_SWAP_DELAY);
   };
 
-  const openActions = (u: User) => {
+  const openProfile = (u: User) => {
     setTarget(u);
-    setNewRole(u.role);
-    setLockReason('');
-    setMode('actions');
+    if (!wide) setMode('profile');
   };
 
   const toggleActive = useMutation({
@@ -121,175 +159,175 @@ export const AdminUsersScreen: React.FC = () => {
     onError: (err: any) => toast(err?.response?.data?.message || 'Không thể đổi vai trò', 'error'),
   });
 
-  const isSelf = target?.id === me?.id;
-  const isAdminTarget = target?.role === 'ADMIN';
-
-  const renderItem = ({ item }: { item: User }) => {
+  const renderItem = ({ item, index }: { item: User; index: number }) => {
     const profile = item.driverProfile;
+    const debt = profile?.codBalance ?? 0;
+    const dTone = debtTone(debt, debtLimit);
+    const selected = wide && fresh?.id === item.id;
+    const first = index === 0;
+    const last = index === users.length - 1;
+    const vehicle = profile ? DRIVER_STATUS_META[profile.verificationStatus] : null;
     return (
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel={`${item.fullName}, ${ROLE_META[item.role].label}. Mở thao tác`}
-        onPress={() => openActions(item)}
-        className={cn('gap-3 rounded-2xl bg-surface p-4 shadow-card active:opacity-90', !item.isActive && 'opacity-70')}
+        accessibilityLabel={`${item.fullName}, ${ROLE_META[item.role].label}${item.isActive ? '' : ', đã khoá'}. Mở hồ sơ`}
+        onPress={() => openProfile(item)}
+        className={cn(
+          'min-h-[72px] flex-row items-center gap-3 px-4 py-3',
+          selected ? 'bg-brand-50' : 'bg-surface active:bg-canvas-subtle',
+          first && 'rounded-t-2xl',
+          last ? 'rounded-b-2xl' : 'border-b border-line-subtle',
+        )}
       >
-        <View className="flex-row items-start gap-3">
-          <Avatar uri={item.avatarUrl} name={item.fullName} size="lg" />
-          <View className="flex-1 gap-0.5">
-            <Text variant="body-lg" weight="semibold" numberOfLines={1}>
-              {item.fullName}
-            </Text>
-            <Text variant="caption" weight="regular" tone="secondary" numberOfLines={1}>
-              {item.email}
-            </Text>
-            <Text variant="caption" weight="regular" tone="secondary">
-              {item.phone || 'Chưa có số điện thoại'}
-            </Text>
-          </View>
-          <IconButton
-            icon="ellipsis-horizontal"
-            variant="subtle"
-            size="sm"
-            accessibilityLabel={`Thao tác với ${item.fullName}`}
-            onPress={() => openActions(item)}
-          />
-        </View>
-        <View className="flex-row flex-wrap items-center gap-1.5">
-          <RoleBadge role={item.role} />
-          {!item.isActive && <Badge label="Đã khoá" tone="danger" icon="lock-closed" />}
+        <RoleAvatar name={item.fullName} role={item.role} uri={item.avatarUrl} locked={!item.isActive} />
+        <View className="flex-1 gap-0.5">
+          <Text variant="body" weight="semibold" numberOfLines={1} tone={item.isActive ? 'default' : 'muted'}>
+            {item.fullName}
+          </Text>
+          <Text variant="caption" weight="regular" tone="secondary" numberOfLines={1}>
+            {item.email}
+          </Text>
+          {/* Thông tin phụ chỉ hiện khi có ý nghĩa: xe chưa duyệt, công nợ COD, số quán */}
           {item.role === 'DRIVER' && (
-            <Badge
-              label={profile ? DRIVER_STATUS_META[profile.verificationStatus].label : 'Chưa có xe'}
-              tone={profile ? DRIVER_STATUS_META[profile.verificationStatus].tone : 'neutral'}
-            />
+            <View className="flex-row items-center gap-2">
+              {vehicle && profile?.verificationStatus !== 'APPROVED' && (
+                <Text variant="micro" weight="bold" tone={vehicle.tone === 'warning' ? 'warning' : 'danger'}>
+                  {vehicle.label}
+                </Text>
+              )}
+              {!profile && (
+                <Text variant="micro" weight="semibold" tone="muted">
+                  Chưa khai báo xe
+                </Text>
+              )}
+              {debt > 0 && (
+                <Text
+                  variant="micro"
+                  weight="bold"
+                  tone={dTone === 'danger' ? 'danger' : dTone === 'warning' ? 'warning' : 'secondary'}
+                >
+                  Nợ COD {formatVND(debt)}
+                </Text>
+              )}
+            </View>
           )}
           {item.role === 'RESTAURANT_OWNER' && (
-            <Badge label={`${item._count?.restaurants ?? 0} quán`} tone="neutral" icon="storefront-outline" />
+            <Text variant="micro" weight="semibold" tone="accent">
+              {item._count?.restaurants ?? 0} quán
+            </Text>
           )}
-          <Text variant="micro" weight="regular" tone="muted" className="ml-auto">
-            Tham gia {formatDate(item.createdAt)}
-          </Text>
+        </View>
+        <View className="items-end gap-1">
+          <RoleBadge role={item.role} />
+          {!item.isActive && (
+            <Text variant="micro" weight="bold" tone="danger">
+              Đã khoá
+            </Text>
+          )}
         </View>
       </Pressable>
     );
   };
 
+  const list =
+    listQuery.isLoading && !listQuery.data ? (
+      <View className="px-4 pt-1">
+        <ListSkeleton rows={6} />
+      </View>
+    ) : listQuery.isError && !listQuery.data ? (
+      <ErrorState onRetry={() => listQuery.refetch()} />
+    ) : (
+      <FlatList
+        data={users}
+        keyExtractor={(item) => item.id}
+        renderItem={renderItem}
+        contentContainerClassName={cn('px-4 pt-3', TAB_BAR_CLEARANCE)}
+        keyboardShouldPersistTaps="handled"
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[palette.brand['500']]} />}
+        ListHeaderComponent={
+          pendingRequests > 0 ? (
+            <NoticeCard
+              tone="warning"
+              icon="person-add"
+              title={`${pendingRequests} yêu cầu mở quán / làm tài xế đang chờ duyệt`}
+              actionLabel="Xem ngay"
+              onPress={() => setRequestsOpen(true)}
+              className="mb-3"
+            />
+          ) : undefined
+        }
+        ListEmptyComponent={
+          <EmptyState icon="people-outline" title="Không tìm thấy người dùng" description="Thử từ khoá khác hoặc đổi tab." />
+        }
+      />
+    );
+
+  const isSelf = target?.id === me?.id;
+
   return (
     <View className="flex-1 bg-canvas-subtle">
       {isFocused && <StatusBar style="light" />}
       <TabHeader
-        title="Quản lý Người dùng"
-        subtitle={stats ? `${stats.users.total} tài khoản • ${stats.users.inactive} đang khoá` : undefined}
+        compact
+        title="Người dùng"
+        subtitle={stats ? `${stats.users.total} tài khoản · ${stats.users.inactive} đang khoá` : undefined}
       >
-        <SearchBar
-          value={search}
-          onChangeText={setSearch}
-          onClear={() => setSearch('')}
-          placeholder="Tìm theo tên, email, số điện thoại..."
-          className="h-search-lg rounded-full bg-surface px-4"
-        />
+        <ContentWidth>
+          <SearchBar
+            value={search}
+            onChangeText={setSearch}
+            onClear={() => setSearch('')}
+            placeholder="Tìm theo tên, email, số điện thoại..."
+            className="h-search-lg rounded-full bg-surface px-4"
+          />
+        </ContentWidth>
       </TabHeader>
 
-      {pendingRequests > 0 && (
-        <Pressable
-          accessibilityRole="button"
-          onPress={() => setRequestsOpen(true)}
-          className="mx-4 mt-3 flex-row items-center gap-3 rounded-2xl border border-warning/40 bg-warning-soft px-4 py-3 active:opacity-85"
-        >
-          <Icon name="person-add" size="md" tone="accent" />
-          <Text variant="body" weight="semibold" className="flex-1">
-            Yêu cầu mở quán / làm tài xế
-          </Text>
-          <CountBadge count={pendingRequests} />
-          <Icon name="chevron-forward" size="md" tone="muted" />
-        </Pressable>
-      )}
-
-      <View>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerClassName="gap-2 px-4 py-3">
-          {ROLE_FILTERS.map((f) => {
-            const n = f.value ? stats?.users.roles[f.value] : stats?.users.total;
-            return (
-              <FilterChip
-                key={f.label}
-                label={n !== undefined ? `${f.label} (${n})` : f.label}
-                selected={role === f.value}
-                onPress={() => setRole(f.value)}
-              />
-            );
-          })}
-        </ScrollView>
-      </View>
-
-      {isLoading && !refreshing ? (
-        <LoadingSpinner message="Đang tải danh sách người dùng..." />
-      ) : isError ? (
-        <ErrorState onRetry={refetch} />
-      ) : (
-        <FlatList
-          data={users}
-          keyExtractor={(item) => item.id}
-          renderItem={renderItem}
-          contentContainerClassName={`gap-3 px-4 pt-1 ${TAB_BAR_CLEARANCE}`}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[palette.brand['500']]} />}
-          ListEmptyComponent={
-            <EmptyState
-              icon="people-outline"
-              title="Không tìm thấy người dùng"
-              description="Thử từ khoá khác hoặc đổi bộ lọc vai trò."
-            />
-          }
+      <ContentWidth className="flex-1">
+        <TabStrip
+          items={TABS.map((t) => ({ ...t, count: countOf(t.key) }))}
+          value={tab}
+          onChange={setTab}
         />
-      )}
 
-      {/* Bảng hành động của một người dùng */}
-      <BottomSheet visible={mode === 'actions'} onClose={close} title={target?.fullName}>
-        <View className="pb-3">
-          <ListRow
-            icon="swap-horizontal"
-            iconTone="brand"
-            title="Đổi vai trò"
-            subtitle={
-              isSelf || isAdminTarget
-                ? 'Không áp dụng cho tài khoản quản trị viên'
-                : `Hiện tại: ${target ? ROLE_META[target.role].label : ''}`
-            }
-            onPress={isSelf || isAdminTarget ? undefined : () => switchTo('role')}
-          />
-          {target?.role === 'DRIVER' && (
-            <>
-              <Divider inset />
-              <ListRow
-                icon="bicycle-outline"
-                iconTone="brand"
-                title="Duyệt hồ sơ xe & Công nợ COD"
-                subtitle="Kiểm duyệt phương tiện, ghi nhận nộp tiền và điều chỉnh công nợ"
-                onPress={() => switchTo('driver')}
-              />
-            </>
-          )}
-          <Divider inset />
-          <ListRow icon="time-outline" iconTone="brand" title="Xem lịch sử hoạt động" onPress={() => switchTo('activity')} />
-          <Divider inset />
-          {target?.isActive ? (
-            <ListRow
-              icon="lock-closed-outline"
-              title="Khoá tài khoản"
-              subtitle={isSelf || isAdminTarget ? 'Không thể khoá tài khoản quản trị viên' : 'Đăng xuất và chặn đăng nhập'}
-              destructive={!(isSelf || isAdminTarget)}
-              showChevron={false}
-              onPress={isSelf || isAdminTarget ? undefined : () => switchTo('lock')}
+        {wide ? (
+          <View className="flex-1 flex-row gap-4 pr-4">
+            <View className="w-[46%]">{list}</View>
+            <View className={cn('flex-1 pt-1', TAB_BAR_CLEARANCE)}>
+              {fresh ? (
+                <ScrollView className="flex-1 rounded-2xl bg-surface shadow-card" contentContainerClassName="p-4">
+                  <UserProfilePanel
+                    key={fresh.id}
+                    user={fresh}
+                    isSelf={fresh.id === me?.id}
+                    debtLimit={debtLimit}
+                    onAction={openAction}
+                  />
+                </ScrollView>
+              ) : (
+                <DetailPlaceholder icon="person-outline" text="Chọn một người dùng để xem hồ sơ." />
+              )}
+            </View>
+          </View>
+        ) : (
+          list
+        )}
+      </ContentWidth>
+
+      {/* Hồ sơ người dùng (điện thoại) */}
+      <BottomSheet visible={mode === 'profile'} onClose={close} title="Hồ sơ người dùng">
+        {target ? (
+          <ScrollView showsVerticalScrollIndicator={false}>
+            <UserProfilePanel
+              user={users.find((u) => u.id === target.id) ?? target}
+              isSelf={isSelf}
+              debtLimit={debtLimit}
+              onAction={openAction}
             />
-          ) : (
-            <ListRow
-              icon="lock-open-outline"
-              iconTone="success"
-              title="Mở khoá tài khoản"
-              showChevron={false}
-              onPress={() => switchTo('lock')}
-            />
-          )}
-        </View>
+          </ScrollView>
+        ) : (
+          <View />
+        )}
       </BottomSheet>
 
       {/* Đổi vai trò */}
@@ -323,7 +361,7 @@ export const AdminUsersScreen: React.FC = () => {
                 accessibilityState={{ selected }}
                 onPress={() => setNewRole(r)}
                 className={cn(
-                  'flex-row items-center gap-3 rounded-xl border p-3 active:opacity-80',
+                  'min-h-touch flex-row items-center gap-3 rounded-xl border p-3 active:opacity-80',
                   selected ? 'border-brand-500 bg-brand-50' : 'border-line-subtle bg-surface',
                 )}
               >
@@ -354,8 +392,8 @@ export const AdminUsersScreen: React.FC = () => {
         onCancel={() => !toggleActive.isPending && close()}
         onConfirm={() => {
           if (!target) return;
-          if (target.isActive && !lockReason.trim()) {
-            toast('Vui lòng nhập lý do khoá', 'error');
+          if (target.isActive && lockReason.trim().length < 3) {
+            toast('Vui lòng nhập lý do khoá (ít nhất 3 ký tự)', 'error');
             return;
           }
           toggleActive.mutate(target);
@@ -373,11 +411,7 @@ export const AdminUsersScreen: React.FC = () => {
       </ConfirmDialog>
 
       <UserActivitySheet user={mode === 'activity' ? target : null} onClose={close} />
-      <DriverVerifySheet
-        key={mode === 'driver' ? target?.id : 'none'}
-        user={mode === 'driver' ? target : null}
-        onClose={close}
-      />
+      <DriverVerifySheet key={mode === 'driver' ? target?.id : 'none'} user={mode === 'driver' ? target : null} onClose={close} />
       <RoleRequestsSheet visible={requestsOpen} onClose={() => setRequestsOpen(false)} />
     </View>
   );

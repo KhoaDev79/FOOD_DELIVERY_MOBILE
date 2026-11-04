@@ -26,6 +26,10 @@ const PRESETS = {
   splash: `linear-gradient(180deg, ${palette.brand['900']} 0%, ${palette.brand['700']} 55%, ${palette.brand['700']} 100%)`,
   /** Quầng sáng sau logo màn khởi động (màu brand-300, mờ dần). */
   splashGlow: 'radial-gradient(circle at 50% 45%, rgba(127,224,236,0.38) 0%, rgba(127,224,236,0) 48%)',
+  /** Đầu các màn Đăng nhập / Đăng ký / Quên mật khẩu: xanh ngọc đậm chéo sang sáng. */
+  authHero: `linear-gradient(150deg, ${palette.brand['900']} 0%, ${palette.brand['700']} 55%, ${palette.brand['500']} 120%)`,
+  /** Nút chính màn xác thực: đủ đậm để chữ trắng dễ đọc ở cả hai đầu. */
+  authButton: `linear-gradient(135deg, ${palette.brand['700']} 0%, ${palette.brand['800']} 100%)`,
   /** Lớp tối dưới chữ phủ trên ảnh. */
   imageScrim: 'linear-gradient(180deg, rgba(0,0,0,0) 0%, rgba(0,0,0,0.55) 100%)',
 } as const;

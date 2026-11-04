@@ -2,7 +2,7 @@ import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { StatusBar } from 'expo-status-bar';
 import React, { useState } from 'react';
-import { FlatList, RefreshControl, View } from 'react-native';
+import { FlatList, Image, Pressable, RefreshControl, View } from 'react-native';
 import { restaurantsApi } from '../../api/restaurants';
 import {
   Badge,
@@ -19,9 +19,11 @@ import {
 import { OwnerRestaurantSelector } from '../../components/modules/owner/OwnerRestaurantSelector';
 import { useOwnerRestaurantStore } from '../../store/useOwnerRestaurantStore';
 import { palette } from '../../theme';
-import { ManageRestaurantReview } from '../../types/api';
+import { ManageRestaurantReview, ReviewImageHideReason } from '../../types/api';
+import { AppImage, BottomSheet, cn } from '../../components/ui';
+import { resolveImageUrl } from '../../utils/image';
 import { OwnerStackParamList } from '../../types/navigation';
-import { formatDateTime } from '../../utils/format';
+import { formatDateTime, orderCode } from '../../utils/format';
 
 type Props = NativeStackScreenProps<OwnerStackParamList, 'OwnerReviews'>;
 
@@ -29,6 +31,10 @@ export const OwnerReviewsScreen: React.FC<Props> = ({ navigation }) => {
   const queryClient = useQueryClient();
   const toast = useToast();
   const [unrepliedOnly, setUnrepliedOnly] = useState(false);
+  const [withPhotos, setWithPhotos] = useState(false);
+  // Ảnh đang được thao tác (xem lớn, ẩn / hiện lại)
+  const [imageAction, setImageAction] = useState<{ reviewId: string; url: string; hidden: boolean } | null>(null);
+  const [hideReason, setHideReason] = useState<ReviewImageHideReason | null>(null);
   const [replyDrafts, setReplyDrafts] = useState<Record<string, string>>({});
   const [replyingId, setReplyingId] = useState<string | null>(null);
 
@@ -45,12 +51,13 @@ export const OwnerReviewsScreen: React.FC<Props> = ({ navigation }) => {
     isRefetching,
     refetch,
   } = useQuery({
-    queryKey: ['owner', 'reviews', restaurant?.id, unrepliedOnly],
+    queryKey: ['owner', 'reviews', restaurant?.id, unrepliedOnly, withPhotos],
     queryFn: () =>
       restaurantsApi.getManageReviews(restaurant!.id, {
         page: 1,
         limit: 50,
         unrepliedOnly,
+        withPhotos: withPhotos || undefined,
       }),
     enabled: Boolean(restaurant?.id),
   });
@@ -73,11 +80,25 @@ export const OwnerReviewsScreen: React.FC<Props> = ({ navigation }) => {
     },
   });
 
+  const imageMutation = useMutation({
+    mutationFn: ({ reviewId, url, hide, reason }: { reviewId: string; url: string; hide: boolean; reason?: ReviewImageHideReason }) =>
+      hide ? restaurantsApi.hideReviewImage(reviewId, url, reason!) : restaurantsApi.unhideReviewImage(reviewId, url),
+    onSuccess: (_res, vars) => {
+      void refetch();
+      queryClient.invalidateQueries({ queryKey: ['restaurant-reviews'] });
+      toast(vars.hide ? 'Đã ẩn ảnh khỏi trang đánh giá công khai' : 'Đã hiện lại ảnh', 'success');
+      setImageAction(null);
+      setHideReason(null);
+    },
+    onError: (err: any) => toast(err?.response?.data?.message || 'Không cập nhật được ảnh', 'error'),
+  });
+
   if (loadingRest || (loadingReviews && !reviewsRes)) {
     return <LoadingSpinner message="Đang tải đánh giá..." />;
   }
 
   const reviews: ManageRestaurantReview[] = reviewsRes?.items ?? [];
+
 
   const renderItem = ({ item }: { item: ManageRestaurantReview }) => {
     const isEditing = replyingId === item.id;
@@ -91,7 +112,7 @@ export const OwnerReviewsScreen: React.FC<Props> = ({ navigation }) => {
               {item.customer?.fullName || 'Khách hàng'}
             </Text>
             {item.orderId && (
-              <Badge label={`#${item.orderId.slice(-6).toUpperCase()}`} tone="neutral" size="sm" />
+              <Badge label={`#${orderCode(item.orderId)}`} tone="neutral" size="sm" />
             )}
           </View>
           <View className="flex-row items-center gap-0.5">
@@ -119,6 +140,33 @@ export const OwnerReviewsScreen: React.FC<Props> = ({ navigation }) => {
               Đánh giá tài xế: {item.driverRating}/5 sao
               {item.driverComment ? ` — "${item.driverComment}"` : ''}
             </Text>
+          </View>
+        )}
+
+        {!!item.images?.length && (
+          <View className="flex-row gap-2">
+            {item.images.map((url) => {
+              const hidden = item.hiddenImages?.includes(url) ?? false;
+              return (
+                <Pressable
+                  key={url}
+                  accessibilityRole="imagebutton"
+                  accessibilityLabel={hidden ? 'Ảnh đã ẩn, chạm để hiện lại' : 'Ảnh của khách, chạm để xem hoặc ẩn'}
+                  onPress={() => setImageAction({ reviewId: item.id, url, hidden })}
+                  className="h-16 w-16 overflow-hidden rounded-lg bg-canvas-subtle"
+                >
+                  <AppImage uri={url} className={cn('h-full w-full', hidden ? 'opacity-30' : 'opacity-100')} fallbackIcon="image-outline" />
+                  {hidden && (
+                    <View className="absolute inset-0 items-center justify-center">
+                      <Icon name="eye-off" size="sm" tone="default" />
+                      <Text variant="micro" weight="bold">
+                        Đã ẩn
+                      </Text>
+                    </View>
+                  )}
+                </Pressable>
+              );
+            })}
           </View>
         )}
 
@@ -209,6 +257,7 @@ export const OwnerReviewsScreen: React.FC<Props> = ({ navigation }) => {
           selected={unrepliedOnly}
           onPress={() => setUnrepliedOnly(true)}
         />
+        <FilterChip label="Có ảnh" icon="images-outline" selected={withPhotos} onPress={() => setWithPhotos((v) => !v)} />
       </View>
 
       <FlatList
@@ -233,7 +282,80 @@ export const OwnerReviewsScreen: React.FC<Props> = ({ navigation }) => {
           />
         }
       />
+
+      {/* Xem ảnh lớn + ẩn (bắt buộc lý do) / hiện lại */}
+      <BottomSheet
+        visible={Boolean(imageAction)}
+        onClose={() => {
+          setImageAction(null);
+          setHideReason(null);
+        }}
+        title={imageAction?.hidden ? 'Ảnh đang bị ẩn' : 'Ảnh của khách'}
+        footer={
+          <View className="pb-2">
+            {imageAction?.hidden ? (
+              <Button
+                label="Hiện lại ảnh"
+                leftIcon="eye-outline"
+                size="md"
+                loading={imageMutation.isPending}
+                onPress={() => imageAction && imageMutation.mutate({ reviewId: imageAction.reviewId, url: imageAction.url, hide: false })}
+              />
+            ) : (
+              <Button
+                label="Ẩn ảnh này"
+                leftIcon="eye-off-outline"
+                variant="danger"
+                size="md"
+                disabled={!hideReason}
+                loading={imageMutation.isPending}
+                onPress={() =>
+                  imageAction &&
+                  hideReason &&
+                  imageMutation.mutate({ reviewId: imageAction.reviewId, url: imageAction.url, hide: true, reason: hideReason })
+                }
+              />
+            )}
+          </View>
+        }
+      >
+        {imageAction && (
+          <View className="gap-3 pb-3">
+            <Image
+              source={{ uri: resolveImageUrl(imageAction.url) ?? imageAction.url }}
+              style={{ width: '100%', height: 240, borderRadius: 16 }}
+              resizeMode="cover"
+              accessibilityLabel="Ảnh đánh giá"
+            />
+            {!imageAction.hidden && (
+              <>
+                <Text variant="caption" weight="regular" tone="secondary">
+                  Chỉ ẩn ảnh không phù hợp. Ảnh món ăn thật dù chưa đẹp không được ẩn; mọi thao tác ẩn đều được ghi lại để
+                  ZomZom kiểm tra.
+                </Text>
+                <View className="flex-row flex-wrap gap-2">
+                  {HIDE_REASONS.map((r) => (
+                    <FilterChip
+                      key={r.value}
+                      label={r.label}
+                      selected={hideReason === r.value}
+                      onPress={() => setHideReason(r.value)}
+                    />
+                  ))}
+                </View>
+              </>
+            )}
+          </View>
+        )}
+      </BottomSheet>
     </View>
   );
 };
 
+/** Lý do được phép ẩn ảnh đánh giá (khớp backend REVIEW_IMAGE_HIDE_REASONS). */
+const HIDE_REASONS: { value: ReviewImageHideReason; label: string }[] = [
+  { value: 'IRRELEVANT', label: 'Không liên quan món ăn' },
+  { value: 'OFFENSIVE', label: 'Hình ảnh phản cảm' },
+  { value: 'PERSONAL_INFO', label: 'Lộ thông tin cá nhân' },
+  { value: 'SPAM', label: 'Quảng cáo / spam' },
+];

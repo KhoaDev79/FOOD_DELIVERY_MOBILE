@@ -19,6 +19,9 @@ export interface CartLineItem {
   level?: string;
 }
 
+/** Mã dòng trong giỏ: dòng có tuỳ chọn dùng id riêng, dòng thường dùng id món (khớp removeItem / updateQuantity). */
+export const lineKeyOf = (i: Pick<CartLineItem, 'id' | 'menuItem'>) => i.id ?? i.menuItem.id;
+
 export interface CartRestaurant {
   id: string;
   name: string;
@@ -70,6 +73,10 @@ interface CartState {
     },
   ) => void;
   updateNote: (menuItemId: string, note: string) => void;
+  /** Bỏ nhiều dòng một lúc (vd "Xoá các món không còn bán" sau khi kiểm tra giỏ). */
+  removeLines: (lineKeys: string[]) => void;
+  /** Cập nhật đơn giá theo giá mới của máy chủ (lineKey → đơn giá). */
+  applyPrices: (prices: Record<string, number>) => void;
   clearCart: () => void;
   getTotalItems: () => number;
   getSubtotal: () => number;
@@ -181,6 +188,21 @@ export const useCartStore = create<CartState>()(
           return match ? { ...i, note } : i;
         });
         set({ items: updated });
+      },
+
+      removeLines: (lineKeys) => {
+        const drop = new Set(lineKeys);
+        const updated = get().items.filter((i) => !drop.has(lineKeyOf(i)));
+        set({ items: updated, restaurant: updated.length === 0 ? null : get().restaurant });
+      },
+
+      applyPrices: (prices) => {
+        set({
+          items: get().items.map((i) => {
+            const price = prices[lineKeyOf(i)];
+            return price === undefined ? i : { ...i, unitPrice: price };
+          }),
+        });
       },
 
       clearCart: () => set({ restaurant: null, items: [] }),

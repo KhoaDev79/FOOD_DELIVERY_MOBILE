@@ -5,7 +5,7 @@ import { Pressable, View } from 'react-native';
 import { ordersApi } from '../../../api/orders';
 import { queryKeys } from '../../../constants/queryKeys';
 import { useAuthStore } from '../../../store/useAuthStore';
-import { formatDateTime, formatVND } from '../../../utils/format';
+import { formatDateTime, formatVND, orderCode } from '../../../utils/format';
 import { formatOrderEndReason } from '../../../utils/orderStatus';
 import { OrderStatusBadge } from '../../ui/Badge';
 import { Icon, IconName } from '../../ui/Icon';
@@ -50,7 +50,7 @@ export const ChatOrderCard: React.FC<{ orderId: string }> = ({ orderId }) => {
     );
   }
 
-  const code = order.id.slice(0, 8).toUpperCase();
+  const code = orderCode(order.id);
   const itemCount = order.items.reduce((s, i) => s + i.quantity, 0);
   const endReason = formatOrderEndReason(order);
   // Màn chi tiết đơn theo vai trò; chủ quán xem đơn ở tab Đơn hàng nên không có nút này

@@ -1,5 +1,5 @@
 import React from 'react';
-import { ActivityIndicator, Switch, View } from 'react-native';
+import { ActivityIndicator, Pressable, Switch, View } from 'react-native';
 import { cn, Icon, IconName, IconTone, Text } from '../../ui';
 import { useNow } from '../../../hooks/useNow';
 import { palette } from '../../../theme';
@@ -71,7 +71,8 @@ export const StoreStatusCard: React.FC<{
   restaurant: Restaurant;
   busy?: boolean;
   onToggle: (value: boolean) => void;
-}> = ({ restaurant, busy, onToggle }) => {
+  onSetPause?: (mode: '30m' | '1h' | '2h' | 'today' | 'cancel') => void;
+}> = ({ restaurant, busy, onToggle, onSetPause }) => {
   const now = useNow();
   const st = getStoreStatus(restaurant, now);
   const style = STATUS_STYLE[st.kind];
@@ -96,6 +97,36 @@ export const StoreStatusCard: React.FC<{
         </View>
       </View>
 
+      {/* Banner thông báo khi đang tạm nghỉ có hẹn giờ */}
+      {st.isTimedPause && (
+        <View className="flex-row items-center justify-between rounded-xl bg-canvas-subtle p-3">
+          <View className="flex-1 mr-3">
+            <View className="flex-row items-center gap-1.5">
+              <Icon name="time" size={16} tone="danger" />
+              <Text variant="caption" weight="bold">
+                Đang tạm nghỉ có hẹn giờ
+              </Text>
+            </View>
+            <Text variant="micro" tone="secondary" className="mt-0.5">
+              {st.detail}
+            </Text>
+          </View>
+          <Pressable
+            disabled={busy}
+            onPress={() => onSetPause?.('cancel')}
+            className="rounded-lg bg-brand-500 px-3 py-1.5 active:bg-brand-600"
+          >
+            {busy ? (
+              <ActivityIndicator size="small" color={palette.ink.inverse} />
+            ) : (
+              <Text variant="caption" weight="bold" tone="inverse">
+                Mở lại ngay
+              </Text>
+            )}
+          </Pressable>
+        </View>
+      )}
+
       {canToggle && (
         <View className="flex-row items-center gap-3 rounded-xl bg-surface/80 px-3 py-2.5">
           <View className="flex-1">
@@ -119,6 +150,37 @@ export const StoreStatusCard: React.FC<{
               thumbColor={palette.surface}
             />
           )}
+        </View>
+      )}
+
+      {/* Các nút hẹn giờ tạm nghỉ nhanh khi quán đang mở */}
+      {canToggle && !st.isTimedPause && restaurant.isOpen && (
+        <View className="gap-2 pt-1 border-t border-line/40">
+          <View className="flex-row items-center gap-1.5">
+            <Icon name="timer-outline" size={14} tone="secondary" />
+            <Text variant="caption" weight="medium" tone="secondary">
+              Tạm nghỉ có hẹn giờ (hết giờ tự mở lại):
+            </Text>
+          </View>
+          <View className="flex-row items-center gap-2">
+            {[
+              { mode: '30m' as const, label: '30 phút' },
+              { mode: '1h' as const, label: '1 giờ' },
+              { mode: '2h' as const, label: '2 giờ' },
+              { mode: 'today' as const, label: 'Hết ngày' },
+            ].map((p) => (
+              <Pressable
+                key={p.mode}
+                disabled={busy}
+                onPress={() => onSetPause?.(p.mode)}
+                className="flex-1 items-center justify-center py-2 px-1 rounded-xl bg-surface border border-line active:bg-canvas-subtle"
+              >
+                <Text variant="caption" weight="semibold" tone="default">
+                  {p.label}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
         </View>
       )}
     </View>

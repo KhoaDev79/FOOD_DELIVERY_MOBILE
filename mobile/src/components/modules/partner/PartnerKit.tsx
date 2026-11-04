@@ -2,7 +2,7 @@ import React from 'react';
 import { Pressable, View } from 'react-native';
 import { cn, Icon, IconName, IconTone, Text } from '../../ui';
 import { OrderStatus } from '../../../types/api';
-import { formatDateTime, formatVND } from '../../../utils/format';
+import { formatDateTime, formatVND, orderCode } from '../../../utils/format';
 
 /**
  * Bộ khối giao diện dùng chung cho các màn đối tác (tài xế và chủ quán), để thẻ, tiến trình,
@@ -421,7 +421,7 @@ export function timeAgo(iso: string): string {
   return formatDateTime(iso);
 }
 
-export const orderCode = (id: string) => id.slice(0, 8).toUpperCase();
+export { orderCode };
 
 /** "Hôm nay", "Hôm qua" hoặc dd/mm/yyyy. */
 export function dayLabel(iso: string): string {

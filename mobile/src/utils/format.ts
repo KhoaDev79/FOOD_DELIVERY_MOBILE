@@ -41,3 +41,6 @@ export function formatDate(dateString: string): string {
   if (Number.isNaN(d.getTime())) return dateString;
   return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
 }
+
+/** Mã đơn hiển thị chung cho cả 4 vai trò: 8 ký tự đầu của id, viết hoa (vd "358F5744"). */
+export const orderCode = (id: string) => id.slice(0, 8).toUpperCase();

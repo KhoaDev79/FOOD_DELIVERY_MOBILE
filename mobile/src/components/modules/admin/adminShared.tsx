@@ -2,7 +2,9 @@ import React from 'react';
 import { View } from 'react-native';
 import { AuditLogEntry } from '../../../api/admin';
 import { Badge, BadgeTone, cn, Icon, IconName, IconTone, Text } from '../../ui';
-import { RestaurantStatus, Role, RoleRequestStatus } from '../../../types/api';
+import { OrderStatus, RestaurantStatus, Role, RoleRequestStatus } from '../../../types/api';
+import { ORDER_STEP_LABEL } from '../../../utils/adminOrder';
+import { formatVND, orderCode } from '../../../utils/format';
 
 export const RESTAURANT_STATUS_META: Record<RestaurantStatus, { label: string; tone: BadgeTone }> = {
   PENDING_APPROVAL: { label: 'Chờ duyệt', tone: 'warning' },
@@ -83,7 +85,67 @@ export function describeAudit(log: AuditLogEntry): { icon: IconName; tone: IconT
       return { icon: 'play-circle', tone: 'success', text: `Mở lại quán ${m.restaurantName ?? ''}` };
     case 'RESTAURANT_CRITICAL_EDIT_REAPPROVAL':
       return { icon: 'create-outline', tone: 'accent', text: 'Chủ quán sửa tên/địa chỉ/toạ độ → chờ duyệt lại' };
+    case 'RESTAURANT_CREATE':
+      return { icon: 'add-circle', tone: 'success', text: `Tạo quán ${m.name ?? m.restaurantName ?? ''}` };
+    case 'RESTAURANT_UPDATE':
+      return { icon: 'create-outline', tone: 'brand', text: `Sửa thông tin quán ${m.restaurantName ?? ''}` };
+    case 'RESTAURANT_DELETE':
+      return { icon: 'trash', tone: 'danger', text: `Xoá quán ${m.restaurantName ?? ''}` };
+    case 'MENU_ITEM_DELETE':
+      return { icon: 'trash-outline', tone: 'danger', text: `Gỡ món "${m.name ?? ''}"` };
+    case 'USER_CREATE':
+      return { icon: 'person-add', tone: 'success', text: `Tạo tài khoản ${m.email ?? ''} (${roleName(m.role)})` };
+    case 'REVIEW_HIDE':
+      return { icon: 'eye-off', tone: 'accent', text: `Ẩn đánh giá${m.reason ? ` – ${m.reason}` : ''}` };
+    case 'REVIEW_SHOW':
+      return { icon: 'eye', tone: 'success', text: 'Hiện lại đánh giá' };
+    case 'ORDER_UNASSIGN_DRIVER':
+      return { icon: 'person-remove', tone: 'accent', text: `Gỡ tài xế khỏi đơn #${orderCode(log.targetId)}${m.reason ? ` – ${m.reason}` : ''}` };
+    case 'DRIVER_SETTLEMENT':
+      return {
+        icon: 'cash',
+        tone: 'success',
+        text: `Ghi nhận tài xế nộp ${formatVND(Number(m.amount ?? 0))} tiền COD${m.note ? ` – ${m.note}` : ''}`,
+      };
+    case 'DRIVER_LEDGER_ADJUSTMENT':
+      return { icon: 'calculator', tone: 'brand', text: `Điều chỉnh công nợ tài xế${m.note || m.reason ? ` – ${m.note || m.reason}` : ''}` };
+    case 'DRIVER_RELEASE_ORDER':
+      return { icon: 'return-up-back', tone: 'accent', text: `Tài xế trả lại đơn #${orderCode(log.targetId)}` };
+    case 'EXPORT_ORDERS_CSV':
+      return { icon: 'download', tone: 'brand', text: `Xuất CSV đơn hàng ${m.from ?? ''} → ${m.to ?? ''} (${m.rows ?? 0} đơn)` };
+    case 'EXPORT_REVENUE_CSV':
+      return {
+        icon: 'download',
+        tone: 'accent',
+        text: `Xuất CSV doanh thu ${m.restaurantName ?? 'quán'} ${m.from ?? ''} → ${m.to ?? ''}`,
+      };
+    case 'BANNER_CREATE':
+      return { icon: 'images', tone: 'success', text: 'Thêm banner mới' };
+    case 'BANNER_UPDATE':
+      return { icon: 'images-outline', tone: 'brand', text: 'Sửa banner' };
+    case 'BANNER_DELETE':
+      return { icon: 'images-outline', tone: 'danger', text: 'Xoá banner' };
+    case 'BANNER_REORDER':
+      return { icon: 'swap-vertical', tone: 'brand', text: 'Sắp xếp lại banner' };
+    case 'CUISINE_CREATE':
+      return { icon: 'grid', tone: 'success', text: 'Thêm danh mục ẩm thực' };
+    case 'CUISINE_UPDATE':
+      return { icon: 'grid-outline', tone: 'brand', text: 'Sửa danh mục ẩm thực' };
+    case 'CUISINE_DELETE':
+      return { icon: 'grid-outline', tone: 'danger', text: 'Xoá danh mục ẩm thực' };
+    case 'CUISINE_REORDER':
+      return { icon: 'swap-vertical', tone: 'brand', text: 'Sắp xếp lại danh mục ẩm thực' };
     default:
+      if (log.action.startsWith('ORDER_STATUS_')) {
+        const to = log.action.replace('ORDER_STATUS_', '') as OrderStatus;
+        return {
+          icon: to === 'CANCELLED' ? 'close-circle' : 'swap-horizontal',
+          tone: to === 'CANCELLED' ? 'danger' : 'brand',
+          text: `${to === 'CANCELLED' ? 'Huỷ' : `Chuyển sang "${ORDER_STEP_LABEL[to] ?? to}" cho`} đơn #${orderCode(log.targetId)}${
+            m.cancelNote ? ` – ${m.cancelNote}` : ''
+          }`,
+        };
+      }
       return { icon: 'ellipse-outline', tone: 'muted', text: log.action };
   }
 }

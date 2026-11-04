@@ -188,6 +188,9 @@ export const RestaurantRow = memo<CardProps>(({ restaurant: r, onPress, classNam
             {r.canDeliver === false && (
               <InfoChip label="Ngoài vùng giao hàng" tone="danger" icon="alert-circle-outline" />
             )}
+            {!!r.promoLabel && r.canDeliver !== false && (
+              <InfoChip label={r.promoLabel} tone="voucher" icon="pricetag" />
+            )}
             {!!r.matchedDishes?.length && (
               <Text variant="caption" tone="secondary" numberOfLines={2}>
                 Có món: <Text variant="caption" weight="semibold">{r.matchedDishes.join(', ')}</Text>

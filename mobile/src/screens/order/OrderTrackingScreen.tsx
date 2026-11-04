@@ -10,14 +10,14 @@ import {
   AppImage,
   Button,
   cn,
-  ConfirmDialog,
   Icon,
   IconButton,
   LoadingSpinner,
   Text,
 } from '../../components/ui';
 import { useSocket } from '../../hooks/useSocket';
-import { useCancelOrder, useOrderDetail } from '../../services/useOrders';
+import { CancelOrderSheet } from '../../components/modules/order/CancelOrderSheet';
+import { useOrderDetail } from '../../services/useOrders';
 import { OrderItem } from '../../types/api';
 import { RootStackParamList } from '../../types/navigation';
 import { CUSTOMER_STEPS, customerHeadline, customerStepIndex, etaText } from '../../utils/customerOrderProgress';
@@ -39,7 +39,6 @@ const optionsText = (m: OrderItem) =>
 export const OrderTrackingScreen: React.FC<Props> = ({ route, navigation }) => {
   const { orderId } = route.params;
   const { data: order, isLoading, refetch } = useOrderDetail(orderId);
-  const cancelMutation = useCancelOrder();
   const { socket, joinOrder, leaveOrder } = useSocket();
   const insets = useSafeAreaInsets();
   const { height: windowHeight } = useWindowDimensions();
@@ -97,15 +96,6 @@ export const OrderTrackingScreen: React.FC<Props> = ({ route, navigation }) => {
     };
   }, [rLat, rLng, dLat, dLng]);
 
-  const handleCancel = async () => {
-    setConfirmCancel(false);
-    try {
-      await cancelMutation.mutateAsync(orderId);
-      refetch();
-    } catch (err: any) {
-      Alert.alert('Không thể hủy đơn', err.response?.data?.message || 'Quán đã tiếp nhận đơn.');
-    }
-  };
 
   const callPhone = (phone?: string | null, missing = 'Số điện thoại hiện không khả dụng.') => {
     if (phone) Linking.openURL(`tel:${phone}`);
@@ -229,7 +219,7 @@ export const OrderTrackingScreen: React.FC<Props> = ({ route, navigation }) => {
             variant="surface"
             accessibilityLabel="Trợ giúp đơn hàng"
             onPress={() =>
-              Alert.alert('Trợ giúp đơn hàng', 'Nếu cần hỗ trợ gấp về đơn hàng, vui lòng liên hệ hotline CSKH: 1900 6868.')
+              navigation.navigate('OrderIssue', { orderId: order.id })
             }
           />
         </View>
@@ -251,20 +241,20 @@ export const OrderTrackingScreen: React.FC<Props> = ({ route, navigation }) => {
         >
           {/* TRẠNG THÁI */}
           {isTerminated ? (
-            <View className="gap-2 rounded-2xl border border-danger/20 bg-danger-soft p-4">
-              <View className="flex-row items-center gap-2.5">
-                <View className="h-11 w-11 items-center justify-center rounded-2xl bg-surface">
-                  <Icon name={headline.icon} size="lg" tone="danger" />
-                </View>
-                <Text variant="headline" weight="bold" tone="danger" className="flex-1">
+            <View className="flex-row items-center gap-3 rounded-2xl bg-surface p-4 shadow-card">
+              <View className="h-12 w-12 items-center justify-center rounded-2xl bg-danger-soft">
+                <Icon name={headline.icon} size="lg" tone="danger" />
+              </View>
+              <View className="flex-1 gap-0.5">
+                <Text variant="headline" weight="bold">
                   {headline.title}
                 </Text>
+                <Text variant="caption" weight="regular" tone="secondary">
+                  {endReasonText
+                    ? `Lý do: ${endReasonText}`
+                    : 'Đơn hàng này đã bị hủy và không còn được giao. Bạn có thể đặt lại món từ nhà hàng.'}
+                </Text>
               </View>
-              <Text variant="body" weight="regular" tone="secondary">
-                {endReasonText
-                  ? `Lý do: ${endReasonText}`
-                  : 'Đơn hàng này đã bị hủy và không còn được giao. Bạn có thể đặt lại món từ nhà hàng.'}
-              </Text>
             </View>
           ) : (
             <View className="gap-4 rounded-2xl bg-surface p-4 shadow-card">
@@ -552,13 +542,31 @@ export const OrderTrackingScreen: React.FC<Props> = ({ route, navigation }) => {
             <View className="gap-1.5">
               <SummaryRow label="Tạm tính" value={formatVND(order.subtotal)} />
               <SummaryRow label={`Phí giao hàng (${order.distanceKm} km)`} value={formatVND(order.deliveryFee)} />
+              {!!order.shippingDiscount && (
+                <SummaryRow
+                  label={`Giảm phí giao${order.freeshipVoucherCode ? ` (${order.freeshipVoucherCode})` : ''}`}
+                  value={`−${formatVND(order.shippingDiscount)}`}
+                  discount
+                />
+              )}
+              {!!order.discountAmount && (
+                <SummaryRow
+                  label={`Giảm giá${order.voucherCode ? ` (${order.voucherCode})` : ''}`}
+                  value={`−${formatVND(order.discountAmount)}`}
+                  discount
+                />
+              )}
               <SummaryRow
                 label="Thanh toán"
                 value={
                   order.paymentMethod === 'VNPAY'
-                    ? order.paymentStatus === 'PAID'
-                      ? 'VNPay · đã thanh toán'
-                      : 'VNPay'
+                    ? order.paymentStatus === 'REFUND_PENDING'
+                      ? 'VNPay · đang hoàn tiền'
+                      : order.paymentStatus === 'REFUNDED'
+                        ? 'VNPay · đã hoàn tiền'
+                        : order.paymentStatus === 'PAID'
+                          ? 'VNPay · đã thanh toán'
+                          : 'VNPay'
                     : 'Tiền mặt khi nhận hàng'
                 }
               />
@@ -580,33 +588,34 @@ export const OrderTrackingScreen: React.FC<Props> = ({ route, navigation }) => {
               size="lg"
               leftIcon="close-circle-outline"
               onPress={() => setConfirmCancel(true)}
-              loading={cancelMutation.isPending}
             />
           )}
         </ScrollView>
       </View>
 
-      <ConfirmDialog
+      <CancelOrderSheet
         visible={confirmCancel}
-        title="Hủy đơn hàng?"
-        message="Bạn có chắc chắn muốn hủy đơn hàng này không?"
-        confirmLabel="Hủy đơn"
-        cancelLabel="Không"
-        destructive
-        loading={cancelMutation.isPending}
-        onCancel={() => setConfirmCancel(false)}
-        onConfirm={handleCancel}
+        orderId={orderId}
+        onClose={() => setConfirmCancel(false)}
+        onCancelled={() => refetch()}
+        onRequestSupport={() => navigation.navigate('OrderIssue', { orderId, preselectedIssue: 'CANCEL_REQUEST' })}
       />
     </View>
   );
 };
 
-const SummaryRow: React.FC<{ label: string; value: string }> = ({ label, value }) => (
+const SummaryRow: React.FC<{ label: string; value: string; discount?: boolean }> = ({ label, value, discount }) => (
   <View className="flex-row items-center justify-between gap-3">
     <Text variant="body" weight="regular" tone="secondary">
       {label}
     </Text>
-    <Text variant="body" weight="medium" numberOfLines={1} className="flex-shrink text-right">
+    <Text
+      variant="body"
+      weight="medium"
+      tone={discount ? 'success' : 'default'}
+      numberOfLines={1}
+      className="flex-shrink text-right"
+    >
       {value}
     </Text>
   </View>

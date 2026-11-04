@@ -1,8 +1,18 @@
+import { NotificationCenterScreen } from '../screens/notifications/NotificationCenterScreen';
+import { HelpCenterScreen } from '../screens/help/HelpCenterScreen';
+import { HelpArticleScreen } from '../screens/help/HelpArticleScreen';
+import { OrderIssueScreen } from '../screens/help/OrderIssueScreen';
+import { SupportTicketListScreen } from '../screens/help/SupportTicketListScreen';
+import { SupportTicketDetailScreen } from '../screens/help/SupportTicketDetailScreen';
+import { SupportChatScreen } from '../screens/help/SupportChatScreen';
+import { VoucherWalletScreen } from '../screens/voucher/VoucherWalletScreen';
+import { RestaurantReviewsScreen } from '../screens/restaurant/RestaurantReviewsScreen';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import React from 'react';
 import { colors } from '../constants/colors';
 import { LoginScreen } from '../screens/auth/LoginScreen';
 import { RegisterScreen } from '../screens/auth/RegisterScreen';
+import { ForgotPasswordScreen } from '../screens/auth/ForgotPasswordScreen';
 import { CartScreen } from '../screens/cart/CartScreen';
 import { CheckoutScreen } from '../screens/checkout/CheckoutScreen';
 import { OrderTrackingScreen } from '../screens/order/OrderTrackingScreen';
@@ -49,6 +59,11 @@ export const RootStack: React.FC = () => {
       <Stack.Screen
         name="Register"
         component={RegisterScreen}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="ForgotPassword"
+        component={ForgotPasswordScreen}
         options={{ headerShown: false }}
       />
       <Stack.Screen
@@ -109,6 +124,51 @@ export const RootStack: React.FC = () => {
       <Stack.Screen
         name="Inbox"
         component={InboxScreen}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="NotificationCenter"
+        component={NotificationCenterScreen}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="RestaurantReviews"
+        component={RestaurantReviewsScreen}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="VoucherWallet"
+        component={VoucherWalletScreen}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="HelpCenter"
+        component={HelpCenterScreen}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="HelpArticle"
+        component={HelpArticleScreen}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="OrderIssue"
+        component={OrderIssueScreen}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="SupportTicketList"
+        component={SupportTicketListScreen}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="SupportTicketDetail"
+        component={SupportTicketDetailScreen}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="SupportChat"
+        component={SupportChatScreen}
         options={{ headerShown: false }}
       />
     </Stack.Navigator>

@@ -2,24 +2,21 @@ import { RouteProp, useIsFocused, useNavigation, useRoute } from '@react-navigat
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { StatusBar } from 'expo-status-bar';
 import React, { useState } from 'react';
-import { Alert, FlatList, RefreshControl, ScrollView, View } from 'react-native';
+import { Alert, FlatList, Pressable, RefreshControl, ScrollView, View } from 'react-native';
 import { adminApi, AdminRestaurantItem, RestaurantFilter } from '../../api/admin';
+import { ContentWidth, DetailPlaceholder, ListSkeleton, TabStrip, useIsWide } from '../../components/modules/admin/AdminKit';
 import { AssignOwnerSheet } from '../../components/modules/admin/AssignOwnerSheet';
-import { RestaurantDetailSheet } from '../../components/modules/admin/RestaurantDetailSheet';
-import { RESTAURANT_STATUS_META, RoleBadge } from '../../components/modules/admin/adminShared';
+import { RestaurantDetailPanel, RestaurantStatusBadges } from '../../components/modules/admin/RestaurantDetailPanel';
 import {
   AppImage,
-  Badge,
   BottomSheet,
   Button,
-  ConfirmDialog,
+  cn,
   EmptyState,
   ErrorState,
-  FilterChip,
   Icon,
   IconButton,
   Input,
-  LoadingSpinner,
   SearchBar,
   TAB_BAR_CLEARANCE,
   TabHeader,
@@ -27,15 +24,18 @@ import {
   useToast,
 } from '../../components/ui';
 import { DEFAULT_COORDS } from '../../constants/config';
+import { useDebounce } from '../../hooks/useDebounce';
+import { useNow } from '../../hooks/useNow';
 import { palette } from '../../theme';
 import { AdminTabParamList } from '../../types/navigation';
 
-const FILTERS: { value: RestaurantFilter; label: string }[] = [
+/** tone: số đếm tô cam/đỏ khi tab có việc cần xử lý. */
+const TABS: { value: RestaurantFilter; label: string; tone?: 'warning' | 'danger' }[] = [
   { value: 'all', label: 'Tất cả' },
-  { value: 'pending', label: 'Chờ duyệt' },
-  { value: 'open', label: 'Đang mở' },
-  { value: 'closed', label: 'Đã đóng' },
-  { value: 'unassigned', label: 'Chưa có chủ quán' },
+  { value: 'pending', label: 'Chờ duyệt', tone: 'warning' },
+  { value: 'active', label: 'Đang hoạt động' },
+  { value: 'suspended', label: 'Tạm khoá', tone: 'danger' },
+  { value: 'unassigned', label: 'Chưa có chủ', tone: 'warning' },
 ];
 
 /** Đợi Modal trước đóng hẳn rồi mới mở Modal sau (iOS không mở được 2 Modal chồng nhau). */
@@ -43,14 +43,19 @@ const MODAL_SWAP_DELAY = 350;
 
 const EMPTY_FORM = { name: '', address: '', phone: '', imageUrl: '', ownerName: '', ownerPhone: '', ownerEmail: '' };
 
+type Moderation = { restaurant: Pick<AdminRestaurantItem, 'id' | 'name'>; mode: 'reject' | 'suspend' };
+
 export const AdminRestaurantsScreen: React.FC = () => {
   const queryClient = useQueryClient();
   const toast = useToast();
   const isFocused = useIsFocused();
   const route = useRoute<RouteProp<AdminTabParamList, 'AdminRestaurantsTab'>>();
-
   const navigation = useNavigation<any>();
+  const wide = useIsWide();
+  const now = useNow();
+
   const [search, setSearch] = useState('');
+  const q = useDebounce(search.trim(), 350);
   // Bộ lọc nằm trong tham số route để màn Tổng quan mở thẳng bộ lọc (VD: "quán chưa có chủ")
   const filter: RestaurantFilter = route.params?.filter ?? 'all';
   const setFilter = (f: RestaurantFilter) => navigation.setParams({ filter: f });
@@ -58,70 +63,57 @@ export const AdminRestaurantsScreen: React.FC = () => {
 
   const [assignFor, setAssignFor] = useState<AdminRestaurantItem | null>(null);
   const [detailId, setDetailId] = useState<string | null>(null);
-  const [toggleFor, setToggleFor] = useState<AdminRestaurantItem | null>(null);
-  const [moderationModal, setModerationModal] = useState<{
-    restaurant: AdminRestaurantItem;
-    mode: 'reject' | 'suspend';
-  } | null>(null);
+  const [moderation, setModeration] = useState<Moderation | null>(null);
   const [moderationReason, setModerationReason] = useState('');
   const [createOpen, setCreateOpen] = useState(false);
   const [form, setForm] = useState(EMPTY_FORM);
 
-  const { data, isLoading, isError, refetch } = useQuery({
-    queryKey: ['admin', 'restaurants', filter, search.trim()],
-    queryFn: () => adminApi.listRestaurants({ q: search.trim() || undefined, filter, limit: 100 }),
+  const listQuery = useQuery({
+    queryKey: ['admin', 'restaurants', filter, q],
+    queryFn: () => adminApi.listRestaurants({ q: q || undefined, filter, limit: 100 }),
+    placeholderData: (prev) => prev,
   });
-  const restaurants = data?.items ?? [];
+  const restaurants = listQuery.data?.items ?? [];
+  const counts = listQuery.data?.counts;
+  const activeId = detailId ?? (wide ? (restaurants[0]?.id ?? null) : null);
 
   const onRefresh = async () => {
     setRefreshing(true);
-    await refetch();
+    await listQuery.refetch();
     setRefreshing(false);
   };
 
-  const toggleOpen = useMutation({
-    mutationFn: (id: string) => adminApi.toggleRestaurantOpen(id),
-    onSuccess: (res) => {
-      queryClient.invalidateQueries({ queryKey: ['admin'] });
-      toast(res.isOpen ? `Đã mở lại quán ${res.name}` : `Đã tạm ngưng quán ${res.name}`, 'success');
-    },
-    onError: (err: any) => toast(err?.response?.data?.message || 'Không thể đổi trạng thái quán', 'error'),
-    onSettled: () => setToggleFor(null),
-  });
+  const invalidate = () => queryClient.invalidateQueries({ queryKey: ['admin'] });
+  const errMsg = (fallback: string) => (err: any) => toast(err?.response?.data?.message || fallback, 'error');
 
   const approveMutation = useMutation({
     mutationFn: (id: string) => adminApi.approveRestaurant(id),
     onSuccess: (res) => {
-      queryClient.invalidateQueries({ queryKey: ['admin'] });
+      invalidate();
       toast(`Đã duyệt quán ${res.name}`, 'success');
     },
-    onError: (err: any) => toast(err?.response?.data?.message || 'Không thể duyệt quán', 'error'),
+    onError: errMsg('Không thể duyệt quán'),
   });
 
   const resumeMutation = useMutation({
     mutationFn: (id: string) => adminApi.updateRestaurantStatus(id, 'ACTIVE'),
     onSuccess: (res) => {
-      queryClient.invalidateQueries({ queryKey: ['admin'] });
-      toast(`Đã mở khoá quán ${res.name}`, 'success');
+      invalidate();
+      toast(`Đã mở lại quán ${res.name}`, 'success');
     },
-    onError: (err: any) => toast(err?.response?.data?.message || 'Không thể mở khoá quán', 'error'),
+    onError: errMsg('Không thể mở lại quán'),
   });
 
-  const rejectOrSuspendMutation = useMutation({
+  const moderationMutation = useMutation({
     mutationFn: ({ id, mode, reason }: { id: string; mode: 'reject' | 'suspend'; reason: string }) =>
-      mode === 'reject'
-        ? adminApi.rejectRestaurant(id, reason)
-        : adminApi.updateRestaurantStatus(id, 'SUSPENDED', reason),
+      mode === 'reject' ? adminApi.rejectRestaurant(id, reason) : adminApi.updateRestaurantStatus(id, 'SUSPENDED', reason),
     onSuccess: (res, vars) => {
-      queryClient.invalidateQueries({ queryKey: ['admin'] });
-      setModerationModal(null);
+      invalidate();
+      setModeration(null);
       setModerationReason('');
-      toast(
-        vars.mode === 'reject' ? `Đã từ chối quán ${res.name}` : `Đã tạm khoá quán ${res.name}`,
-        'success',
-      );
+      toast(vars.mode === 'reject' ? `Đã từ chối quán ${res.name}` : `Đã tạm khoá quán ${res.name}`, 'success');
     },
-    onError: (err: any) => toast(err?.response?.data?.message || 'Không thể thực hiện thao tác', 'error'),
+    onError: errMsg('Không thể thực hiện thao tác'),
   });
 
   const createRestaurant = useMutation({
@@ -138,7 +130,7 @@ export const AdminRestaurantsScreen: React.FC = () => {
         imageUrl: form.imageUrl.trim() || undefined,
       }),
     onSuccess: (res) => {
-      queryClient.invalidateQueries({ queryKey: ['admin'] });
+      invalidate();
       setCreateOpen(false);
       setForm(EMPTY_FORM);
       // Mật khẩu tạm của chủ quán mới chỉ trả về một lần: hiện hộp thoại để admin ghi lại
@@ -153,7 +145,7 @@ export const AdminRestaurantsScreen: React.FC = () => {
         MODAL_SWAP_DELAY,
       );
     },
-    onError: (err: any) => toast(err?.response?.data?.message || 'Không thể tạo quán', 'error'),
+    onError: errMsg('Không thể tạo quán'),
   });
 
   const submitCreate = () => {
@@ -176,240 +168,199 @@ export const AdminRestaurantsScreen: React.FC = () => {
     onChangeText: (v: string) => setForm((f) => ({ ...f, [key]: v })),
   });
 
-  const renderItem = ({ item }: { item: AdminRestaurantItem }) => (
-    <View className="gap-3 rounded-2xl bg-surface p-3 shadow-card">
-      <View className="flex-row gap-3">
-        <AppImage uri={item.imageUrl} className="h-20 w-20 rounded-xl" />
-        <View className="flex-1 gap-1">
-          <Text variant="body-lg" weight="semibold" numberOfLines={1}>
-            {item.name}
-          </Text>
-          <View className="flex-row items-center gap-1">
-            <Icon name="star" size="xs" tone="rating" />
-            <Text variant="caption">{item.rating.toFixed(1)}</Text>
-            <Text variant="caption" tone="muted">
-              • {item._count.menuItems} món • {item._count.orders} đơn
-            </Text>
-          </View>
-          <View className="flex-row items-start gap-1">
-            <Icon name="location-outline" size="xs" tone="secondary" />
-            <Text variant="caption" weight="regular" tone="secondary" numberOfLines={1} className="flex-1">
-              {item.address}
-            </Text>
-          </View>
-          <View className="flex-row flex-wrap gap-1.5">
-            {item.status && (
-              <Badge
-                label={RESTAURANT_STATUS_META[item.status]?.label ?? item.status}
-                tone={RESTAURANT_STATUS_META[item.status]?.tone ?? 'neutral'}
-                size="sm"
-              />
-            )}
-            <Badge label={item.isOpen ? 'Đang mở' : 'Tạm ngưng'} tone={item.isOpen ? 'success' : 'danger'} size="sm" />
-            {item.needsOwner && <Badge label="Chưa có chủ" tone="warning" icon="alert-circle" size="sm" />}
-          </View>
-          {!!item.suspendReason && item.status === 'SUSPENDED' && (
-            <Text variant="micro" tone="danger" numberOfLines={2}>
-              Lý do: {item.suspendReason}
-            </Text>
-          )}
-        </View>
-      </View>
+  /** Trên điện thoại: đóng bảng chi tiết rồi mới mở bảng tiếp theo. */
+  const fromDetail = (open: () => void) => {
+    if (wide) {
+      open();
+      return;
+    }
+    setDetailId(null);
+    setTimeout(open, MODAL_SWAP_DELAY);
+  };
 
-      {/* Chủ quán */}
-      <View className="flex-row items-center gap-2 rounded-xl bg-canvas-subtle px-3 py-2">
-        <Icon name="person-circle-outline" size="md" tone={item.needsOwner ? 'danger' : 'brand'} />
-        <View className="flex-1">
-          <Text variant="caption" weight="semibold" numberOfLines={1}>
-            {item.needsOwner ? 'Chưa có chủ quán' : item.owner.fullName}
-          </Text>
-          <Text variant="micro" weight="regular" tone="secondary" numberOfLines={1}>
-            {item.needsOwner ? `Đang giữ bởi: ${item.owner.fullName}` : item.owner.email}
-          </Text>
-        </View>
-        {!item.needsOwner && <RoleBadge role={item.owner.role} />}
-      </View>
+  const openModeration = (r: Moderation['restaurant'], mode: Moderation['mode']) => {
+    setModerationReason('');
+    setModeration({ restaurant: r, mode });
+  };
 
-      {/* Hành động thuộc thẩm quyền nền tảng (admin không sửa giá/món của quán) */}
-      {item.status === 'PENDING_APPROVAL' ? (
-        <View className="flex-row gap-2">
-          <Button
-            label="Duyệt quán"
-            leftIcon="checkmark-circle-outline"
-            variant="primary"
-            size="sm"
-            className="flex-1"
-            loading={approveMutation.isPending && approveMutation.variables === item.id}
-            onPress={() => approveMutation.mutate(item.id)}
-          />
-          <Button
-            label="Từ chối"
-            leftIcon="close-circle-outline"
-            variant="outline"
-            size="sm"
-            className="flex-1"
-            onPress={() => {
-              setModerationReason('');
-              setModerationModal({ restaurant: item, mode: 'reject' });
-            }}
-          />
-          <IconButton
-            icon="information-circle-outline"
-            variant="subtle"
-            size="sm"
-            accessibilityLabel={`Xem chi tiết ${item.name}`}
-            onPress={() => setDetailId(item.id)}
-          />
+  const renderItem = ({ item }: { item: AdminRestaurantItem }) => {
+    const selected = wide && item.id === activeId;
+    return (
+      // Không đặt accessibilityRole="button": thẻ có nút Duyệt/Từ chối bên trong, trên web Pressable vai trò button
+      // thành thẻ <button>, lồng <button> trong <button> là HTML không hợp lệ (React báo lỗi).
+      <Pressable
+        accessibilityLabel={`${item.name}. Mở chi tiết quán`}
+        onPress={() => setDetailId(item.id)}
+        className={cn(
+          'gap-3 rounded-2xl border-2 bg-surface p-3 shadow-card active:opacity-90',
+          selected ? 'border-brand-500' : item.status === 'PENDING_APPROVAL' ? 'border-warning/50' : 'border-surface',
+        )}
+      >
+        <View className="flex-row gap-3">
+          <AppImage uri={item.imageUrl} className="h-16 w-16 rounded-xl" />
+          <View className="flex-1 gap-1">
+            <Text variant="body-lg" weight="semibold" numberOfLines={1}>
+              {item.name}
+            </Text>
+            <View className="flex-row items-center gap-1">
+              <Icon name="star" size="xs" tone="rating" />
+              <Text variant="caption" weight="bold">
+                {item.rating.toFixed(1)}
+              </Text>
+              <Text variant="caption" weight="regular" tone="muted">
+                ({item.ratingCount ?? 0})
+              </Text>
+              <Icon name="person-circle-outline" size="xs" tone="muted" />
+              <Text variant="caption" weight="regular" tone="secondary" numberOfLines={1} className="flex-1">
+                {item.needsOwner ? 'Chưa có chủ' : item.owner.fullName}
+              </Text>
+            </View>
+            <RestaurantStatusBadges r={item} now={now} />
+          </View>
+          <Icon name="chevron-forward" size="sm" tone="muted" />
         </View>
-      ) : (
-        <View className="flex-row gap-2">
-          <Button
-            label="Gán chủ quán"
-            leftIcon="key-outline"
-            variant={item.needsOwner ? 'primary' : 'secondary'}
-            size="sm"
-            className="flex-1"
-            onPress={() => setAssignFor(item)}
-          />
-          {item.status === 'SUSPENDED' ? (
+
+        {/* Chỉ quán chờ duyệt mới có nút ngay trên thẻ; thao tác khác nằm trong chi tiết */}
+        {item.status === 'PENDING_APPROVAL' && (
+          <View className="flex-row gap-2">
             <Button
-              label="Mở khoá"
-              leftIcon="play-circle-outline"
+              label="Duyệt"
+              leftIcon="checkmark-circle-outline"
+              size="sm"
+              className="flex-1"
+              loading={approveMutation.isPending && approveMutation.variables === item.id}
+              onPress={() => approveMutation.mutate(item.id)}
+            />
+            <Button
+              label="Từ chối"
+              leftIcon="close-circle-outline"
               variant="outline"
               size="sm"
               className="flex-1"
-              loading={resumeMutation.isPending && resumeMutation.variables === item.id}
-              onPress={() => resumeMutation.mutate(item.id)}
+              onPress={() => openModeration(item, 'reject')}
             />
-          ) : (
-            <Button
-              label="Tạm khoá"
-              leftIcon="pause-circle-outline"
-              variant="outline"
-              size="sm"
-              className="flex-1"
-              onPress={() => {
-                setModerationReason('');
-                setModerationModal({ restaurant: item, mode: 'suspend' });
-              }}
-            />
-          )}
-          <IconButton
-            icon="information-circle-outline"
-            variant="subtle"
-            size="sm"
-            accessibilityLabel={`Xem chi tiết ${item.name}`}
-            onPress={() => setDetailId(item.id)}
+          </View>
+        )}
+      </Pressable>
+    );
+  };
+
+  const list =
+    listQuery.isLoading && !listQuery.data ? (
+      <View className="px-4 pt-1">
+        <ListSkeleton rows={5} withImage />
+      </View>
+    ) : listQuery.isError && !listQuery.data ? (
+      <ErrorState onRetry={() => listQuery.refetch()} />
+    ) : (
+      <FlatList
+        data={restaurants}
+        keyExtractor={(item) => item.id}
+        renderItem={renderItem}
+        contentContainerClassName={cn('gap-3 px-4 pt-1', TAB_BAR_CLEARANCE)}
+        keyboardShouldPersistTaps="handled"
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[palette.brand['500']]} />}
+        ListEmptyComponent={
+          <EmptyState
+            icon="storefront-outline"
+            title={filter === 'unassigned' ? 'Mọi quán đều đã có chủ' : filter === 'pending' ? 'Không có quán chờ duyệt' : 'Không tìm thấy quán'}
+            description={filter === 'unassigned' || filter === 'pending' ? 'Không có việc cần xử lý.' : 'Thử từ khoá khác hoặc đổi tab.'}
           />
-        </View>
-      )}
-    </View>
-  );
+        }
+      />
+    );
+
+  const detailActions = (id: string) => {
+    const item = restaurants.find((r) => r.id === id);
+    const brief = { id, name: item?.name ?? 'quán' };
+    return {
+      onAssignOwner: () => fromDetail(() => item && setAssignFor(item)),
+      onApprove: () => approveMutation.mutate(id),
+      onReject: () => fromDetail(() => openModeration(brief, 'reject')),
+      onSuspend: () => fromDetail(() => openModeration(brief, 'suspend')),
+      onResume: () => resumeMutation.mutate(id),
+      approving: approveMutation.isPending && approveMutation.variables === id,
+      resuming: resumeMutation.isPending && resumeMutation.variables === id,
+    };
+  };
 
   return (
     <View className="flex-1 bg-canvas-subtle">
       {isFocused && <StatusBar style="light" />}
       <TabHeader
-        title="Quản lý Quán ăn"
-        subtitle={data ? `${data.total} quán${filter !== 'all' ? ' phù hợp bộ lọc' : ' trên hệ thống'}` : undefined}
-        trailing={
-          <IconButton icon="add" variant="glass" accessibilityLabel="Thêm quán mới" onPress={() => setCreateOpen(true)} />
-        }
+        compact
+        title="Quán ăn"
+        subtitle={counts ? `${counts.all ?? 0} quán · ${counts.pending ?? 0} chờ duyệt` : undefined}
+        trailing={<IconButton icon="add" variant="glass" accessibilityLabel="Thêm quán mới" onPress={() => setCreateOpen(true)} />}
       >
-        <SearchBar
-          value={search}
-          onChangeText={setSearch}
-          onClear={() => setSearch('')}
-          placeholder="Tìm quán theo tên..."
-          className="h-search-lg rounded-full bg-surface px-4"
-        />
+        <ContentWidth>
+          <SearchBar
+            value={search}
+            onChangeText={setSearch}
+            onClear={() => setSearch('')}
+            placeholder="Tìm quán theo tên..."
+            className="h-search-lg rounded-full bg-surface px-4"
+          />
+        </ContentWidth>
       </TabHeader>
 
-      <View>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerClassName="gap-2 px-4 py-3">
-          {FILTERS.map((f) => (
-            <FilterChip
-              key={f.value}
-              label={f.label}
-              icon={f.value === 'unassigned' ? 'key-outline' : undefined}
-              selected={filter === f.value}
-              onPress={() => setFilter(f.value)}
-            />
-          ))}
-        </ScrollView>
-      </View>
-
-      {isLoading && !refreshing ? (
-        <LoadingSpinner message="Đang tải danh sách quán..." />
-      ) : isError ? (
-        <ErrorState onRetry={refetch} />
-      ) : (
-        <FlatList
-          data={restaurants}
-          keyExtractor={(item) => item.id}
-          renderItem={renderItem}
-          contentContainerClassName={`gap-3 px-4 pt-1 ${TAB_BAR_CLEARANCE}`}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[palette.brand['500']]} />}
-          ListEmptyComponent={
-            <EmptyState
-              icon="storefront-outline"
-              title={filter === 'unassigned' ? 'Mọi quán đều đã có chủ' : 'Không tìm thấy quán'}
-              description={
-                filter === 'unassigned'
-                  ? 'Không có quán nào cần gán người quản lý.'
-                  : 'Thử từ khoá khác hoặc đổi bộ lọc.'
-              }
-            />
-          }
+      <ContentWidth className="flex-1">
+        <TabStrip
+          items={TABS.map((t) => ({ key: t.value, label: t.label, count: counts?.[t.value], tone: t.tone }))}
+          value={filter}
+          onChange={(f) => {
+            setFilter(f);
+            setDetailId(null);
+          }}
         />
+        <View className="h-3" />
+
+        {wide ? (
+          <View className="flex-1 flex-row gap-4 pr-4">
+            <View className="w-[44%]">{list}</View>
+            <View className={cn('flex-1 pt-1', TAB_BAR_CLEARANCE)}>
+              {activeId ? (
+                <View className="flex-1 rounded-2xl bg-surface p-4 shadow-card">
+                  <RestaurantDetailPanel key={activeId} restaurantId={activeId} {...detailActions(activeId)} />
+                </View>
+              ) : (
+                <DetailPlaceholder icon="storefront-outline" text="Chọn một quán để xem chi tiết." />
+              )}
+            </View>
+          </View>
+        ) : (
+          list
+        )}
+      </ContentWidth>
+
+      {!wide && (
+        <BottomSheet visible={!!detailId} onClose={() => setDetailId(null)} title="Chi tiết quán">
+          {detailId ? <RestaurantDetailPanel key={detailId} restaurantId={detailId} {...detailActions(detailId)} /> : <View />}
+        </BottomSheet>
       )}
 
       <AssignOwnerSheet key={assignFor?.id ?? 'none'} restaurant={assignFor} onClose={() => setAssignFor(null)} />
 
-      <RestaurantDetailSheet
-        restaurantId={detailId}
-        onClose={() => setDetailId(null)}
-        onAssignOwner={() => {
-          const target = restaurants.find((r) => r.id === detailId) ?? null;
-          setDetailId(null);
-          setTimeout(() => setAssignFor(target), MODAL_SWAP_DELAY);
-        }}
-      />
-
-      <ConfirmDialog
-        visible={!!toggleFor}
-        title={toggleFor?.isOpen ? 'Tạm ngưng quán này?' : 'Mở lại quán này?'}
-        message={
-          toggleFor?.isOpen
-            ? `"${toggleFor?.name}" sẽ ngừng nhận đơn mới cho đến khi được mở lại.`
-            : `"${toggleFor?.name}" sẽ hoạt động và nhận đơn trở lại.`
-        }
-        confirmLabel={toggleFor?.isOpen ? 'Tạm ngưng' : 'Mở lại'}
-        destructive={toggleFor?.isOpen}
-        loading={toggleOpen.isPending}
-        onCancel={() => !toggleOpen.isPending && setToggleFor(null)}
-        onConfirm={() => toggleFor && toggleOpen.mutate(toggleFor.id)}
-      />
-
       <BottomSheet
-        visible={!!moderationModal}
-        onClose={() => !rejectOrSuspendMutation.isPending && setModerationModal(null)}
-        title={moderationModal?.mode === 'reject' ? 'Từ chối duyệt quán' : 'Tạm khoá quán ăn'}
+        visible={!!moderation}
+        onClose={() => !moderationMutation.isPending && setModeration(null)}
+        title={moderation?.mode === 'reject' ? 'Từ chối duyệt quán' : 'Tạm khoá quán ăn'}
         footer={
           <View className="pb-2">
             <Button
-              label={moderationModal?.mode === 'reject' ? 'Xác nhận từ chối' : 'Xác nhận tạm khoá'}
+              label={moderation?.mode === 'reject' ? 'Xác nhận từ chối' : 'Xác nhận tạm khoá'}
+              variant="danger"
               size="lg"
-              loading={rejectOrSuspendMutation.isPending}
+              loading={moderationMutation.isPending}
               onPress={() => {
-                if (!moderationModal) return;
+                if (!moderation) return;
                 if (moderationReason.trim().length < 3) {
                   toast('Vui lòng nhập lý do (ít nhất 3 ký tự)', 'error');
                   return;
                 }
-                rejectOrSuspendMutation.mutate({
-                  id: moderationModal.restaurant.id,
-                  mode: moderationModal.mode,
+                moderationMutation.mutate({
+                  id: moderation.restaurant.id,
+                  mode: moderation.mode,
                   reason: moderationReason.trim(),
                 });
               }}
@@ -419,9 +370,9 @@ export const AdminRestaurantsScreen: React.FC = () => {
       >
         <View className="gap-3 pb-4">
           <Text variant="body" tone="secondary">
-            {moderationModal?.mode === 'reject'
-              ? `Nhập lý do từ chối hồ sơ quán "${moderationModal?.restaurant.name}":`
-              : `Nhập lý do tạm khoá quán "${moderationModal?.restaurant.name}":`}
+            {moderation?.mode === 'reject'
+              ? `Nhập lý do từ chối hồ sơ quán "${moderation?.restaurant.name}". Chủ quán sẽ nhận được thông báo.`
+              : `Nhập lý do tạm khoá quán "${moderation?.restaurant.name}". Quán sẽ ngừng hiển thị với khách.`}
           </Text>
           <Input
             label="Lý do *"

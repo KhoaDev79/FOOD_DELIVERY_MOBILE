@@ -2,20 +2,22 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { useIsFocused } from '@react-navigation/native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { StatusBar } from 'expo-status-bar';
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useForm } from 'react-hook-form';
-import {
-  KeyboardAvoidingView,
-  Platform,
-  Pressable,
-  ScrollView,
-  View,
-} from 'react-native';
+import { Pressable, View } from 'react-native';
 import { z } from 'zod';
 import { authApi } from '../../api/auth';
+import {
+  AuthShell,
+  AuthSubmitButton,
+  AuthSwitchLink,
+  DemoAccount,
+  DevQuickLogin,
+  FormErrorBanner,
+} from '../../components/modules/auth/AuthHeader';
+import { AuthOrDivider, GoogleLoginResult, GoogleSignInButton } from '../../components/modules/auth/GoogleSignInButton';
+import { FormInput, Icon, Text, useToast } from '../../components/ui';
 import { leaveAuthScreens } from '../../navigation/authFlow';
-import { AuthHeader, FormErrorBanner } from '../../components/modules/auth/AuthHeader';
-import { Button, FormInput, Icon, IconName, Text, useToast } from '../../components/ui';
 import { useAuthStore } from '../../store/useAuthStore';
 import { palette } from '../../theme';
 import { AuthStackParamList } from '../../types/navigation';
@@ -29,39 +31,45 @@ type LoginFormData = z.infer<typeof loginSchema>;
 
 type Props = NativeStackScreenProps<AuthStackParamList, 'Login'>;
 
-// Chỉ phần hiển thị (nhãn, mô tả, biểu tượng, màu); tên đăng nhập giữ nguyên.
-const DEMO_ACCOUNTS: {
-  label: string;
-  hint: string;
-  username: string;
-  icon: IconName;
-  iconBg: string;
-  iconColor: string;
-}[] = [
-  { label: 'Khách', hint: 'Đặt món', username: 'customer', icon: 'bag-handle-outline', iconBg: 'bg-brand-50', iconColor: palette.brand['600'] },
-  { label: 'Quán', hint: 'Quản lý quán', username: 'owner', icon: 'storefront-outline', iconBg: 'bg-accent-50', iconColor: palette.accent['600'] },
-  { label: 'Tài xế', hint: 'Nhận đơn giao', username: 'driver', icon: 'bicycle-outline', iconBg: 'bg-info-soft', iconColor: palette.info.strong },
-  { label: 'Admin', hint: 'Toàn hệ thống', username: 'admin', icon: 'shield-checkmark-outline', iconBg: 'bg-violet-soft', iconColor: palette.violet.strong },
+// Chỉ phần hiển thị (nhãn, biểu tượng, màu); tên đăng nhập giữ nguyên.
+const DEMO_ACCOUNTS: DemoAccount[] = [
+  { label: 'Khách', username: 'customer', icon: 'bag-handle', box: 'bg-brand-50', color: palette.brand['600'] },
+  { label: 'Quán', username: 'owner', icon: 'storefront', box: 'bg-accent-50', color: palette.accent['600'] },
+  { label: 'Tài xế', username: 'driver', icon: 'bicycle', box: 'bg-info-soft', color: palette.info.strong },
+  { label: 'Admin', username: 'admin', icon: 'shield-checkmark', box: 'bg-violet-soft', color: palette.violet.strong },
 ];
 
-export const LoginScreen: React.FC<Props> = ({ navigation }) => {
+export const LoginScreen: React.FC<Props> = ({ navigation, route }) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Bị tạm khoá vì nhập sai nhiều lần (429) thì đổi tiêu đề để người dùng hiểu cần chờ, không phải gõ lại
+  const [isLocked, setIsLocked] = useState(false);
   const toast = useToast();
   const setAuth = useAuthStore((s) => s.setAuth);
   // Chỉ để đổi màu chữ thanh trạng thái khi màn này đang hiển thị (giống các màn khác).
   const isFocused = useIsFocused();
 
-  const {
-    control,
-    handleSubmit,
-    setValue,
-  } = useForm<LoginFormData>({
+  const prefillUsername = route.params?.prefillUsername;
+  const { control, handleSubmit, setValue, getValues } = useForm<LoginFormData>({
     resolver: zodResolver(loginSchema),
-    defaultValues: { username: '', password: '' },
+    defaultValues: { username: prefillUsername ?? '', password: '' },
   });
 
+  // Quay lại từ "Quên mật khẩu" (màn này vẫn đang mở bên dưới): điền sẵn tên đăng nhập, xoá mật khẩu cũ
+  useEffect(() => {
+    if (!prefillUsername) return;
+    setValue('username', prefillUsername);
+    setValue('password', '');
+  }, [prefillUsername, setValue]);
+
+  const openForgotPassword = () => {
+    // Đang gõ email ở ô đăng nhập thì mang sang luôn, đỡ phải gõ lại
+    const typed = getValues('username').trim();
+    navigation.navigate('ForgotPassword', typed.includes('@') ? { email: typed } : undefined);
+  };
+
   const onSubmit = async (data: LoginFormData) => {
+    if (loading) return;
     try {
       setLoading(true);
       setError(null);
@@ -76,8 +84,9 @@ export const LoginScreen: React.FC<Props> = ({ navigation }) => {
       const errorMsg =
         err.response?.data?.message ||
         (err.message === 'Network Error'
-          ? 'Không thể kết nối đến máy chủ backend (Network Error). Hãy kiểm tra Backend đang bật.'
+          ? 'Không kết nối được máy chủ. Vui lòng kiểm tra mạng và thử lại.'
           : err.message || 'Tên đăng nhập hoặc mật khẩu không chính xác');
+      setIsLocked(err.response?.status === 429);
       setError(Array.isArray(errorMsg) ? errorMsg.join('\n') : errorMsg);
     } finally {
       setLoading(false);
@@ -87,115 +96,102 @@ export const LoginScreen: React.FC<Props> = ({ navigation }) => {
   const handleQuickLogin = (username: string) => {
     setValue('username', username);
     setValue('password', 'Password123!');
-    onSubmit({ username, password: 'Password123!' });
+    void onSubmit({ username, password: 'Password123!' });
+  };
+
+  const handleGoogleSuccess = async (res: GoogleLoginResult) => {
+    setError(null);
+    await setAuth(res.user, res.accessToken, res.refreshToken);
+    // Khách chưa có SĐT: AppNavigator tự mở màn "Hoàn tất hồ sơ", không điều hướng ở đây
+    if (res.user.role === 'CUSTOMER' && !res.user.phone) return;
+    toast(`Đăng nhập thành công! Chào mừng ${res.user.fullName || 'bạn'}.`, 'success');
+    if (res.user.role !== 'CUSTOMER') return;
+    leaveAuthScreens(navigation as any);
   };
 
   return (
-    <KeyboardAvoidingView
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      className="flex-1 bg-surface"
-    >
+    <>
       {isFocused && <StatusBar style="light" />}
-
-      <ScrollView
-        className="flex-1 bg-surface"
-        contentContainerClassName="flex-grow"
-        keyboardShouldPersistTaps="handled"
-        bounces={false}
+      <AuthShell
+        title="Chào mừng trở lại"
+        subtitle="Đăng nhập để đặt món ngon quanh bạn"
+        onBack={navigation.canGoBack() ? () => navigation.goBack() : undefined}
+        footer={
+          <View className="gap-5">
+            <AuthSwitchLink
+              question="Chưa có tài khoản?"
+              action="Đăng ký ngay"
+              onPress={() => navigation.replace('Register')}
+            />
+            {/* Dùng thử nhanh: chỉ hiện ở bản phát triển (__DEV__), bản phát hành sẽ ẩn */}
+            {__DEV__ && <DevQuickLogin accounts={DEMO_ACCOUNTS} disabled={loading} onPick={handleQuickLogin} />}
+          </View>
+        }
       >
-        <AuthHeader
-          title="Chào mừng trở lại 👋"
-          subtitle="Đăng nhập để đặt món ngon quanh bạn"
-          onBack={navigation.canGoBack() ? () => navigation.goBack() : undefined}
-        />
+        <View className="gap-5">
+          {!!error && <FormErrorBanner title={isLocked ? 'Tạm khoá đăng nhập' : 'Đăng nhập thất bại'} message={error} />}
 
-        {/* Khung trắng bo góc lớn chứa form */}
-        <View className="-mt-7 flex-1 rounded-t-[32px] bg-surface px-6 pb-8 pt-7">
-          <View className="gap-4">
-            {!!error && <FormErrorBanner title="Đăng nhập thất bại" message={error} />}
+          <FormInput
+            variant="outlined"
+            control={control}
+            name="username"
+            label="Tên đăng nhập hoặc email"
+            placeholder="Nhập tên đăng nhập hoặc email"
+            autoCapitalize="none"
+            autoCorrect={false}
+            autoComplete="username"
+            textContentType="username"
+            returnKeyType="next"
+            leftIcon="person-outline"
+          />
 
-            <FormInput
-              control={control}
-              name="username"
-              label="Tên đăng nhập hoặc email"
-              placeholder="VD: customer hoặc ban@gmail.com"
-              autoCapitalize="none"
-              autoCorrect={false}
-              autoComplete="username"
-              textContentType="username"
-              leftIcon="person-outline"
-            />
+          <FormInput
+            variant="outlined"
+            control={control}
+            name="password"
+            label="Mật khẩu"
+            placeholder="Nhập mật khẩu"
+            password
+            autoComplete="password"
+            textContentType="password"
+            returnKeyType="go"
+            onSubmitEditing={() => handleSubmit(onSubmit)()}
+            leftIcon="lock-closed-outline"
+          />
 
-            <FormInput
-              control={control}
-              name="password"
-              label="Mật khẩu"
-              placeholder="••••••••"
-              password
-              leftIcon="lock-closed-outline"
-            />
+          <Pressable
+            accessibilityRole="link"
+            onPress={openForgotPassword}
+            hitSlop={8}
+            className="-my-2 min-h-touch justify-center self-end active:opacity-70"
+          >
+            <Text variant="body" weight="semibold" tone="brand">
+              Quên mật khẩu?
+            </Text>
+          </Pressable>
 
-            <Button
-              label="Đăng nhập"
-              rightIcon="arrow-forward"
-              onPress={() => handleSubmit(onSubmit)()}
-              loading={loading}
-              variant="primary"
-              size="lg"
-              className="mt-2 rounded-full shadow-glow"
-            />
+          <View className="-mt-2">
+            <AuthSubmitButton label="Đăng nhập" loading={loading} onPress={() => handleSubmit(onSubmit)()} />
           </View>
 
-          {/* Dùng thử nhanh: chỉ hiện ở bản phát triển (__DEV__), bản phát hành sẽ ẩn */}
-          {__DEV__ && (
-            <View className="mt-7 gap-3">
-              <View className="flex-row items-center gap-3">
-                <View className="h-px flex-1 bg-line" />
-                <Text variant="caption" weight="medium" tone="muted">
-                  Dùng thử nhanh
-                </Text>
-                <View className="h-px flex-1 bg-line" />
-              </View>
-              <View className="flex-row gap-2">
-                {DEMO_ACCOUNTS.map((acc) => (
-                  <Pressable
-                    key={acc.username}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Đăng nhập nhanh bằng tài khoản ${acc.label}`}
-                    accessibilityState={{ disabled: loading }}
-                    className="flex-1 items-center gap-1.5 rounded-2xl border border-line-subtle bg-surface py-3 active:bg-canvas-subtle"
-                    onPress={() => handleQuickLogin(acc.username)}
-                    disabled={loading}
-                  >
-                    <View className={`h-10 w-10 items-center justify-center rounded-full ${acc.iconBg}`}>
-                      <Icon name={acc.icon} size={20} color={acc.iconColor} />
-                    </View>
-                    <Text variant="micro" weight="semibold" numberOfLines={1}>
-                      {acc.label}
-                    </Text>
-                  </Pressable>
-                ))}
-              </View>
-            </View>
-          )}
+          <AuthOrDivider label="hoặc tiếp tục với" />
+          <GoogleSignInButton
+            disabled={loading}
+            onSuccess={handleGoogleSuccess}
+            onError={(message) => {
+              setIsLocked(false);
+              setError(message);
+            }}
+          />
 
-          <View className="mt-auto flex-row items-center justify-center pt-8">
-            <Text variant="body" tone="secondary">
-              Chưa có tài khoản?{' '}
+          <View className="flex-row items-center justify-center gap-1.5">
+            <Icon name="shield-checkmark-outline" size="sm" tone="muted" />
+            <Text variant="caption" weight="regular" tone="muted">
+              Thông tin đăng nhập được mã hoá an toàn
             </Text>
-            <Pressable
-              accessibilityRole="link"
-              onPress={() => navigation.replace('Register')}
-              hitSlop={12}
-              className="min-h-touch justify-center"
-            >
-              <Text variant="body" weight="bold" tone="brand">
-                Đăng ký ngay
-              </Text>
-            </Pressable>
           </View>
         </View>
-      </ScrollView>
-    </KeyboardAvoidingView>
+      </AuthShell>
+    </>
   );
 };

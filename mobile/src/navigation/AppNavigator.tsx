@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useFavoritesSync } from '../hooks/useFavorites';
 import { usePushNotifications } from '../hooks/usePushNotifications';
+import { CompleteProfileScreen } from '../screens/auth/CompleteProfileScreen';
 import { ZomZomSplashScreen } from '../screens/intro/ZomZomSplashScreen';
 import { useAuthStore } from '../store/useAuthStore';
 import { AdminTabNavigator } from './AdminTabNavigator';
@@ -38,6 +39,8 @@ export const AppNavigator: React.FC = () => {
         return <AdminTabNavigator />;
       case 'CUSTOMER':
       default:
+        // Khách chưa có SĐT (thường là vừa đăng nhập Google): bắt buộc hoàn tất hồ sơ trước khi vào app
+        if (user && !user.phone) return <CompleteProfileScreen />;
         return <RootStack />;
     }
   }

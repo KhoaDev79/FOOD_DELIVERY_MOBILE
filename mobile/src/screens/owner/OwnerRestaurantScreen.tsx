@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { StatusBar } from 'expo-status-bar';
 import * as ImagePicker from 'expo-image-picker';
 import React, { useEffect, useRef, useState } from 'react';
-import { Pressable, ScrollView, View } from 'react-native';
+import { Pressable, ScrollView, Switch, View } from 'react-native';
 import { restaurantsApi } from '../../api/restaurants';
 import {
   AppImage,
@@ -28,8 +28,11 @@ import {
 } from '../../components/ui';
 import { OwnerRestaurantSelector } from '../../components/modules/owner/OwnerRestaurantSelector';
 import { StoreStatusCard } from '../../components/modules/owner/OwnerKit';
+import { OwnerScheduleSheet } from '../../components/modules/owner/OwnerScheduleSheet';
 import { Money, NoticeCard } from '../../components/modules/partner/PartnerKit';
 import { useOwnerRestaurants } from '../../hooks/useOwnerRestaurants';
+import { useOwnerSettingsStore } from '../../store/useOwnerSettingsStore';
+import { playChimeOnce } from '../../utils/orderAlertSound';
 import { useAddressDraftStore } from '../../store/useAddressDraftStore';
 import { useAuthStore } from '../../store/useAuthStore';
 import { Restaurant } from '../../types/api';
@@ -54,6 +57,8 @@ export const OwnerRestaurantScreen: React.FC = () => {
   const logout = useAuthStore((s) => s.logout);
 
   const [editVisible, setEditVisible] = useState(false);
+  const [scheduleSheetVisible, setScheduleSheetVisible] = useState(false);
+  const { soundEnabled, vibrationEnabled, setSoundEnabled, setVibrationEnabled } = useOwnerSettingsStore();
   const [restName, setRestName] = useState('');
   const [restAddress, setRestAddress] = useState('');
   const [restPhone, setRestPhone] = useState('');
@@ -99,6 +104,28 @@ export const OwnerRestaurantScreen: React.FC = () => {
       toast(err.response?.data?.message || 'Không thể đổi trạng thái quán', 'error');
     },
     onSettled: () => queryClient.invalidateQueries({ queryKey: ['owner', 'restaurants'] }),
+  });
+
+  const pauseMutation = useMutation({
+    mutationFn: (pauseMode: '30m' | '1h' | '2h' | 'today' | 'cancel') =>
+      restaurantsApi.updateRestaurant(restaurant!.id, { pauseMode }),
+    onSuccess: (_d, mode) => {
+      queryClient.invalidateQueries({ queryKey: ['owner', 'restaurants'] });
+      if (mode === 'cancel') {
+        toast('Đã mở lại nhận đơn bình thường.', 'success');
+      } else {
+        const labels: Record<string, string> = {
+          '30m': '30 phút',
+          '1h': '1 giờ',
+          '2h': '2 giờ',
+          today: 'đến hết hôm nay',
+        };
+        toast(`Quán đã tạm nghỉ ${labels[mode] || ''}. Hết giờ sẽ tự mở lại.`, 'success');
+      }
+    },
+    onError: (err: any) => {
+      toast(err.response?.data?.message || 'Không thể đổi trạng thái tạm nghỉ', 'error');
+    },
   });
 
   const updateRestaurantMutation = useMutation({
@@ -296,11 +323,12 @@ export const OwnerRestaurantScreen: React.FC = () => {
                 />
               )}
 
-              {/* Trạng thái thật của quán + công tắc nhận đơn */}
+              {/* Trạng thái thật của quán + công tắc nhận đơn + hẹn giờ tạm nghỉ */}
               <StoreStatusCard
                 restaurant={restaurant}
-                busy={toggleOpenMutation.isPending}
+                busy={toggleOpenMutation.isPending || pauseMutation.isPending}
                 onToggle={(val) => toggleOpenMutation.mutate(val)}
+                onSetPause={(mode) => pauseMutation.mutate(mode)}
               />
 
               {/* Thao tác nhanh */}
@@ -311,7 +339,7 @@ export const OwnerRestaurantScreen: React.FC = () => {
                   tone="brand"
                   title="Giờ mở cửa"
                   value={`${restaurant.openTime || '07:00'} – ${restaurant.closeTime || '22:00'}`}
-                  onPress={openEdit}
+                  onPress={() => setScheduleSheetVisible(true)}
                 />
                 <QuickTile
                   icon="navigate"
@@ -336,6 +364,16 @@ export const OwnerRestaurantScreen: React.FC = () => {
                   title="Thống kê"
                   value="Doanh thu, món bán chạy"
                   onPress={() => navigation.navigate('OwnerStats')}
+                />
+                <QuickTile
+                  icon="pricetags"
+                  box="bg-danger-soft"
+                  tone="danger"
+                  title="Mã giảm giá"
+                  value="Tạo ưu đãi thu hút khách"
+                  onPress={() =>
+                    navigation.navigate('OwnerVouchers', { restaurantId: restaurant.id, restaurantName: restaurant.name })
+                  }
                 />
               </View>
 
@@ -432,6 +470,60 @@ export const OwnerRestaurantScreen: React.FC = () => {
               description="Vui lòng liên hệ Quản trị viên để đăng ký mở quán trên hệ thống."
             />
           )}
+
+          {/* Cài đặt âm thanh & chuông báo đơn mới */}
+          <Group title="Âm thanh & Chuông báo đơn">
+            <View className="py-2.5 gap-3">
+              <View className="flex-row items-center justify-between">
+                <View className="flex-1 pr-3">
+                  <Text variant="body" weight="medium">
+                    Chuông báo có đơn mới
+                  </Text>
+                  <Text variant="caption" tone="secondary">
+                    Phát tiếng chuông ting ting lặp lại khi có khách đặt đơn mới
+                  </Text>
+                </View>
+                <Switch
+                  value={soundEnabled}
+                  onValueChange={(val) => void setSoundEnabled(val)}
+                  trackColor={{ false: '#d1d5db', true: '#FF7A30' }}
+                />
+              </View>
+
+              <View className="h-hairline bg-line" />
+
+              <View className="flex-row items-center justify-between">
+                <View className="flex-1 pr-3">
+                  <Text variant="body" weight="medium">
+                    Rung khi có đơn mới
+                  </Text>
+                  <Text variant="caption" tone="secondary">
+                    Rung máy theo chu kỳ giúp nhận biết khi đang trong bếp ồn ào
+                  </Text>
+                </View>
+                <Switch
+                  value={vibrationEnabled}
+                  onValueChange={(val) => void setVibrationEnabled(val)}
+                  trackColor={{ false: '#d1d5db', true: '#FF7A30' }}
+                />
+              </View>
+
+              <View className="h-hairline bg-line" />
+
+              <View className="flex-row items-center justify-between pt-1">
+                <Text variant="caption" tone="secondary">
+                  Nghe thử âm lượng chuông báo
+                </Text>
+                <Button
+                  label="Thử chuông"
+                  size="sm"
+                  variant="outline"
+                  leftIcon="volume-high-outline"
+                  onPress={() => void playChimeOnce()}
+                />
+              </View>
+            </View>
+          </Group>
 
           {/* Tài khoản chủ quán */}
           <Group title="Tài khoản">
@@ -559,6 +651,16 @@ export const OwnerRestaurantScreen: React.FC = () => {
                 Quán mở qua đêm, đóng cửa lúc {closeTime} ngày hôm sau.
               </Text>
             )}
+            <Button
+              variant="outline"
+              size="sm"
+              label="Cài đặt lịch 7 ngày & Ngày nghỉ lễ/Tết"
+              onPress={() => {
+                setEditVisible(false);
+                setScheduleSheetVisible(true);
+              }}
+              className="mt-1"
+            />
           </View>
 
           {/* Bán kính giao hàng */}
@@ -589,6 +691,14 @@ export const OwnerRestaurantScreen: React.FC = () => {
           </View>
         </ScrollView>
       </BottomSheet>
+
+      {restaurant && (
+        <OwnerScheduleSheet
+          visible={scheduleSheetVisible}
+          onClose={() => setScheduleSheetVisible(false)}
+          restaurantId={restaurant.id}
+        />
+      )}
 
     </View>
   );

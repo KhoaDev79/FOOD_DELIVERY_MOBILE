@@ -1,3 +1,6 @@
+import { NotificationBell } from '../../components/modules/notifications/NotificationBell';
+import { mapsApi } from '../../api/maps';
+import { isCoordinateAddressString } from '../../store/useAddressDraftStore';
 import { useIsFocused, useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import * as Location from 'expo-location';
@@ -11,10 +14,13 @@ import {
   RefreshControl,
   ScrollView,
   View,
+  Platform,
 } from 'react-native';
 import Animated, { FadeIn, FadeOut, ReduceMotion } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { BannerCarousel, BannerSkeleton } from '../../components/modules/home/BannerCarousel';
+import { FeaturedVoucherStrip } from '../../components/modules/voucher/FeaturedVoucherStrip';
+import { useAuthStore } from '../../store/useAuthStore';
 import { DishCard, DishTile } from '../../components/modules/home/DishCard';
 import { FeaturedCarousel } from '../../components/modules/home/FeaturedCarousel';
 import { HomePromoModal } from '../../components/modules/home/HomePromoModal';
@@ -171,6 +177,14 @@ export const HomeScreen: React.FC = () => {
     async function resolveCurrentAddress() {
       if (!coords) return;
       try {
+        // Ưu tiên backend (Goong): chạy được cả trên web. expo-location trên web dùng API Google đã ngừng (SDK 49).
+        const data = await mapsApi.reverseGeocode(coords.latitude, coords.longitude).catch(() => null);
+        const firstPart = data?.addressLine?.split(',')[0]?.trim();
+        if (firstPart && !isCoordinateAddressString(data!.addressLine)) {
+          if (isMounted) setStreetName(firstPart);
+          return;
+        }
+        if (Platform.OS === 'web') return;
         const results = await Location.reverseGeocodeAsync({
           latitude: coords.latitude,
           longitude: coords.longitude,
@@ -369,27 +383,30 @@ export const HomeScreen: React.FC = () => {
       <Gradient preset="header">
         <SafeAreaView edges={['top']}>
           <View className="gap-3 px-4 pb-4 pt-2">
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={`Giao đến ${displayAddress}. Đổi địa chỉ`}
-              onPress={openAddresses}
-              className="min-h-touch flex-row items-center gap-2 active:opacity-70"
-            >
-              <View className="h-10 w-10 items-center justify-center rounded-full bg-scrim">
-                <Icon name="location" size="md" tone="inverse" />
-              </View>
-              <View className="flex-1">
-                <Text variant="caption" weight="regular" tone="inverse" className="opacity-80">
-                  Giao đến
-                </Text>
-                <View className="flex-row items-center gap-1">
-                  <Text variant="headline" tone="inverse" numberOfLines={1} className="flex-shrink">
-                    {displayAddress}
-                  </Text>
-                  <Icon name="chevron-down" size="md" tone="inverse" />
+            <View className="min-h-touch flex-row items-center gap-2">
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={`Giao đến ${displayAddress}. Đổi địa chỉ`}
+                onPress={openAddresses}
+                className="min-h-touch flex-1 flex-row items-center gap-2 active:opacity-70"
+              >
+                <View className="h-10 w-10 items-center justify-center rounded-full bg-scrim">
+                  <Icon name="location" size="md" tone="inverse" />
                 </View>
-              </View>
-            </Pressable>
+                <View className="flex-1">
+                  <Text variant="caption" weight="regular" tone="inverse" className="opacity-80">
+                    Giao đến
+                  </Text>
+                  <View className="flex-row items-center gap-1">
+                    <Text variant="headline" tone="inverse" numberOfLines={1} className="flex-shrink">
+                      {displayAddress}
+                    </Text>
+                    <Icon name="chevron-down" size="md" tone="inverse" />
+                  </View>
+                </View>
+              </Pressable>
+              <NotificationBell tone="inverse" withBackground />
+            </View>
             <SearchBar
               size="lg"
               placeholder="Bạn đang tìm kiếm món gì?"
@@ -452,6 +469,13 @@ export const HomeScreen: React.FC = () => {
               />
             </View>
           ) : null}
+
+          {/* Mã ưu đãi toàn sàn đang chạy */}
+          <FeaturedVoucherStrip
+            onOpenWallet={() =>
+              navigation.navigate(useAuthStore.getState().isAuthenticated ? 'VoucherWallet' : 'Login')
+            }
+          />
 
           {/* Khối món ăn (ảnh mẫu 3) – dữ liệu từ GET /restaurants/nearby/dishes */}
           {dishesQuery.isLoading ? (

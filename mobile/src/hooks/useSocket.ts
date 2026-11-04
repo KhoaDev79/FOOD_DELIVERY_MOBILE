@@ -102,7 +102,8 @@ export function useSocket() {
         notify();
         const msg = err?.message || '';
         if (msg.toLowerCase().includes('unauthorized') || msg.toLowerCase().includes('jwt')) {
-          const newToken = await refreshAuthTokens();
+          // refreshAuthTokens không ném lỗi; thêm catch phòng khi lỗi bất ngờ để không thành "Uncaught"
+          const newToken = await refreshAuthTokens().catch(() => null);
           if (newToken && socketInstance === created) {
             created.connect();
           }
@@ -116,7 +117,8 @@ export function useSocket() {
           return;
         }
         if (msg.toLowerCase().includes('unauthorized')) {
-          const newToken = await refreshAuthTokens();
+          // refreshAuthTokens không ném lỗi; thêm catch phòng khi lỗi bất ngờ để không thành "Uncaught"
+          const newToken = await refreshAuthTokens().catch(() => null);
           if (newToken && socketInstance === created) {
             created.connect();
           }
@@ -140,11 +142,17 @@ export function useSocket() {
     currentSocket.on('order:driver_assigned', handleOrderEvent);
     currentSocket.on('order:payment', handleOrderEvent);
 
+    const handleNotificationEvent = () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.notifications.all });
+    };
+    currentSocket.on('notification:new', handleNotificationEvent);
+
     return () => {
       currentSocket.off('order:created', handleOrderEvent);
       currentSocket.off('order:status', handleOrderEvent);
       currentSocket.off('order:driver_assigned', handleOrderEvent);
       currentSocket.off('order:payment', handleOrderEvent);
+      currentSocket.off('notification:new', handleNotificationEvent);
     };
   }, [accessToken, userId, queryClient]);
 
@@ -167,3 +175,49 @@ export function useSocket() {
     leaveOrder,
   };
 }
+
+/** Số màn đang theo dõi từng quán (màn quán + giỏ có thể cùng theo dõi một quán). */
+const watchedRestaurants = new Map<string, number>();
+
+interface MenuStockEvent {
+  restaurantId: string;
+  items: { id: string; isAvailable: boolean; soldOutUntil: string | null }[];
+}
+
+/**
+ * Nhận ngay khi quán báo hết món / mở bán lại (chỉ khi đã đăng nhập, vì socket cần đăng nhập).
+ * Làm mới chi tiết quán và kết quả kiểm tra giỏ; khách chưa đăng nhập vẫn được cập nhật khi mở lại màn.
+ */
+export function useRestaurantStockLive(restaurantId?: string | null) {
+  const { socket } = useSocket();
+  const queryClient = useQueryClient();
+
+  useEffect(() => {
+    if (!socket || !restaurantId) return;
+    const watch = () => socket.emit('restaurant:watch', { restaurantId });
+    watchedRestaurants.set(restaurantId, (watchedRestaurants.get(restaurantId) ?? 0) + 1);
+    if (socket.connected) watch();
+    // Kết nối lại (mất mạng, đổi token) thì vào lại phòng
+    socket.on('connect', watch);
+
+    const onStock = (data: MenuStockEvent) => {
+      if (data?.restaurantId !== restaurantId) return;
+      queryClient.invalidateQueries({ queryKey: queryKeys.restaurants.detail(restaurantId) });
+      queryClient.invalidateQueries({ queryKey: ['cart-check'] });
+    };
+    socket.on('menu:stock', onStock);
+
+    return () => {
+      socket.off('connect', watch);
+      socket.off('menu:stock', onStock);
+      const left = (watchedRestaurants.get(restaurantId) ?? 1) - 1;
+      if (left <= 0) {
+        watchedRestaurants.delete(restaurantId);
+        socket.emit('restaurant:unwatch', { restaurantId });
+      } else {
+        watchedRestaurants.set(restaurantId, left);
+      }
+    };
+  }, [socket, restaurantId, queryClient]);
+}
+

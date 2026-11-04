@@ -36,6 +36,7 @@ import { useOwnerRestaurants } from '../../hooks/useOwnerRestaurants';
 import { palette } from '../../theme';
 import { MenuItem } from '../../types/api';
 import { formatVND } from '../../utils/format';
+import { formatRestockTime, nextStockResetAt, StockStatus, stockStatusOf } from '../../utils/menuStock';
 import { DISCOUNT_OPTIONS, discountPercent, discountPriceFor, effectiveBasePrice } from '../../utils/menuPricing';
 
 const MIN_PRICE = 1000;
@@ -58,6 +59,8 @@ export const OwnerMenuScreen: React.FC = () => {
 
   // Bảng thêm/sửa món
   const [sheet, setSheet] = useState<SheetMode>(null);
+  // Món đang chọn kiểu "hết món" (bảng 2 lựa chọn: hết hôm nay / hết đến khi bật lại)
+  const [stockItem, setStockItem] = useState<MenuItem | null>(null);
   const [name, setName] = useState('');
   const [price, setPrice] = useState(''); // chỉ chữ số
   const [description, setDescription] = useState('');
@@ -66,6 +69,9 @@ export const OwnerMenuScreen: React.FC = () => {
   const [showImageUrl, setShowImageUrl] = useState(false);
   const [discount, setDiscount] = useState(0); // % giảm giá: 0, 5, 7, 10, 15, 20
   const [available, setAvailable] = useState(true);
+  const [isTimedDish, setIsTimedDish] = useState(false);
+  const [availableFrom, setAvailableFrom] = useState('');
+  const [availableTo, setAvailableTo] = useState('');
   const [optionsDraft, setOptionsDraft] = useState<OptionsDraft>(EMPTY_OPTIONS_DRAFT);
   const [formError, setFormError] = useState<{ name?: string; price?: string; submit?: string }>({});
 
@@ -129,17 +135,19 @@ export const OwnerMenuScreen: React.FC = () => {
     },
   });
 
-  // Bật/tắt "còn món": đổi ngay trên màn hình, lỗi thì trả lại như cũ
-  const toggleAvailableMutation = useMutation({
-    mutationFn: ({ id, isAvailable }: { id: string; isAvailable: boolean }) =>
-      restaurantsApi.updateMenuItem(id, { isAvailable }),
-    onMutate: async ({ id, isAvailable }) => {
+  // Đổi tình trạng món (còn / hết hôm nay / hết đến khi bật lại): đổi ngay trên màn hình, lỗi thì trả lại như cũ
+  const stockMutation = useMutation({
+    mutationFn: ({ id, status }: { id: string; status: StockStatus }) => restaurantsApi.setMenuItemStock(id, status),
+    onMutate: async ({ id, status }) => {
+      const isAvailable = status === 'AVAILABLE';
+      const soldOutUntil = status === 'SOLD_OUT_TODAY' ? nextStockResetAt().toISOString() : null;
       const key = ['owner', 'menu', restaurant?.id];
       await queryClient.cancelQueries({ queryKey: key });
       const previous = queryClient.getQueryData(key);
       queryClient.setQueryData(key, (old: typeof detail) => {
         if (!old) return old;
-        const patch = (items?: MenuItem[]) => items?.map((m) => (m.id === id ? { ...m, isAvailable } : m));
+        const patch = (items?: MenuItem[]) =>
+          items?.map((m) => (m.id === id ? { ...m, isAvailable, soldOutUntil } : m));
         return {
           ...old,
           categories: old.categories?.map((c) => ({ ...c, menuItems: patch(c.menuItems) ?? [] })),
@@ -148,12 +156,27 @@ export const OwnerMenuScreen: React.FC = () => {
       });
       return { previous };
     },
+    onSuccess: (_data, { status }) => {
+      toast(
+        status === 'AVAILABLE'
+          ? 'Đã mở bán lại món.'
+          : status === 'SOLD_OUT_TODAY'
+            ? `Đã báo hết hôm nay. Món tự mở bán lại ${formatRestockTime(nextStockResetAt())}.`
+            : 'Đã báo hết món. Bấm "Hết món" để mở bán lại khi có hàng.',
+        'success',
+      );
+    },
     onError: (err: any, _vars, ctx) => {
       if (ctx?.previous) queryClient.setQueryData(['owner', 'menu', restaurant?.id], ctx.previous);
       toast(err.response?.data?.message || 'Không thể đổi trạng thái món', 'error');
     },
     onSettled: () => refetch(),
   });
+
+  const setStock = (id: string, status: StockStatus) => {
+    setStockItem(null);
+    stockMutation.mutate({ id, status });
+  };
 
   const archiveItemMutation = useMutation({
     mutationFn: (id: string) => restaurantsApi.archiveMenuItem(id),
@@ -190,6 +213,9 @@ export const OwnerMenuScreen: React.FC = () => {
     setShowImageUrl(false);
     setDiscount(0);
     setAvailable(true);
+    setIsTimedDish(false);
+    setAvailableFrom('');
+    setAvailableTo('');
     setOptionsDraft(EMPTY_OPTIONS_DRAFT);
     setFormError({});
     setSheet({ kind: 'create' });
@@ -206,6 +232,10 @@ export const OwnerMenuScreen: React.FC = () => {
     const current = discountPercent(item);
     setDiscount(DISCOUNT_OPTIONS.reduce((best, p) => (Math.abs(p - current) < Math.abs(best - current) ? p : best), 0));
     setAvailable(item.isAvailable);
+    const hasTime = Boolean(item.availableFrom && item.availableTo);
+    setIsTimedDish(hasTime);
+    setAvailableFrom(item.availableFrom || '');
+    setAvailableTo(item.availableTo || '');
     setOptionsDraft(draftFromOptions(item.options));
     setFormError({});
     setSheet({ kind: 'edit', item });
@@ -241,6 +271,16 @@ export const OwnerMenuScreen: React.FC = () => {
     if (!price || isNaN(numPrice)) errors.price = 'Vui lòng nhập giá bán';
     else if (numPrice < MIN_PRICE) errors.price = 'Giá tối thiểu là 1.000 ₫';
     else if (numPrice > MAX_PRICE) errors.price = 'Giá tối đa là 10.000.000 ₫';
+    const TIME_REGEX = /^([01]\d|2[0-3]):[0-5]\d$/;
+    if (isTimedDish) {
+      const from = availableFrom.trim();
+      const to = availableTo.trim();
+      if (!from || !to) {
+        errors.submit = 'Vui lòng nhập đầy đủ giờ mở bán (bắt đầu và kết thúc)';
+      } else if (!TIME_REGEX.test(from) || !TIME_REGEX.test(to)) {
+        errors.submit = 'Khung giờ bán phải đúng định dạng HH:mm (VD: 06:00, 10:30)';
+      }
+    }
     const optionsError = validateDraft(optionsDraft);
     if (optionsError) errors.submit = optionsError;
     setFormError(errors);
@@ -259,6 +299,8 @@ export const OwnerMenuScreen: React.FC = () => {
           imageUrl: imageUrl.trim(),
           discountPercent: discount,
           isAvailable: available,
+          availableFrom: isTimedDish ? availableFrom.trim() : null,
+          availableTo: isTimedDish ? availableTo.trim() : null,
           options,
         },
       });
@@ -271,6 +313,8 @@ export const OwnerMenuScreen: React.FC = () => {
         imageUrl: imageUrl.trim() || undefined,
         discountPercent: discount,
         isAvailable: available,
+        availableFrom: isTimedDish ? availableFrom.trim() : undefined,
+        availableTo: isTimedDish ? availableTo.trim() : undefined,
         ...(options ? { options } : {}),
       });
     }
@@ -469,7 +513,8 @@ export const OwnerMenuScreen: React.FC = () => {
                     key={item.id}
                     item={item}
                     onEdit={() => openEdit(item)}
-                    onToggle={(val) => toggleAvailableMutation.mutate({ id: item.id, isAvailable: val })}
+                    // Đang bán → hỏi kiểu hết món; đang hết → mở bán lại ngay
+                    onStockPress={() => (item.isAvailable ? setStockItem(item) : setStock(item.id, 'AVAILABLE'))}
                   />
                 ))
               )}
@@ -692,8 +737,138 @@ export const OwnerMenuScreen: React.FC = () => {
               thumbColor={palette.surface}
             />
           </View>
+          {/* Khung giờ mở bán (Mục 4.4) */}
+          <View className="gap-2.5 rounded-2xl border border-line-subtle bg-surface p-3.5">
+            <View className="flex-row items-center gap-3">
+              <View className={cn('h-10 w-10 items-center justify-center rounded-full', isTimedDish ? 'bg-brand-50' : 'bg-canvas-subtle')}>
+                <Icon name="time-outline" size="md" tone={isTimedDish ? 'brand' : 'muted'} />
+              </View>
+              <View className="flex-1">
+                <Text variant="body" weight="semibold">
+                  Khung giờ mở bán
+                </Text>
+                <Text variant="micro" weight="regular" tone="muted">
+                  {isTimedDish ? 'Chỉ cho khách đặt trong khung giờ cài đặt' : 'Mở bán cả ngày trong giờ quán mở'}
+                </Text>
+              </View>
+              <Switch
+                accessibilityLabel={isTimedDish ? 'Tắt bán theo khung giờ' : 'Bật bán theo khung giờ'}
+                value={isTimedDish}
+                onValueChange={(val) => {
+                  setIsTimedDish(val);
+                  if (val && !availableFrom && !availableTo) {
+                    setAvailableFrom('06:00');
+                    setAvailableTo('10:30');
+                  }
+                }}
+                trackColor={{ false: palette.line.DEFAULT, true: palette.brand['500'] }}
+                thumbColor={palette.surface}
+              />
+            </View>
+
+            {isTimedDish && (
+              <View className="gap-3 border-t border-line-subtle pt-3">
+                <View className="gap-1.5">
+                  <Text variant="caption" weight="medium" tone="secondary">
+                    Chọn nhanh khung giờ phổ biến
+                  </Text>
+                  <View className="flex-row flex-wrap gap-2">
+                    {[
+                      { label: 'Sáng (06:00 – 10:30)', from: '06:00', to: '10:30' },
+                      { label: 'Trưa (10:30 – 14:00)', from: '10:30', to: '14:00' },
+                      { label: 'Tối (17:00 – 22:00)', from: '17:00', to: '22:00' },
+                      { label: 'Đêm (22:00 – 02:00)', from: '22:00', to: '02:00' },
+                    ].map((preset) => {
+                      const active = availableFrom === preset.from && availableTo === preset.to;
+                      return (
+                        <Pressable
+                          key={preset.label}
+                          accessibilityRole="button"
+                          onPress={() => {
+                            setAvailableFrom(preset.from);
+                            setAvailableTo(preset.to);
+                          }}
+                          className={cn(
+                            'h-8 items-center justify-center rounded-full border px-3',
+                            active ? 'border-brand-500 bg-brand-50' : 'border-line bg-surface',
+                          )}
+                        >
+                          <Text variant="micro" weight={active ? 'bold' : 'medium'} tone={active ? 'brand' : 'default'}>
+                            {preset.label}
+                          </Text>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+                </View>
+
+                <View className="flex-row items-center gap-3">
+                  <View className="flex-1">
+                    <Input
+                      label="Bắt đầu từ (HH:mm)"
+                      placeholder="06:00"
+                      value={availableFrom}
+                      onChangeText={setAvailableFrom}
+                      maxLength={5}
+                      autoCapitalize="none"
+                    />
+                  </View>
+                  <View className="flex-1">
+                    <Input
+                      label="Đến lúc (HH:mm)"
+                      placeholder="10:30"
+                      value={availableTo}
+                      onChangeText={setAvailableTo}
+                      maxLength={5}
+                      autoCapitalize="none"
+                    />
+                  </View>
+                </View>
+                <Text variant="micro" tone="muted">
+                  * Ngoài khung giờ này, món sẽ hiện nhãn "Bán từ {availableFrom || '...'} " và khách không thể thêm vào giỏ.
+                </Text>
+              </View>
+            )}
+          </View>
         </ScrollView>
         {!!sheet && confirmDelete}
+      </BottomSheet>
+
+      {/* Bảng chọn kiểu hết món (giống Grab Merchant / ShopeeFood Partner) */}
+      <BottomSheet visible={!!stockItem} onClose={() => setStockItem(null)} title="Báo hết món">
+        <View className="gap-3 pb-4">
+          {!!stockItem && (
+            <View className="flex-row items-center gap-3 rounded-2xl bg-canvas-subtle p-3">
+              <AppImage uri={stockItem.imageUrl} className="h-12 w-12 rounded-xl" />
+              <Text variant="body" weight="bold" numberOfLines={2} className="flex-1">
+                {stockItem.name}
+              </Text>
+            </View>
+          )}
+          <StockOption
+            icon="moon-outline"
+            box="bg-accent-50"
+            iconColor={palette.accent['600']}
+            title="Hết hôm nay"
+            subtitle={`Tự mở bán lại lúc ${formatRestockTime(nextStockResetAt())}. Không cần nhớ bật lại.`}
+            recommended
+            onPress={() => stockItem && setStock(stockItem.id, 'SOLD_OUT_TODAY')}
+          />
+          <StockOption
+            icon="pause-circle-outline"
+            box="bg-canvas-subtle"
+            iconColor={palette.ink.secondary}
+            title="Hết đến khi tôi bật lại"
+            subtitle="Dùng khi hết nguyên liệu nhiều ngày hoặc tạm ngừng bán món."
+            onPress={() => stockItem && setStock(stockItem.id, 'SOLD_OUT')}
+          />
+          <View className="flex-row items-start gap-2 px-1">
+            <Icon name="flash-outline" size={14} tone="muted" />
+            <Text variant="caption" weight="regular" tone="muted" className="flex-1">
+              Khách đang xem quán hoặc có món này trong giỏ sẽ được báo ngay.
+            </Text>
+          </View>
+        </View>
       </BottomSheet>
 
       {/* Bảng thêm nhóm */}
@@ -771,9 +946,11 @@ const CategoryChip: React.FC<{ label: string; count: number; selected: boolean; 
 const MenuItemCard: React.FC<{
   item: MenuItem;
   onEdit: () => void;
-  onToggle: (value: boolean) => void;
-}> = ({ item, onEdit, onToggle }) => {
+  onStockPress: () => void;
+}> = ({ item, onEdit, onStockPress }) => {
   const pct = discountPercent(item);
+  const stock = stockStatusOf(item);
+  const stockLabel = stock === 'AVAILABLE' ? 'Đang bán' : stock === 'SOLD_OUT_TODAY' ? 'Hết hôm nay' : 'Hết món';
   const summary = optionsSummary(item.options);
   return (
     <Pressable
@@ -787,7 +964,7 @@ const MenuItemCard: React.FC<{
         {!item.isAvailable && (
           <View className="absolute bottom-1.5 left-1.5 right-1.5 items-center rounded-md bg-scrim py-0.5">
             <Text variant="micro" weight="bold" tone="inverse">
-              Hết món
+              {stockLabel}
             </Text>
           </View>
         )}
@@ -813,6 +990,14 @@ const MenuItemCard: React.FC<{
               </Text>
             </View>
           )}
+          {!!(item.availableFrom && item.availableTo) && (
+            <View className="flex-row items-center gap-1">
+              <Icon name="time-outline" size={12} tone="brand" />
+              <Text variant="micro" weight="medium" tone="brand" numberOfLines={1}>
+                Khung giờ: {item.availableFrom} – {item.availableTo}
+              </Text>
+            </View>
+          )}
         </View>
         <View className="flex-row items-center justify-between gap-2">
           <View className="flex-1 flex-row flex-wrap items-baseline gap-x-1.5">
@@ -829,17 +1014,26 @@ const MenuItemCard: React.FC<{
           <Pressable
             accessibilityRole="switch"
             accessibilityState={{ checked: item.isAvailable }}
-            accessibilityLabel={`${item.name}: ${item.isAvailable ? 'đang bán, bấm để báo hết món' : 'hết món, bấm để mở bán lại'}`}
+            accessibilityLabel={`${item.name}: ${stockLabel.toLowerCase()}, ${item.isAvailable ? 'bấm để báo hết món' : 'bấm để mở bán lại'}`}
             hitSlop={6}
-            onPress={() => onToggle(!item.isAvailable)}
+            onPress={onStockPress}
             className={cn(
               'h-8 flex-row items-center gap-1.5 rounded-full px-3',
-              item.isAvailable ? 'bg-success-soft' : 'bg-canvas-subtle',
+              stock === 'AVAILABLE' ? 'bg-success-soft' : stock === 'SOLD_OUT_TODAY' ? 'bg-accent-50' : 'bg-canvas-subtle',
             )}
           >
-            <View className={cn('h-2 w-2 rounded-full', item.isAvailable ? 'bg-success' : 'bg-ink-muted')} />
-            <Text variant="caption" weight="bold" tone={item.isAvailable ? 'success' : 'secondary'}>
-              {item.isAvailable ? 'Đang bán' : 'Hết món'}
+            <View
+              className={cn(
+                'h-2 w-2 rounded-full',
+                stock === 'AVAILABLE' ? 'bg-success' : stock === 'SOLD_OUT_TODAY' ? 'bg-accent-500' : 'bg-ink-muted',
+              )}
+            />
+            <Text
+              variant="caption"
+              weight="bold"
+              tone={stock === 'AVAILABLE' ? 'success' : stock === 'SOLD_OUT_TODAY' ? 'accent' : 'secondary'}
+            >
+              {stockLabel}
             </Text>
           </Pressable>
         </View>
@@ -847,3 +1041,46 @@ const MenuItemCard: React.FC<{
     </Pressable>
   );
 };
+
+/** Một lựa chọn trong bảng "Báo hết món". */
+const StockOption: React.FC<{
+  icon: React.ComponentProps<typeof Icon>['name'];
+  box: string;
+  iconColor: string;
+  title: string;
+  subtitle: string;
+  recommended?: boolean;
+  onPress: () => void;
+}> = ({ icon, box, iconColor, title, subtitle, recommended, onPress }) => (
+  <Pressable
+    accessibilityRole="button"
+    accessibilityLabel={title}
+    onPress={onPress}
+    className={cn(
+      'flex-row items-center gap-3 rounded-2xl border bg-surface p-3.5 active:bg-canvas-subtle',
+      recommended ? 'border-accent-100' : 'border-line',
+    )}
+  >
+    <View className={cn('h-11 w-11 items-center justify-center rounded-full', box)}>
+      <Icon name={icon} size={20} color={iconColor} />
+    </View>
+    <View className="flex-1 gap-0.5">
+      <View className="flex-row items-center gap-2">
+        <Text variant="body" weight="bold">
+          {title}
+        </Text>
+        {recommended && (
+          <View className="rounded-full bg-accent-50 px-2 py-0.5">
+            <Text variant="micro" weight="bold" tone="accent">
+              Hay dùng
+            </Text>
+          </View>
+        )}
+      </View>
+      <Text variant="caption" weight="regular" tone="secondary">
+        {subtitle}
+      </Text>
+    </View>
+    <Icon name="chevron-forward" size={16} tone="muted" />
+  </Pressable>
+);

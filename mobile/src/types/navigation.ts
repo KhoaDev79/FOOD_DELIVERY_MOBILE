@@ -9,16 +9,20 @@ export type MainTabParamList = {
 };
 
 export type AuthStackParamList = {
-  Login: undefined;
+  /** prefillUsername: điền sẵn sau khi đặt lại mật khẩu */
+  Login: { prefillUsername?: string } | undefined;
   Register: undefined;
+  ForgotPassword: { email?: string } | undefined;
 };
 
 export type RootStackParamList = {
   MainTabs: NavigatorScreenParams<MainTabParamList>;
   Search: { initialQuery?: string } | undefined;
-  Login: undefined;
+  Login: { prefillUsername?: string } | undefined;
   Register: undefined;
+  ForgotPassword: { email?: string } | undefined;
   RestaurantDetail: { restaurantId: string; openDishId?: string };
+  RestaurantReviews: { restaurantId: string; restaurantName?: string };
   Cart: undefined;
   Checkout: undefined;
   OrderTracking: { orderId: string };
@@ -34,6 +38,14 @@ export type RootStackParamList = {
   RoleUpgradeRequest: undefined;
   Rating: { orderId: string; restaurantName?: string; driverName?: string; hasDriver?: boolean };
   Chat: { orderId: string; channel: ChatChannel; recipientName?: string; recipientRole?: string };
+  NotificationCenter: undefined;
+  HelpCenter: undefined;
+  HelpArticle: { articleId: string; title?: string };
+  OrderIssue: { orderId?: string; preselectedIssue?: string } | undefined;
+  SupportTicketList: undefined;
+  SupportTicketDetail: { ticketId: string; code?: string };
+  SupportChat: undefined;
+  VoucherWallet: undefined;
 };
 
 export type OwnerTabParamList = {
@@ -54,6 +66,9 @@ export type OwnerStackParamList = {
   /** Dùng lại màn chọn địa chỉ trên bản đồ của khách hàng để ghim vị trí quán. */
   AddressPicker: RootStackParamList['AddressPicker'];
   Chat: { orderId: string; channel: ChatChannel; recipientName?: string; recipientRole?: string };
+  NotificationCenter: undefined;
+  /** Mã giảm giá của quán (quán chịu chi phí) */
+  OwnerVouchers: { restaurantId: string; restaurantName?: string };
 };
 
 export type DriverTabParamList = {
@@ -72,14 +87,22 @@ export type DriverStackParamList = {
   DriverWallet: undefined;
   DriverReviews: undefined;
   Chat: { orderId: string; channel: ChatChannel; recipientName?: string; recipientRole?: string };
+  NotificationCenter: undefined;
 };
 
 export type AdminTabParamList = {
   AdminDashboardTab: undefined;
-  AdminOrdersTab: { stalledOnly?: boolean; status?: string } | undefined;
-  /** openRequests: mở ngay danh sách yêu cầu nâng cấp chờ duyệt. */
-  AdminUsersTab: { openRequests?: boolean } | undefined;
-  AdminRestaurantsTab: { filter?: 'all' | 'open' | 'closed' | 'unassigned' | 'pending' | 'suspended' } | undefined;
+  /** group: tab nhóm đơn; status: lọc chi tiết theo trạng thái; stalledOnly: giữ tương thích (= group 'stalled'). */
+  AdminOrdersTab:
+    | { group?: 'active' | 'stalled' | 'done' | 'failed'; status?: string; stalledOnly?: boolean; orderId?: string }
+    | undefined;
+  /** openRequests: mở ngay danh sách yêu cầu nâng cấp chờ duyệt; tab: lọc theo vai trò / đã khoá. */
+  AdminUsersTab:
+    | { openRequests?: boolean; tab?: 'ALL' | 'CUSTOMER' | 'RESTAURANT_OWNER' | 'DRIVER' | 'ADMIN' | 'LOCKED' }
+    | undefined;
+  AdminRestaurantsTab:
+    | { filter?: 'all' | 'open' | 'closed' | 'unassigned' | 'pending' | 'suspended' | 'active' }
+    | undefined;
   AdminProfileTab: undefined;
 };
 
@@ -88,4 +111,9 @@ export type AdminStackParamList = {
   EditProfile: undefined;
   AdminBanners: undefined;
   AdminCuisines: undefined;
+  AdminAuditLog: undefined;
+  NotificationCenter: undefined;
+  AdminSupportTickets: undefined;
+  AdminVouchers: undefined;
+  AdminRefunds: undefined;
 };

@@ -28,7 +28,7 @@ import { useSocket } from '../../hooks/useSocket';
 import { useAuthStore } from '../../store/useAuthStore';
 import { palette } from '../../theme';
 import { ChatChannel, OrderMessage, Role } from '../../types/api';
-import { formatDateTime } from '../../utils/format';
+import { formatDateTime, orderCode } from '../../utils/format';
 
 interface ChatParams {
   orderId: string;
@@ -200,8 +200,8 @@ export const ChatScreen: React.FC = () => {
       <TopBar
         title={
           recipientName
-            ? `${recipientName} (${recipientRole || `#${orderId.slice(0, 8).toUpperCase()}`})`
-            : `Đơn #${orderId.slice(0, 8).toUpperCase()}`
+            ? `${recipientName} (${recipientRole || `#${orderCode(orderId)}`})`
+            : `Đơn #${orderCode(orderId)}`
         }
         onLeadingPress={() => navigation.goBack()}
         trailing={

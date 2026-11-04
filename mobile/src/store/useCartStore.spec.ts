@@ -96,3 +96,27 @@ describe('useCartStore – nâng cấp giỏ cũ (v1 → v2)', () => {
     expect(next.items[0]).toEqual({ menuItem: pho, quantity: 1, note: undefined, unitPrice: 55000 });
   });
 });
+
+describe('useCartStore: xử lý sau khi kiểm tra giỏ', () => {
+  const base = { id: 'x', restaurantId: 'r1', name: 'Trà đá', price: 5000, isAvailable: true, isArchived: false } as never;
+  beforeEach(() => useCartStore.getState().clearCart());
+
+  it('removeLines bỏ đúng các dòng; bỏ hết thì giỏ trống', () => {
+    const s = useCartStore.getState();
+    s.addItem(quan, base, 1);
+    s.addItem(quan, { ...(base as object), id: 'y', name: 'Nem' } as never, 2);
+    useCartStore.getState().removeLines(['x']);
+    expect(useCartStore.getState().items.map((i) => i.menuItem.id)).toEqual(['y']);
+    useCartStore.getState().removeLines(['y']);
+    expect(useCartStore.getState().items).toHaveLength(0);
+    expect(useCartStore.getState().restaurant).toBeNull();
+  });
+
+  it('applyPrices cập nhật đơn giá theo máy chủ', () => {
+    useCartStore.getState().addItem(quan, base, 3);
+    useCartStore.getState().applyPrices({ x: 4000 });
+    expect(useCartStore.getState().items[0].unitPrice).toBe(4000);
+    expect(useCartStore.getState().getSubtotal()).toBe(12000);
+  });
+});
+

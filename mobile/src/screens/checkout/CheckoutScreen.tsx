@@ -21,7 +21,10 @@ import {
   useToast,
 } from '../../components/ui';
 import { CartSuggestions } from '../../components/modules/cart/CartSuggestions';
+import { CartCheckBanners, checkoutBlockedLabel } from '../../components/modules/cart/CartCheckBanners';
+import { useCartCheck } from '../../hooks/useCartCheck';
 import { MetricChip, Money } from '../../components/modules/partner/PartnerKit';
+import { VoucherPickerSheet, VoucherSelection } from '../../components/modules/voucher/VoucherPickerSheet';
 import { useCreateOrder } from '../../services/useOrders';
 import { useAddresses } from '../../services/useUser';
 import { CartLineItem, useCartStore } from '../../store/useCartStore';
@@ -62,11 +65,12 @@ const Section: React.FC<{
   </View>
 );
 
-const SummaryRow: React.FC<{ label: string; value: string; hint?: string; strong?: boolean }> = ({
+const SummaryRow: React.FC<{ label: string; value: string; hint?: string; strong?: boolean; discount?: boolean }> = ({
   label,
   value,
   hint,
   strong,
+  discount,
 }) => (
   <View className="flex-row items-start justify-between gap-3">
     <View className="flex-1">
@@ -82,7 +86,7 @@ const SummaryRow: React.FC<{ label: string; value: string; hint?: string; strong
     <Text
       variant={strong ? 'title' : 'body'}
       weight={strong ? 'bold' : 'medium'}
-      tone={strong ? 'brand' : 'default'}
+      tone={strong ? 'brand' : discount ? 'success' : 'default'}
       className="text-right"
     >
       {value}
@@ -115,6 +119,9 @@ export const CheckoutScreen: React.FC<Props> = ({ navigation }) => {
   const [quote, setQuote] = useState<OrderQuoteResponse | null>(null);
   const [quoteLoading, setQuoteLoading] = useState(false);
   const [quoteError, setQuoteError] = useState<string | null>(null);
+  // Kiểm tra giỏ chủ động (realtime khi quán báo hết món), không đợi đến lúc bấm Đặt hàng mới báo lỗi
+  const { result: cartCheck, blockingKeys } = useCartCheck();
+  const checkBlockedLabel = checkoutBlockedLabel(cartCheck, blockingKeys.length);
   const [unavailableItemIds, setUnavailableItemIds] = useState<string[]>([]);
 
   const [quoteChangedDialog, setQuoteChangedDialog] = useState<{
@@ -123,6 +130,15 @@ export const CheckoutScreen: React.FC<Props> = ({ navigation }) => {
   } | null>(null);
 
   const idempotencyKeyRef = useRef<string>(generateIdempotencyKey());
+
+  // Ưu đãi: tối đa 1 mã giảm giá + 1 mã freeship
+  const [vouchers, setVouchers] = useState<VoucherSelection>({});
+  const [voucherSheetOpen, setVoucherSheetOpen] = useState(false);
+  const [voucherSheetKey, setVoucherSheetKey] = useState(0);
+  const voucherCodes = useMemo(
+    () => [vouchers.discountCode, vouchers.freeshipCode].filter((c): c is string => Boolean(c)),
+    [vouchers],
+  );
 
   const activeAddr = useMemo(() => {
     if (!addresses || addresses.length === 0) return null;
@@ -149,7 +165,7 @@ export const CheckoutScreen: React.FC<Props> = ({ navigation }) => {
   );
 
   const fetchQuote = useCallback(
-    async (restId: string, addrId: string, payloadItems: OrderItemPayload[]) => {
+    async (restId: string, addrId: string, payloadItems: OrderItemPayload[], codes: string[]) => {
       setQuoteLoading(true);
       setQuoteError(null);
       setUnavailableItemIds([]);
@@ -159,8 +175,19 @@ export const CheckoutScreen: React.FC<Props> = ({ navigation }) => {
           restaurantId: restId,
           addressId: addrId,
           items: payloadItems,
+          voucherCodes: codes.length ? codes : undefined,
         });
         setQuote(res);
+        // Mã không dùng được (hết lượt, thiếu tiền món…): báo lý do và bỏ chọn để khách vẫn đặt được đơn
+        const rejected = res.rejectedVouchers ?? [];
+        if (rejected.length) {
+          toast(`${rejected[0].code}: ${rejected[0].reason}`, 'error');
+          const bad = new Set(rejected.map((r) => r.code));
+          setVouchers((v) => ({
+            discountCode: v.discountCode && bad.has(v.discountCode) ? undefined : v.discountCode,
+            freeshipCode: v.freeshipCode && bad.has(v.freeshipCode) ? undefined : v.freeshipCode,
+          }));
+        }
       } catch (err: any) {
         const data = err?.response?.data;
         const msg =
@@ -178,19 +205,19 @@ export const CheckoutScreen: React.FC<Props> = ({ navigation }) => {
         setQuoteLoading(false);
       }
     },
-    [],
+    [toast],
   );
 
-  // Gọi báo giá mỗi khi quán, địa chỉ hoặc giỏ hàng thay đổi (debounce 400ms)
+  // Gọi báo giá mỗi khi quán, địa chỉ, giỏ hàng hoặc mã ưu đãi thay đổi (debounce 400ms)
   useEffect(() => {
     if (!restaurant?.id || !activeAddressId || orderItemsPayload.length === 0) {
       return;
     }
     const timer = setTimeout(() => {
-      fetchQuote(restaurant.id, activeAddressId, orderItemsPayload);
+      fetchQuote(restaurant.id, activeAddressId, orderItemsPayload, voucherCodes);
     }, 400);
     return () => clearTimeout(timer);
-  }, [restaurant?.id, activeAddressId, orderItemsPayload, fetchQuote]);
+  }, [restaurant?.id, activeAddressId, orderItemsPayload, voucherCodes, fetchQuote]);
 
   // Tự động làm mới báo giá trước khi hết hạn 60s
   useEffect(() => {
@@ -200,10 +227,10 @@ export const CheckoutScreen: React.FC<Props> = ({ navigation }) => {
     const expiresMs = new Date(quote.expiresAt).getTime();
     const refreshInMs = Math.max(5000, expiresMs - Date.now() - 60_000);
     const timer = setTimeout(() => {
-      fetchQuote(restaurant.id, activeAddressId, orderItemsPayload);
+      fetchQuote(restaurant.id, activeAddressId, orderItemsPayload, voucherCodes);
     }, refreshInMs);
     return () => clearTimeout(timer);
-  }, [quote?.expiresAt, restaurant?.id, activeAddressId, orderItemsPayload, fetchQuote]);
+  }, [quote?.expiresAt, restaurant?.id, activeAddressId, orderItemsPayload, voucherCodes, fetchQuote]);
 
   const itemCount = items.reduce((s, i) => s + i.quantity, 0);
   const close = () => navigation.goBack();
@@ -219,6 +246,7 @@ export const CheckoutScreen: React.FC<Props> = ({ navigation }) => {
           addressId: activeAddressId,
           quoteToken: targetQuote.quoteToken,
           note: note.trim() || undefined,
+          voucherCodes: voucherCodes.length ? voucherCodes : undefined,
         },
         idempotencyKey: idempotencyKeyRef.current,
       });
@@ -234,6 +262,12 @@ export const CheckoutScreen: React.FC<Props> = ({ navigation }) => {
         setQuote(newQuote);
         idempotencyKeyRef.current = generateIdempotencyKey();
         setQuoteChangedDialog({ oldTotal, newQuote });
+        return;
+      }
+      // Mã vừa hết lượt do khách khác dùng trước: bỏ mã, báo giá lại để khách xác nhận giá mới
+      if (status === 409 && data?.code === 'VOUCHER_UNAVAILABLE') {
+        toast(data.message, 'error');
+        setVouchers({});
         return;
       }
       if (Array.isArray(data?.unavailableItemIds)) {
@@ -297,6 +331,9 @@ export const CheckoutScreen: React.FC<Props> = ({ navigation }) => {
 
   const displaySubtotal = quote?.subtotal ?? subtotal;
   const displayTotal = quote?.total ?? subtotal;
+  const totalSaving = (quote?.itemDiscount ?? 0) + (quote?.shippingDiscount ?? 0);
+  const appliedDiscount = quote?.appliedVouchers?.find((a) => a.discountType !== 'FREE_SHIP');
+  const appliedFreeship = quote?.appliedVouchers?.find((a) => a.discountType === 'FREE_SHIP');
   const canSubmit =
     Boolean(activeAddr) &&
     !addressLoading &&
@@ -304,6 +341,7 @@ export const CheckoutScreen: React.FC<Props> = ({ navigation }) => {
     Boolean(quote) &&
     !quoteError &&
     unavailableItemIds.length === 0 &&
+    !checkBlockedLabel &&
     !isSubmitting;
 
   return (
@@ -396,12 +434,24 @@ export const CheckoutScreen: React.FC<Props> = ({ navigation }) => {
             )}
           </Section>
 
+          {/* Món vừa hết / quán ngừng nhận đơn (giá đã do máy chủ tính ở báo giá nên không báo đổi giá ở đây) */}
+          <CartCheckBanners
+            check={cartCheck}
+            blockingCount={blockingKeys.length}
+            priceChangeCount={0}
+            onRemoveBlocked={() => undefined}
+            onApplyPrices={() => undefined}
+            onOpenCart={() => navigation.navigate('Cart')}
+          />
+
           {/* Cảnh báo lỗi báo giá hoặc món hết hàng */}
           {!!quoteError && (
-            <View className="gap-2 rounded-lg border border-danger-soft bg-danger-soft/30 p-3.5">
-              <View className="flex-row items-center gap-2">
-                <Icon name="alert-circle" size="md" tone="danger" />
-                <Text variant="body" weight="semibold" tone="danger" className="flex-1">
+            <View className="gap-3 rounded-2xl bg-surface p-4 shadow-card">
+              <View className="flex-row items-center gap-3">
+                <View className="h-9 w-9 items-center justify-center rounded-xl bg-danger-soft">
+                  <Icon name="alert-circle" size="md" tone="danger" />
+                </View>
+                <Text variant="body" weight="semibold" className="flex-1">
                   {quoteError}
                 </Text>
               </View>
@@ -504,6 +554,41 @@ export const CheckoutScreen: React.FC<Props> = ({ navigation }) => {
             />
           </Section>
 
+          {/* Ưu đãi */}
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Chọn mã ưu đãi"
+            onPress={() => {
+              setVoucherSheetKey((k) => k + 1);
+              setVoucherSheetOpen(true);
+            }}
+            className="flex-row items-center gap-3 rounded-2xl bg-surface p-4 shadow-card active:opacity-80"
+          >
+            <View className="h-10 w-10 items-center justify-center rounded-full bg-accent-50">
+              <Icon name="pricetags" size="md" tone="accent" />
+            </View>
+            <View className="flex-1 gap-1">
+              <Text variant="body-lg" weight="bold">
+                Ưu đãi
+              </Text>
+              {appliedDiscount || appliedFreeship ? (
+                <View className="flex-row flex-wrap gap-1.5">
+                  {appliedFreeship && (
+                    <Badge label={`Freeship −${formatVND(appliedFreeship.amount)}`} tone="brand" size="sm" />
+                  )}
+                  {appliedDiscount && (
+                    <Badge label={`${appliedDiscount.code} −${formatVND(appliedDiscount.amount)}`} tone="discount" size="sm" />
+                  )}
+                </View>
+              ) : (
+                <Text variant="caption" weight="regular" tone="secondary">
+                  Chọn hoặc nhập mã giảm giá, freeship
+                </Text>
+              )}
+            </View>
+            <Icon name="chevron-forward" size="sm" tone="muted" />
+          </Pressable>
+
           {/* Phương thức thanh toán cố định COD */}
           <Section title="Thanh toán" icon="wallet">
             <View className="flex-row items-center gap-3 rounded-xl border-2 border-brand-500 bg-brand-50 p-3">
@@ -549,6 +634,22 @@ export const CheckoutScreen: React.FC<Props> = ({ navigation }) => {
                     hint="Khung giờ cao điểm trưa / tối"
                   />
                 )}
+                {!!quote.shippingDiscount && (
+                  <SummaryRow
+                    label="Giảm phí giao hàng"
+                    value={`−${formatVND(quote.shippingDiscount)}`}
+                    hint={appliedFreeship?.code}
+                    discount
+                  />
+                )}
+                {!!quote.itemDiscount && (
+                  <SummaryRow
+                    label="Giảm giá"
+                    value={`−${formatVND(quote.itemDiscount)}`}
+                    hint={appliedDiscount?.code}
+                    discount
+                  />
+                )}
                 <View className="mt-1 rounded-xl bg-brand-50 px-3 py-3">
                   <SummaryRow label="Tổng cộng" value={formatVND(quote.total)} strong />
                 </View>
@@ -581,9 +682,14 @@ export const CheckoutScreen: React.FC<Props> = ({ navigation }) => {
             ) : (
               <Money amount={displayTotal} variant="title" tone="brand" />
             )}
+            {totalSaving > 0 && (
+              <Text variant="micro" weight="semibold" tone="success">
+                Tiết kiệm {formatVND(totalSaving)}
+              </Text>
+            )}
           </View>
           <Button
-            label="Đặt hàng"
+            label={checkBlockedLabel ? 'Chưa đặt được' : 'Đặt hàng'}
             rightIcon="arrow-forward"
             size="lg"
             loading={isSubmitting || quoteLoading}
@@ -661,6 +767,18 @@ export const CheckoutScreen: React.FC<Props> = ({ navigation }) => {
           })}
         </ScrollView>
       </BottomSheet>
+
+      {/* Bảng chọn ưu đãi (key đổi mỗi lần mở để bắt đầu từ lựa chọn hiện tại) */}
+      <VoucherPickerSheet
+        key={voucherSheetKey}
+        visible={voucherSheetOpen}
+        onClose={() => setVoucherSheetOpen(false)}
+        restaurantId={restaurant.id}
+        subtotal={displaySubtotal}
+        deliveryFee={quote?.deliveryFee ?? 0}
+        value={vouchers}
+        onApply={setVouchers}
+      />
 
       {/* Hộp xác nhận khi báo giá thay đổi (409 QUOTE_CHANGED) */}
       <ConfirmDialog

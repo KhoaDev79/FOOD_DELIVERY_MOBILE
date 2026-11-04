@@ -1,3 +1,5 @@
+import { NotificationCenterScreen } from '../screens/notifications/NotificationCenterScreen';
+import { VoucherManageScreen } from '../screens/voucher/VoucherManageScreen';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import React from 'react';
@@ -54,8 +56,10 @@ export const OwnerTabNavigator: React.FC = () => (
     <Stack.Screen name="OwnerTabs" component={OwnerTabs} />
     <Stack.Screen name="OwnerStats" component={OwnerStatsScreen} />
     <Stack.Screen name="OwnerReviews" component={OwnerReviewsScreen} />
+    <Stack.Screen name="OwnerVouchers" component={VoucherManageScreen} />
     <Stack.Screen name="EditProfile" component={EditProfileScreen as React.ComponentType<any>} />
     <Stack.Screen name="AddressPicker" component={AddressPickerScreen as React.ComponentType<any>} />
     <Stack.Screen name="Chat" component={ChatScreen as React.ComponentType<any>} />
+    <Stack.Screen name="NotificationCenter" component={NotificationCenterScreen} />
   </Stack.Navigator>
 );

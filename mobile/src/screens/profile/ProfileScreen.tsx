@@ -19,6 +19,7 @@ import {
 import { useUnreadChatCount } from '../../hooks/useUnreadChatCount';
 import { useMyOrders } from '../../services/useOrders';
 import { useAddresses, useMe } from '../../services/useUser';
+import { useOpenTicketsCount } from '../../services/useHelp';
 import { useAuthStore } from '../../store/useAuthStore';
 import { useFavoritesStore } from '../../store/useFavoritesStore';
 import { RootStackParamList } from '../../types/navigation';
@@ -60,6 +61,7 @@ export const ProfileScreen: React.FC = () => {
   const { data: user, isLoading } = useMe();
   const { data: orders } = useMyOrders();
   const { data: addresses } = useAddresses();
+  const { data: openTicketsCount = 0 } = useOpenTicketsCount();
   const favoriteCount = useFavoritesStore((s) => s.restaurants.length);
   const logout = useAuthStore((s) => s.logout);
 
@@ -185,6 +187,14 @@ export const ProfileScreen: React.FC = () => {
             <ListRow icon="receipt-outline" iconTone="brand" title="Lịch sử đơn hàng" onPress={goOrders} />
             <Divider inset />
             <ListRow icon="heart-outline" iconTone="danger" title="Quán yêu thích" onPress={goFavorites} />
+            <Divider inset />
+            <ListRow
+              icon="ticket-outline"
+              iconTone="accent"
+              title="Ví voucher"
+              subtitle="Mã giảm giá, freeship và quà tặng riêng cho bạn"
+              onPress={() => requireAuth(() => navigation.navigate('VoucherWallet'))}
+            />
           </Group>
 
           {isAuthenticated && user?.role === 'CUSTOMER' && (
@@ -198,6 +208,24 @@ export const ProfileScreen: React.FC = () => {
               />
             </Group>
           )}
+
+                    <Group title="Hỗ trợ">
+            <ListRow
+              icon="help-buoy-outline"
+              iconTone="brand"
+              title="Trung tâm trợ giúp"
+              subtitle="Câu hỏi thường gặp, báo sự cố & chatbot"
+              trailing={
+                openTicketsCount > 0 ? (
+                  <View className="flex-row items-center gap-1">
+                    <CountBadge count={openTicketsCount} />
+                    <Icon name="chevron-forward" size="md" tone="muted" />
+                  </View>
+                ) : undefined
+              }
+              onPress={() => navigation.navigate('HelpCenter')}
+            />
+          </Group>
 
           {isAuthenticated ? (
             <LogoutButton onLogout={logout} />

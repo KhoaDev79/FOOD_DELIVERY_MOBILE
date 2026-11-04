@@ -1,6 +1,8 @@
 import React, { memo } from 'react';
 import { Pressable, View } from 'react-native';
+import { useNow } from '../../../hooks/useNow';
 import { MenuItem } from '../../../types/api';
+import { getDishAvailabilityStatus } from '../../../utils/dishAvailability';
 import { formatVND } from '../../../utils/format';
 import { discountPercent, linePrice, originalLinePrice } from '../../../utils/menuPricing';
 import { AppImage, Badge, cn, IconButton, Text } from '../../ui';
@@ -33,27 +35,42 @@ interface Props {
 
 /** Dòng món trong thực đơn quán: ảnh, nhãn giảm giá, tên, mô tả, giá, nút "+" (phần tử ngang hàng). */
 export const DishRow = memo<Props>(({ item, canOrder, onOpen, onAdd }) => {
+  const now = useNow();
   const off = discountPercent(item);
   const available = item.isAvailable;
+  const availability = getDishAvailabilityStatus(item, now);
+  const isAvailableNow = available && availability.isAvailableNow;
+
   return (
     <View>
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel={[item.name, formatVND(linePrice(item)), !available && 'tạm hết'].filter(Boolean).join(', ')}
+        accessibilityLabel={[
+          item.name,
+          formatVND(linePrice(item)),
+          !available && 'tạm hết',
+          !isAvailableNow && availability.tag,
+        ]
+          .filter(Boolean)
+          .join(', ')}
         onPress={() => onOpen(item)}
         disabled={!available}
         className={cn(
           'flex-row gap-3 rounded-lg bg-surface p-3 shadow-card hover:bg-brand-50 active:bg-brand-50',
-          !available && 'opacity-60',
+          (!available || !isAvailableNow) && 'opacity-70',
         )}
       >
         <AppImage uri={item.imageUrl} className="h-24 w-24 rounded-md" fallbackIcon="fast-food-outline">
           {off > 0 && <Badge label={`-${off}%`} tone="discount" size="sm" className="absolute left-1.5 top-1.5" />}
-          {!available && (
+          {!available ? (
             <View className="absolute inset-0 items-center justify-center bg-scrim">
               <Badge label="Tạm hết" tone="neutral" size="sm" />
             </View>
-          )}
+          ) : !isAvailableNow && availability.tag ? (
+            <View className="absolute inset-0 items-center justify-center bg-scrim px-1">
+              <Badge label={availability.tag} tone="warning" size="sm" />
+            </View>
+          ) : null}
         </AppImage>
         <View className="flex-1 justify-center gap-1 pr-10">
           <Text variant="body-lg" weight="semibold" numberOfLines={2}>
@@ -64,10 +81,20 @@ export const DishRow = memo<Props>(({ item, canOrder, onOpen, onAdd }) => {
               {item.description}
             </Text>
           )}
+          {availability.isTimedDish && (
+            <Text
+              variant="micro"
+              weight="medium"
+              tone={isAvailableNow ? 'muted' : 'accent'}
+              numberOfLines={1}
+            >
+              {isAvailableNow ? `Khung giờ: ${availability.servingTimeLabel}` : `⏰ ${availability.tag}`}
+            </Text>
+          )}
           <DishPrice item={item} />
         </View>
       </Pressable>
-      {available && canOrder && (
+      {isAvailableNow && canOrder && (
         <IconButton
           icon="add"
           variant="brand"

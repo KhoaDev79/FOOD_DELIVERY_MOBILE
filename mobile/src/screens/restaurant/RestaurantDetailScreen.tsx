@@ -1,8 +1,13 @@
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useQuery } from '@tanstack/react-query';
+import { SOCKET_URL } from '../../constants/config';
+import { useShare } from '../../hooks/useShare';
+import { dishShareMessage, dishShareUrl, restaurantShareMessage, restaurantShareUrl } from '../../utils/share';
 import { StatusBar } from 'expo-status-bar';
+import { CustomerScheduleSheet } from '../../components/modules/restaurant/CustomerScheduleSheet';
+import { getTodayOpeningHour, getTodaySpecialClosing, isRestaurantPaused } from '../../utils/openingHours';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { ScrollView, View } from 'react-native';
+import { Pressable, ScrollView, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { restaurantsApi } from '../../api/restaurants';
 import { DishOptionSheet, DishSelection } from '../../components/modules/restaurant/DishOptionSheet';
@@ -23,15 +28,17 @@ import {
 } from '../../components/ui';
 import { useLocation } from '../../hooks/useLocation';
 import { useRestaurantDetail } from '../../services/useRestaurants';
+import { useRestaurantStockLive } from '../../hooks/useSocket';
 import { useAddresses } from '../../services/useUser';
 import { useCartStore } from '../../store/useCartStore';
 import { resolveActiveDeliveryAddress, useDeliveryAddressStore } from '../../store/useDeliveryAddressStore';
 import { useToggleFavorite } from '../../hooks/useFavorites';
 import { useFavoritesStore } from '../../store/useFavoritesStore';
 import { MenuItem, PublicRestaurantReview } from '../../types/api';
+import { ReviewCard } from '../../components/modules/review/ReviewCard';
 import { RootStackParamList } from '../../types/navigation';
 import { calculateDistance, estimateDeliveryTime } from '../../utils/fee';
-import { formatDateTime, formatDistance, formatVND } from '../../utils/format';
+import { formatDistance, formatVND } from '../../utils/format';
 import { discountPercent, hasChoices, linePrice } from '../../utils/menuPricing';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'RestaurantDetail'>;
@@ -69,6 +76,8 @@ const DetailSkeleton: React.FC = () => (
 export const RestaurantDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   const { restaurantId, openDishId } = route.params;
   const { data: restaurant, isLoading, isError, refetch } = useRestaurantDetail(restaurantId);
+  // Quán báo hết món / mở bán lại thì thực đơn tự cập nhật (khi đã đăng nhập)
+  useRestaurantStockLive(restaurantId);
   const { data: reviewsData } = useQuery({
     queryKey: ['restaurant-reviews', restaurantId],
     queryFn: () => restaurantsApi.getPublicReviews(restaurantId, { page: 1, limit: 10 }),
@@ -90,11 +99,15 @@ export const RestaurantDetailScreen: React.FC<Props> = ({ route, navigation }) =
   const toggleFavorite = useToggleFavorite();
 
   const [selected, setSelected] = useState<MenuItem | null>(null);
+  const [scheduleSheetVisible, setScheduleSheetVisible] = useState(false);
   const [pending, setPending] = useState<PendingAdd | null>(null);
   const [activeCat, setActiveCat] = useState<string | null>(null);
   const scrollRef = useRef<React.ComponentRef<typeof ScrollView>>(null);
   const sectionY = useRef<Record<string, number>>({});
   const autoOpenedRef = useRef<string | null>(null);
+  const share = useShare();
+  // Mở từ link chia sẻ có thể không có màn trước: quay về Trang chủ thay vì không làm gì
+  const goBack = () => (navigation.canGoBack() ? navigation.goBack() : navigation.navigate('MainTabs' as never));
 
   const sections = useMemo(() => {
     if (!restaurant) return [];
@@ -113,6 +126,27 @@ export const RestaurantDetailScreen: React.FC<Props> = ({ route, navigation }) =
     const prices = allItems.filter((i) => i.isAvailable).map((i) => linePrice(i));
     return prices.length ? [Math.min(...prices), Math.max(...prices)] : null;
   }, [allItems]);
+
+  const todaySchedule = useMemo(() => {
+    return getTodayOpeningHour(
+      restaurant?.openingHours,
+      restaurant?.openTime || '07:00',
+      restaurant?.closeTime || '22:00',
+    );
+  }, [restaurant?.openingHours, restaurant?.openTime, restaurant?.closeTime]);
+
+  const todaySpecialClosing = useMemo(() => {
+    return getTodaySpecialClosing(restaurant?.specialClosings);
+  }, [restaurant?.specialClosings]);
+
+  // Đọc pausedUntil ra biến riêng để React Compiler suy ra đúng phụ thuộc (không phải cả object restaurant)
+  const pausedUntil = restaurant?.pausedUntil;
+  const reopenTime = useMemo(() => {
+    if (!pausedUntil) return '';
+    const d = new Date(pausedUntil);
+    const vnDate = new Date(d.getTime() + 7 * 60 * 60 * 1000);
+    return `${String(vnDate.getUTCHours()).padStart(2, '0')}:${String(vnDate.getUTCMinutes()).padStart(2, '0')}`;
+  }, [pausedUntil]);
 
   // Tự động mở bảng chọn tuỳ chọn khi điều hướng từ trang chủ vào đúng món
   useEffect(() => {
@@ -134,7 +168,7 @@ export const RestaurantDetailScreen: React.FC<Props> = ({ route, navigation }) =
             icon="arrow-back"
             variant="ghost"
             accessibilityLabel="Quay lại"
-            onPress={() => navigation.goBack()}
+            onPress={goBack}
           />
         </View>
         <ErrorState message="Không tải được thông tin quán. Vui lòng thử lại." onRetry={() => refetch()} />
@@ -142,7 +176,8 @@ export const RestaurantDetailScreen: React.FC<Props> = ({ route, navigation }) =
     );
   }
 
-  const canOrder = restaurant.isOpen;
+  const isTimedPause = Boolean(restaurant.pausedUntil && isRestaurantPaused(restaurant.pausedUntil));
+  const canOrder = restaurant.isOpen && !isTimedPause;
   // Nguồn địa chỉ giao hàng duy nhất (địa chỉ đã chọn -> mặc định -> GPS)
   const addressResolution = resolveActiveDeliveryAddress(addresses, selectedAddressId, coords);
   const distanceKm = addressResolution.coordinates
@@ -222,23 +257,34 @@ export const RestaurantDetailScreen: React.FC<Props> = ({ route, navigation }) =
                 icon="arrow-back"
                 variant="glass"
                 accessibilityLabel="Quay lại"
-                onPress={() => navigation.goBack()}
+                onPress={goBack}
               />
-              <IconButton
-                icon={liked ? 'heart' : 'heart-outline'}
-                tone={liked ? 'danger' : 'default'}
-                variant="glass"
-                accessibilityLabel={liked ? 'Bỏ khỏi yêu thích' : 'Thêm vào yêu thích'}
-                accessibilityState={{ selected: liked }}
-                onPress={() => {
-                  const nowLiked = toggleFavorite(restaurant);
-                  if (nowLiked === null) return; // chưa đăng nhập: đã nhắc và chuyển sang Đăng nhập
-                  toast(
-                    nowLiked ? 'Đã thêm vào Góc khoái khẩu' : 'Đã bỏ khỏi yêu thích',
-                    nowLiked ? 'success' : 'default',
-                  );
-                }}
-              />
+              <View className="flex-row gap-2">
+                <IconButton
+                  icon="share-social-outline"
+                  variant="glass"
+                  accessibilityLabel={`Chia sẻ quán ${restaurant.name}`}
+                  onPress={() => {
+                    const url = restaurantShareUrl(SOCKET_URL, restaurant.id);
+                    void share({ title: restaurant.name, message: restaurantShareMessage(restaurant, url), url });
+                  }}
+                />
+                <IconButton
+                  icon={liked ? 'heart' : 'heart-outline'}
+                  tone={liked ? 'danger' : 'default'}
+                  variant="glass"
+                  accessibilityLabel={liked ? 'Bỏ khỏi yêu thích' : 'Thêm vào yêu thích'}
+                  accessibilityState={{ selected: liked }}
+                  onPress={() => {
+                    const nowLiked = toggleFavorite(restaurant);
+                    if (nowLiked === null) return; // chưa đăng nhập: đã nhắc và chuyển sang Đăng nhập
+                    toast(
+                      nowLiked ? 'Đã thêm vào Góc khoái khẩu' : 'Đã bỏ khỏi yêu thích',
+                      nowLiked ? 'success' : 'default',
+                    );
+                  }}
+                />
+              </View>
             </View>
           </SafeAreaView>
         </AppImage>
@@ -249,7 +295,10 @@ export const RestaurantDetailScreen: React.FC<Props> = ({ route, navigation }) =
             <Text variant="title" className="flex-1" accessibilityRole="header">
               {restaurant.name}
             </Text>
-            <Badge label={canOrder ? 'Đang mở' : 'Đã đóng'} tone={canOrder ? 'success' : 'danger'} />
+            <Badge
+              label={canOrder ? 'Đang mở' : isTimedPause ? 'Tạm nghỉ' : 'Đã đóng'}
+              tone={canOrder ? 'success' : isTimedPause ? 'warning' : 'danger'}
+            />
           </View>
           {!!restaurant.description && (
             <Text variant="body" tone="secondary" numberOfLines={3}>
@@ -270,9 +319,18 @@ export const RestaurantDetailScreen: React.FC<Props> = ({ route, navigation }) =
               <MetaItem icon="navigate-outline" label={`Khoảng ${formatDistance(distanceKm) ?? ''}`} />
             )}
             {distanceKm !== undefined && <MetaItem icon="bicycle-outline" label={estimateDeliveryTime(distanceKm, true)} />}
-            {restaurant.openTime && restaurant.closeTime && (
-              <MetaItem icon="time-outline" label={`${restaurant.openTime} - ${restaurant.closeTime}`} />
-            )}
+            <Pressable onPress={() => setScheduleSheetVisible(true)} className="active:opacity-70">
+              {todaySpecialClosing ? (
+                <MetaItem icon="alert-circle-outline" label={`Nghỉ hôm nay (${todaySpecialClosing.reason || 'Lễ/Tết'})`} />
+              ) : todaySchedule.isClosed ? (
+                <MetaItem icon="time-outline" label="Hôm nay nghỉ bán · Xem lịch" />
+              ) : (
+                <MetaItem
+                  icon="time-outline"
+                  label={`Hôm nay ${todaySchedule.openTime} - ${todaySchedule.closeTime} · Xem lịch`}
+                />
+              )}
+            </Pressable>
             {priceRange && (
               <MetaItem
                 icon="pricetag-outline"
@@ -302,13 +360,15 @@ export const RestaurantDetailScreen: React.FC<Props> = ({ route, navigation }) =
 
         {!canOrder && (
           <View className="mx-4 mt-3 flex-row items-center gap-2 rounded-md bg-danger-soft p-3">
-            <Icon name="moon-outline" size="md" tone="danger" />
+            <Icon name={isTimedPause ? 'time-outline' : todaySpecialClosing ? 'alert-circle-outline' : 'moon-outline'} size="md" tone="danger" />
             <Text variant="body" tone="danger" className="flex-1">
-              Quán đang đóng cửa
-              {restaurant.openTime && restaurant.closeTime
-                ? ` (giờ mở cửa ${restaurant.openTime} – ${restaurant.closeTime})`
-                : ''}
-              . Bạn có thể xem thực đơn nhưng chưa thể đặt món.
+              {todaySpecialClosing
+                ? `Quán nghỉ ngày hôm nay: ${todaySpecialClosing.reason || 'Nghỉ lễ/Tết'}. Bạn có thể xem thực đơn trước.`
+                : todaySchedule.isClosed
+                ? 'Quán không mở bán vào ngày hôm nay theo lịch tuần. Bạn có thể xem thực đơn trước.'
+                : isTimedPause
+                ? `Quán đang tạm nghỉ, tự mở lại lúc ${reopenTime}. Bạn có thể xem thực đơn trước.`
+                : `Quán đang đóng cửa (giờ mở cửa hôm nay ${todaySchedule.openTime} – ${todaySchedule.closeTime}). Bạn có thể xem thực đơn nhưng chưa thể đặt món.`}
             </Text>
           </View>
         )}
@@ -428,43 +488,25 @@ export const RestaurantDetailScreen: React.FC<Props> = ({ route, navigation }) =
               </Text>
             </View>
           ) : (
-            reviewsData.items.map((rv: PublicRestaurantReview) => (
-              <View key={rv.id} className="gap-2 rounded-xl bg-surface p-4 shadow-card">
-                <View className="flex-row items-center justify-between">
-                  <Text variant="body" weight="semibold">
-                    {rv.customerName}
-                  </Text>
-                  <View className="flex-row items-center gap-1">
-                    {Array.from({ length: 5 }, (_, idx) => (
-                      <Icon
-                        key={idx}
-                        name={idx < rv.rating ? 'star' : 'star-outline'}
-                        size="xs"
-                        tone={idx < rv.rating ? 'rating' : 'muted'}
-                      />
-                    ))}
-                  </View>
-                </View>
-                {!!rv.comment && (
-                  <Text variant="body" tone="default">
-                    {rv.comment}
-                  </Text>
-                )}
-                <Text variant="micro" weight="regular" tone="muted">
-                  {formatDateTime(rv.createdAt)}
+            <>
+              {!!reviewsData.photoCount && (
+                <Text variant="caption" weight="medium" tone="secondary">
+                  {reviewsData.photoCount} đánh giá có ảnh
                 </Text>
-                {!!rv.ownerReply && (
-                  <View className="mt-1 gap-1 rounded-lg bg-canvas-subtle p-3">
-                    <Text variant="caption" weight="semibold" tone="brand">
-                      Phản hồi từ quán:
-                    </Text>
-                    <Text variant="caption" tone="secondary">
-                      {rv.ownerReply}
-                    </Text>
-                  </View>
-                )}
-              </View>
-            ))
+              )}
+              {reviewsData.items.slice(0, 3).map((rv: PublicRestaurantReview) => (
+                <ReviewCard key={rv.id} review={rv} />
+              ))}
+              <Button
+                label={`Xem tất cả ${reviewsData.total} đánh giá`}
+                variant="outline"
+                size="md"
+                rightIcon="chevron-forward"
+                onPress={() =>
+                  navigation.navigate('RestaurantReviews', { restaurantId, restaurantName: restaurant.name })
+                }
+              />
+            </>
           )}
         </View>
       </ScrollView>
@@ -490,6 +532,10 @@ export const RestaurantDetailScreen: React.FC<Props> = ({ route, navigation }) =
         canOrder={canOrder}
         onClose={() => setSelected(null)}
         onConfirm={(item, sel) => requestAdd({ item, sel })}
+        onShare={(item) => {
+          const url = dishShareUrl(SOCKET_URL, item.id);
+          void share({ title: item.name, message: dishShareMessage(item, restaurant.name, url), url });
+        }}
       />
 
       <ConfirmDialog
@@ -508,6 +554,11 @@ export const RestaurantDetailScreen: React.FC<Props> = ({ route, navigation }) =
           setPending(null);
           setSelected(null);
         }}
+      />
+      <CustomerScheduleSheet
+        visible={scheduleSheetVisible}
+        onClose={() => setScheduleSheetVisible(false)}
+        restaurant={restaurant}
       />
     </View>
   );

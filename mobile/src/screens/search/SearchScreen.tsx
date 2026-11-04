@@ -1,7 +1,8 @@
 import { RouteProp, useNavigation, useRoute } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
+  ActivityIndicator,
   FlatList,
   Pressable,
   ScrollView,
@@ -11,10 +12,17 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { restaurantsApi } from '../../api/restaurants';
 import { RestaurantRow } from '../../components/modules/restaurant/RestaurantCards';
-import { AppImage, EmptyState, Icon, LoadingSpinner, Skeleton, Text } from '../../components/ui';
+import {
+  countActiveFilters,
+  DEFAULT_SEARCH_FILTERS,
+  SearchFilters,
+  SearchFilterSheet,
+  SORT_OPTIONS,
+} from '../../components/modules/search/SearchFilterSheet';
+import { AppImage, EmptyState, FilterChip, Icon, LoadingSpinner, Skeleton, Text } from '../../components/ui';
 import { useDebounce } from '../../hooks/useDebounce';
 import { useLocation } from '../../hooks/useLocation';
-import { useNearbyRestaurants, usePopularSearches } from '../../services/useRestaurants';
+import { useNearbyRestaurants, usePopularSearches, useSearchRestaurants } from '../../services/useRestaurants';
 import { useAddresses } from '../../services/useUser';
 import { resolveActiveDeliveryAddress, useDeliveryAddressStore } from '../../store/useDeliveryAddressStore';
 import { useSearchHistoryStore } from '../../store/useSearchHistoryStore';
@@ -98,7 +106,11 @@ export const SearchScreen: React.FC = () => {
   const hasActiveCoords = activeLat !== null && activeLng !== null;
 
   const [searchQuery, setSearchQuery] = useState(route.params?.initialQuery || '');
-  const [openOnly, setOpenOnly] = useState(false);
+  const [filters, setFilters] = useState<SearchFilters>(DEFAULT_SEARCH_FILTERS);
+  const [filterSheet, setFilterSheet] = useState({ open: false, key: 0 });
+  const activeCount = countActiveFilters(filters);
+  const openFilterSheet = () => setFilterSheet((f) => ({ open: true, key: f.key + 1 }));
+  const patchFilters = (patch: Partial<SearchFilters>) => setFilters((f) => ({ ...f, ...patch }));
 
   const history = useSearchHistoryStore((s) => s.history);
   const loadHistory = useSearchHistoryStore((s) => s.loadHistory);
@@ -130,17 +142,31 @@ export const SearchScreen: React.FC = () => {
     limit: 12,
   });
 
-  // Lấy kết quả tìm kiếm khi người dùng đã nhập từ khoá
-  const { data: searchData, isLoading: isSearchLoading } = useNearbyRestaurants({
-    lat: activeLat,
-    lng: activeLng,
-    q: isSearching ? debouncedQuery.trim() : undefined,
-    openOnly,
-    radiusKm: 20,
-  });
+  // Kết quả tìm kiếm có lọc/sắp xếp, tải thêm theo trang khi cuộn
+  const searchQueryResult = useSearchRestaurants(
+    {
+      lat: activeLat,
+      lng: activeLng,
+      q: debouncedQuery.trim() || undefined,
+      radiusKm: 20,
+      limit: 20,
+      sort: filters.sort === 'relevance' ? undefined : filters.sort,
+      openOnly: filters.openOnly || undefined,
+      hasPromo: filters.hasPromo || undefined,
+      minRating: filters.minRating,
+      maxDistanceKm: filters.maxDistanceKm,
+      maxDeliveryFee: filters.maxDeliveryFee,
+    },
+    isSearching,
+  );
+  const isSearchLoading = searchQueryResult.isLoading;
+  const searchResults = useMemo(
+    () => searchQueryResult.data?.pages.flatMap((p) => p.items) ?? [],
+    [searchQueryResult.data],
+  );
 
   const recommendedRestaurants = recommendedData?.items || [];
-  const searchResults = searchData?.items || [];
+  const sortLabel = SORT_OPTIONS.find((o) => o.value === filters.sort)?.label ?? 'Sắp xếp';
 
   return (
     <SafeAreaView edges={['top', 'bottom']} style={{ flex: 1 }} className="flex-1 bg-surface">
@@ -200,27 +226,46 @@ export const SearchScreen: React.FC = () => {
       ) : isSearching ? (
         // ================= KẾT QUẢ TÌM KIẾM =================
         <View className="flex-1">
-          {/* Bộ lọc đang mở cửa */}
-          <View className="flex-row px-4 pt-3 pb-1">
-            <Pressable
-              className={`flex-row items-center gap-1.5 rounded-full px-3 py-1.5 active:opacity-75 ${
-                openOnly ? 'bg-brand-500' : 'border border-line bg-canvas-subtle'
-              }`}
-              onPress={() => setOpenOnly(!openOnly)}
-            >
-              <Icon
-                name={openOnly ? 'checkmark-circle' : 'time-outline'}
-                size={16}
-                color={openOnly ? palette.surface : palette.ink.secondary}
+          {/* Thanh lọc nhanh: nút mở bảng lọc + sắp xếp + các lọc hay dùng */}
+          <View className="h-14 justify-center border-b border-line-subtle">
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerClassName="items-center gap-2 px-4">
+              <FilterChip
+                label={activeCount ? `Lọc (${activeCount})` : 'Lọc'}
+                icon="options-outline"
+                selected={activeCount > 0}
+                onPress={openFilterSheet}
               />
-              <Text
-                variant="caption"
-                weight="semibold"
-                className={openOnly ? 'text-ink-inverse' : 'text-ink-secondary'}
-              >
-                Đang mở cửa
-              </Text>
-            </Pressable>
+              <FilterChip
+                label={sortLabel}
+                icon="swap-vertical"
+                selected={filters.sort !== 'relevance'}
+                onPress={openFilterSheet}
+              />
+              <FilterChip
+                label="Có ưu đãi"
+                icon="pricetag-outline"
+                selected={filters.hasPromo}
+                onPress={() => patchFilters({ hasPromo: !filters.hasPromo })}
+              />
+              <FilterChip
+                label="Đang mở cửa"
+                icon="time-outline"
+                selected={filters.openOnly}
+                onPress={() => patchFilters({ openOnly: !filters.openOnly })}
+              />
+              <FilterChip
+                label="Từ 4,5★"
+                icon="star-outline"
+                selected={filters.minRating === 4.5}
+                onPress={() => patchFilters({ minRating: filters.minRating === 4.5 ? undefined : 4.5 })}
+              />
+              <FilterChip
+                label="Dưới 3 km"
+                icon="navigate-outline"
+                selected={filters.maxDistanceKm === 3}
+                onPress={() => patchFilters({ maxDistanceKm: filters.maxDistanceKm === 3 ? undefined : 3 })}
+              />
+            </ScrollView>
           </View>
 
           {isSearchLoading ? (
@@ -230,6 +275,31 @@ export const SearchScreen: React.FC = () => {
               data={searchResults}
               keyExtractor={(item) => item.id}
               contentContainerClassName="p-4 gap-3"
+              onEndReachedThreshold={0.4}
+              onEndReached={() => {
+                if (searchQueryResult.hasNextPage && !searchQueryResult.isFetchingNextPage) {
+                  void searchQueryResult.fetchNextPage();
+                }
+              }}
+              ListHeaderComponent={
+                activeCount > 0 && searchResults.length > 0 ? (
+                  <View className="flex-row items-center justify-between">
+                    <Text variant="caption" weight="regular" tone="secondary">
+                      Đang áp dụng {activeCount} bộ lọc
+                    </Text>
+                    <Pressable accessibilityRole="button" hitSlop={8} onPress={() => setFilters(DEFAULT_SEARCH_FILTERS)}>
+                      <Text variant="caption" weight="semibold" tone="brand">
+                        Xoá lọc
+                      </Text>
+                    </Pressable>
+                  </View>
+                ) : undefined
+              }
+              ListFooterComponent={
+                searchQueryResult.isFetchingNextPage ? (
+                  <ActivityIndicator color={palette.brand['500']} className="py-4" />
+                ) : undefined
+              }
               renderItem={({ item }) => (
                 <RestaurantRow
                   restaurant={item}
@@ -242,14 +312,32 @@ export const SearchScreen: React.FC = () => {
                 />
               )}
               ListEmptyComponent={
-                <EmptyState
-                  icon="search-outline"
-                  title="Không tìm thấy kết quả"
-                  description={`Không có quán hoặc món nào khớp "${debouncedQuery}". Thử từ khoá khác (có thể gõ không dấu) hoặc tắt bộ lọc "Đang mở cửa".`}
-                />
+                activeCount > 0 ? (
+                  <EmptyState
+                    icon="options-outline"
+                    title="Không có quán phù hợp bộ lọc"
+                    description={`Không có quán nào khớp "${debouncedQuery}" với bộ lọc đang chọn. Thử bỏ bớt bộ lọc nhé.`}
+                    actionLabel="Xoá bộ lọc"
+                    onAction={() => setFilters(DEFAULT_SEARCH_FILTERS)}
+                  />
+                ) : (
+                  <EmptyState
+                    icon="search-outline"
+                    title="Không tìm thấy kết quả"
+                    description={`Không có quán hoặc món nào khớp "${debouncedQuery}". Thử từ khoá khác (có thể gõ không dấu).`}
+                  />
+                )
               }
             />
           )}
+
+          <SearchFilterSheet
+            key={filterSheet.key}
+            visible={filterSheet.open}
+            value={filters}
+            onClose={() => setFilterSheet((f) => ({ ...f, open: false }))}
+            onApply={setFilters}
+          />
         </View>
       ) : (
         // ================= GIAO DIỆN GỢI Ý (LỊCH SỬ TÌM KIẾM + XU HƯỚNG + ĐỀ XUẤT) =================

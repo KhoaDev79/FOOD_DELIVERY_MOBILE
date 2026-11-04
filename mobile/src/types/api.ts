@@ -12,6 +12,11 @@ export type OrderStatus =
 
 export type CancelReason =
   | 'CUSTOMER_CHANGED_MIND'
+  | 'CUSTOMER_WRONG_ITEMS'
+  | 'CUSTOMER_WRONG_ADDRESS'
+  | 'CUSTOMER_WAIT_TOO_LONG'
+  | 'CUSTOMER_FOUND_ALTERNATIVE'
+  | 'CUSTOMER_OTHER'
   | 'RESTAURANT_TIMEOUT'
   | 'RESTAURANT_OUT_OF_STOCK'
   | 'RESTAURANT_CLOSED'
@@ -62,7 +67,38 @@ export interface DeliveryContactAttempt {
 }
 
 export type PaymentMethod = 'COD' | 'VNPAY';
-export type PaymentStatus = 'UNPAID' | 'PAID' | 'FAILED' | 'REFUNDED';
+export type PaymentStatus = 'UNPAID' | 'PAID' | 'FAILED' | 'REFUNDED' | 'REFUND_PENDING';
+
+/** Thông tin cho bảng huỷ đơn của khách */
+export interface CancelInfo {
+  canCancel: boolean;
+  reason?: string;
+  reasons: { value: CancelReason; label: string; requiresNote?: boolean }[];
+  cancelCount: number;
+  limit: number;
+  windowDays: number;
+  warning?: string;
+  refundNotice?: string;
+}
+
+/** Đơn chờ / đã hoàn tiền (màn admin) */
+export interface RefundOrder {
+  id: string;
+  status: OrderStatus;
+  paymentMethod: PaymentMethod;
+  paymentStatus: PaymentStatus;
+  total: number;
+  cancelReason?: CancelReason | null;
+  failedReason?: FailedDeliveryReason | null;
+  cancelNote?: string | null;
+  refundedAt?: string | null;
+  refundNote?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  customer: { id: string; fullName: string; phone?: string | null };
+  restaurant: { id: string; name: string };
+  transactions: { txnRef: string; providerTxnNo?: string | null; amount: number; bankCode?: string | null }[];
+}
 export type DistanceSource = 'ROAD' | 'ESTIMATED';
 
 export interface OrderQuoteLine {
@@ -82,11 +118,89 @@ export interface OrderQuoteResponse {
   baseDeliveryFee: number;
   peakSurcharge: number;
   deliveryFee: number;
+  /** Giảm trên tiền món (mã giảm giá) */
+  itemDiscount?: number;
+  /** Giảm trên phí giao (mã freeship) */
+  shippingDiscount?: number;
+  appliedVouchers?: { code: string; title: string; discountType: VoucherType; amount: number }[];
+  rejectedVouchers?: { code: string; reason: string }[];
   total: number;
   isPeak: boolean;
   estimatedMinutes: { min: number; max: number };
   expiresAt: string;
   quoteToken: string;
+}
+
+export type VoucherType = 'FIXED_AMOUNT' | 'PERCENTAGE' | 'FREE_SHIP';
+export type VoucherFunding = 'PLATFORM' | 'RESTAURANT';
+export type VoucherKind = 'CAMPAIGN' | 'COMPENSATION';
+
+/** Voucher hiển thị cho khách (Ví voucher, chọn mã ở Thanh toán) */
+export interface VoucherView {
+  id: string;
+  code: string;
+  title: string;
+  description?: string | null;
+  discountType: VoucherType;
+  discountValue: number;
+  maxDiscountAmount?: number | null;
+  minOrderAmount: number;
+  endDate: string;
+  restaurant?: { id: string; name: string } | null;
+  isPersonal: boolean;
+  onlyNewCustomer: boolean;
+  remaining: number;
+  /** Ở danh sách chọn mã: kết quả xét điều kiện với giỏ hiện tại */
+  eligible?: boolean;
+  reason?: string;
+  estimatedSaving?: number;
+  slot?: 'DISCOUNT' | 'FREESHIP';
+  /** Ở Ví voucher */
+  status?: 'AVAILABLE' | 'USED' | 'EXPIRED';
+  usedAt?: string;
+  savedAmount?: number;
+  orderId?: string;
+}
+
+/** Voucher đầy đủ cho màn quản lý (admin / chủ quán) */
+export interface VoucherAdmin {
+  id: string;
+  code: string;
+  title: string;
+  description?: string | null;
+  discountType: VoucherType;
+  discountValue: number;
+  maxDiscountAmount?: number | null;
+  minOrderAmount: number;
+  maxUsage: number;
+  usedCount: number;
+  perUserLimit: number;
+  startDate: string;
+  endDate: string;
+  isActive: boolean;
+  onlyNewCustomer: boolean;
+  fundedBy: VoucherFunding;
+  kind: VoucherKind;
+  restaurantId?: string | null;
+  restaurant?: { id: string; name: string } | null;
+  user?: { id: string; fullName: string } | null;
+  createdAt: string;
+}
+
+export interface VoucherInput {
+  code: string;
+  title: string;
+  description?: string;
+  discountType: VoucherType;
+  discountValue: number;
+  maxDiscountAmount?: number | null;
+  minOrderAmount?: number;
+  maxUsage: number;
+  perUserLimit?: number;
+  startDate?: string;
+  endDate: string;
+  onlyNewCustomer?: boolean;
+  isActive?: boolean;
 }
 
 export interface ApiResponse<T> {
@@ -113,6 +227,8 @@ export interface User {
   avatarUrl?: string | null;
   isActive: boolean;
   createdAt: string;
+  /** Tài khoản đã liên kết đăng nhập Google */
+  hasGoogle?: boolean;
   /** Chỉ có trong danh sách người dùng của admin. */
   _count?: { restaurants: number };
   driverProfile?: {
@@ -157,6 +273,8 @@ export interface Restaurant {
   status?: RestaurantStatus;
   suspendReason?: string | null;
   isOpen: boolean;
+  /** Mốc thời gian tạm nghỉ có hẹn giờ (chuỗi ISO 8601). Hết hạn quán tự mở lại theo giờ. */
+  pausedUntil?: string | null;
   rating: number;
   ratingCount?: number;
   distanceKm?: number;
@@ -168,8 +286,14 @@ export interface Restaurant {
   closeTime?: string;
   /** Quán có giao tới vị trí khách không (khoảng cách ≤ bán kính giao). false = chỉ để xem. */
   canDeliver?: boolean;
+  /** Lịch mở cửa theo 7 ngày trong tuần */
+  openingHours?: RestaurantOpeningHour[];
+  /** Danh sách ngày nghỉ đặc biệt của quán (lễ, Tết...) */
+  specialClosings?: RestaurantSpecialClosing[];
   /** Khi tìm kiếm: tên các món của quán khớp từ khoá. */
   matchedDishes?: string[];
+  /** Nhãn ưu đãi của quán ("Giảm 15K", "Freeship", "Món giảm giá") */
+  promoLabel?: string | null;
   /** Chỉ có ở /restaurants/mine: khách có đặt được không (bật mở cửa + trong giờ mở cửa). */
   acceptingOrders?: boolean;
 }
@@ -208,6 +332,11 @@ export interface MenuItem {
   options?: MenuItemOptions | null;
   imageUrl?: string | null;
   isAvailable: boolean;
+  /** "Hết hôm nay": lúc tự mở bán lại (ISO). null + isAvailable=false = hết đến khi quán bật lại. */
+  soldOutUntil?: string | null;
+  /** Khung giờ bán (HH:mm). null = bán suốt giờ mở cửa của quán. */
+  availableFrom?: string | null;
+  availableTo?: string | null;
   isArchived: boolean;
 }
 
@@ -224,6 +353,8 @@ export interface NearbyDish extends MenuItem {
     name: string;
     imageUrl?: string | null;
     isOpen: boolean;
+  /** Mốc thời gian tạm nghỉ có hẹn giờ (chuỗi ISO 8601). Hết hạn quán tự mở lại theo giờ. */
+  pausedUntil?: string | null;
     rating: number;
     latitude: number;
     longitude: number;
@@ -249,6 +380,43 @@ export interface CuisineCategory {
   imageUrl: string;
   sortOrder: number;
   keywords: string[];
+}
+
+/** Danh mục Trợ giúp / FAQ */
+export interface HelpCategory {
+  id: string;
+  code: string;
+  name: string;
+  icon?: string | null;
+  sortOrder: number;
+  isActive: boolean;
+  audience: 'CUSTOMER' | 'DRIVER' | 'OWNER';
+  _count?: {
+    articles: number;
+  };
+}
+
+/** Bài viết Trợ giúp / FAQ */
+export interface HelpArticle {
+  id: string;
+  categoryId: string;
+  title: string;
+  body: string;
+  keywords: string[];
+  sortOrder: number;
+  isActive: boolean;
+  helpfulCount: number;
+  notHelpfulCount: number;
+  viewCount: number;
+  createdAt: string;
+  updatedAt: string;
+  category?: {
+    id: string;
+    code: string;
+    name: string;
+    icon?: string | null;
+  };
+  userFeedback?: boolean | null;
 }
 
 export interface Category {
@@ -286,6 +454,8 @@ export interface OrderStatusHistory {
   orderId: string;
   status: OrderStatus;
   changedBy?: string | null;
+  /** Chỉ API admin trả: tên + vai trò người đổi trạng thái (null = hệ thống tự động). */
+  actor?: { id: string; fullName: string; role: Role } | null;
   note?: string | null;
   createdAt: string;
 }
@@ -315,9 +485,25 @@ export interface PublicRestaurantReview {
   createdAt: string;
   customerName: string;
   customerAvatarUrl?: string | null;
+  /** Ảnh khách đính kèm (đã bỏ ảnh bị ẩn) */
+  images?: string[];
 }
 
+/** Đầu trang đánh giá của quán: điểm trung bình, số đánh giá theo sao, số đánh giá có ảnh / bình luận */
+export interface ReviewSummary {
+  rating: number;
+  ratingCount: number;
+  total: number;
+  breakdown?: { star: number; count: number }[];
+  photoCount?: number;
+  commentCount?: number;
+}
+
+export type ReviewImageHideReason = 'IRRELEVANT' | 'OFFENSIVE' | 'PERSONAL_INFO' | 'SPAM';
+
 export interface ManageRestaurantReview extends OrderReview {
+  images?: string[];
+  hiddenImages?: string[];
   customer?: {
     id: string;
     fullName: string;
@@ -338,6 +524,12 @@ export interface OrderDetail {
   peakSurcharge?: number;
   platformCommission?: number;
   driverEarning?: number;
+  discountAmount?: number;
+  shippingDiscount?: number;
+  voucherCode?: string | null;
+  freeshipVoucherCode?: string | null;
+  refundedAt?: string | null;
+  refundNote?: string | null;
   total: number;
   distanceKm: number;
   distanceSource?: DistanceSource;
@@ -626,3 +818,155 @@ export interface DriverReviewItem {
   };
 }
 
+
+/** Bản ghi thông báo hệ thống */
+export interface AppNotification {
+  id: string;
+  userId: string;
+  type: 'order' | 'order_available' | 'review_reply' | 'driver_offline' | 'system' | string;
+  title: string;
+  body: string;
+  data?: Record<string, any> | null;
+  readAt?: string | null;
+  createdAt: string;
+}
+
+export interface NotificationListResponse {
+  items: AppNotification[];
+  total: number;
+  unreadCount: number;
+  page: number;
+  limit: number;
+  totalPages: number;
+  hasMore: boolean;
+}
+
+/** Giờ mở cửa theo ngày trong tuần (0 = Chủ nhật, 1 = Thứ hai, ..., 6 = Thứ bảy) */
+export interface RestaurantOpeningHour {
+  id: string;
+  restaurantId: string;
+  dayOfWeek: number;
+  openTime: string;
+  closeTime: string;
+  isClosed: boolean;
+}
+
+/** Ngày nghỉ đặc biệt (lễ, Tết, sửa chữa...) */
+export interface RestaurantSpecialClosing {
+  id: string;
+  restaurantId: string;
+  date: string;
+  reason?: string | null;
+}
+
+export interface RestaurantScheduleResponse {
+  defaultOpenTime: string;
+  defaultCloseTime: string;
+  openingHours: RestaurantOpeningHour[];
+  specialClosings: RestaurantSpecialClosing[];
+}
+
+export type SupportTicketStatus = 'NEW' | 'IN_PROGRESS' | 'WAITING_CUSTOMER' | 'RESOLVED' | 'CLOSED';
+export type SupportTicketPriority = 'LOW' | 'NORMAL' | 'HIGH' | 'URGENT';
+export type SupportMessageRole = 'CUSTOMER' | 'ADMIN' | 'BOT' | 'SYSTEM';
+
+export interface SupportMessage {
+  id: string;
+  ticketId: string;
+  senderId?: string | null;
+  senderRole: SupportMessageRole;
+  content: string;
+  attachments: string[];
+  createdAt: string;
+  sender?: {
+    id: string;
+    fullName: string;
+    avatarUrl?: string | null;
+    role: string;
+  } | null;
+}
+
+export interface SupportTicket {
+  id: string;
+  code: string;
+  userId: string;
+  orderId?: string | null;
+  category: string;
+  subject: string;
+  status: SupportTicketStatus;
+  priority: SupportTicketPriority;
+  resolution?: {
+    decision: 'AUTO_COMPENSATE' | 'NEEDS_REVIEW' | 'INFO_ONLY';
+    suggestedAction: string;
+    reason: string;
+    compensationAmount?: number | null;
+    compensationType?: 'VOUCHER' | 'REFUND_PENDING' | null;
+    /** Mã voucher bồi thường đã phát (nếu có) */
+    voucherCode?: string | null;
+  } | null;
+  csatScore?: number | null;
+  csatComment?: string | null;
+  firstResponseAt?: string | null;
+  resolvedAt?: string | null;
+  closedAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  order?: {
+    id: string;
+    status: string;
+    total: number;
+    paymentMethod?: string;
+    createdAt?: string;
+    deliveredAt?: string | null;
+    restaurant: { id: string; name: string; imageUrl?: string | null; phone?: string | null };
+    items?: { id: string; name: string; unitPrice: number; quantity: number }[];
+  } | null;
+  user?: {
+    id: string;
+    fullName: string;
+    phone?: string | null;
+    avatarUrl?: string | null;
+  } | null;
+  lastMessage?: {
+    content: string;
+    createdAt: string;
+    senderRole: SupportMessageRole;
+  } | null;
+  messages?: SupportMessage[];
+}
+
+export type BotCardType = 'ORDER_STATUS' | 'FAQ_ARTICLE' | 'START_ISSUE' | 'CONTACT_SUPPORT' | 'HANDOVER';
+
+export interface BotActionCard {
+  type: BotCardType;
+  title: string;
+  subtitle?: string;
+  orderId?: string;
+  orderCode?: string;
+  status?: OrderStatus;
+  imageUrl?: string | null;
+  articleId?: string;
+  issueType?: string;
+  summary?: string;
+}
+
+export interface BotWelcome {
+  greeting: string;
+  mode: 'AI' | 'BASIC';
+  quickReplies: string[];
+  dailyLimit: number;
+  remainingToday: number;
+}
+
+export interface BotReplyResult {
+  messageId: string;
+  conversationId: string;
+  role: 'assistant' | 'user';
+  content: string;
+  source?: 'GEMINI' | 'SCRIPT' | 'CACHE';
+  cards?: BotActionCard[];
+  quickReplies?: string[];
+  isRateLimited?: boolean;
+  createdAt?: string;
+  feedback?: 'HELPFUL' | 'UNHELPFUL' | null;
+}

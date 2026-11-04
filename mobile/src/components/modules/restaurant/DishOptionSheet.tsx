@@ -1,9 +1,11 @@
 import React, { useMemo, useState } from 'react';
 import { ScrollView, View } from 'react-native';
+import { useNow } from '../../../hooks/useNow';
 import { MenuItem } from '../../../types/api';
+import { getDishAvailabilityStatus } from '../../../utils/dishAvailability';
 import { formatVND } from '../../../utils/format';
 import { linePrice, originalLinePrice, parseOptions } from '../../../utils/menuPricing';
-import { AppImage, BottomSheet, Button, ChoiceGroup, ChoiceRow, Input, QuantityStepper, Text } from '../../ui';
+import { AppImage, BottomSheet, Button, ChoiceGroup, ChoiceRow, Icon, IconButton, Input, QuantityStepper, Text, cn } from '../../ui';
 
 export interface DishSelection {
   sizeId?: string;
@@ -22,6 +24,8 @@ interface Props {
   confirmLabel?: string;
   onClose: () => void;
   onConfirm: (item: MenuItem, sel: DishSelection) => void;
+  /** Có thì hiện nút chia sẻ món cạnh tên món. */
+  onShare?: (item: MenuItem) => void;
 }
 
 const MAX_TOPPINGS = 10; // trùng giới hạn của backend
@@ -37,6 +41,7 @@ export const DishOptionSheet: React.FC<Props> = ({
   confirmLabel,
   onClose,
   onConfirm,
+  onShare,
 }) => {
   // Giá trị mặc định lấy từ chính món (size đầu tiên, mức đầu tiên) hoặc từ initialSelection khi sửa món.
   const opts = useMemo(() => parseOptions(item?.options), [item]);
@@ -51,6 +56,11 @@ export const DishOptionSheet: React.FC<Props> = ({
   );
   const [quantity, setQuantity] = useState(() => initialSelection?.quantity ?? 1);
   const [note, setNote] = useState(() => initialSelection?.note ?? '');
+
+  const now = useNow();
+  const availability = useMemo(() => (item ? getDishAvailabilityStatus(item, now) : null), [item, now]);
+  const isAvailableNow = (item?.isAvailable ?? true) && (availability?.isAvailableNow ?? true);
+  const canAddToCart = canOrder && isAvailableNow;
 
   if (!item) return null;
 
@@ -76,11 +86,17 @@ export const DishOptionSheet: React.FC<Props> = ({
       note: note.trim() || undefined,
     });
 
-  const buttonLabel = confirmLabel
+  let buttonLabel = confirmLabel
     ? `${confirmLabel} · ${formatVND(unit * quantity)}`
-    : canOrder
-    ? `Thêm vào giỏ · ${formatVND(unit * quantity)}`
-    : 'Quán đang đóng cửa';
+    : `Thêm vào giỏ · ${formatVND(unit * quantity)}`;
+
+  if (item && !item.isAvailable) {
+    buttonLabel = 'Món đã tạm hết';
+  } else if (availability?.isTimedDish && !availability.isAvailableNow && item?.availableFrom) {
+    buttonLabel = `Chỉ bán ${item.availableFrom} – ${item.availableTo}`;
+  } else if (!canOrder) {
+    buttonLabel = 'Quán đang đóng cửa';
+  }
 
   return (
     <BottomSheet
@@ -91,7 +107,7 @@ export const DishOptionSheet: React.FC<Props> = ({
           <QuantityStepper value={quantity} onChange={setQuantity} min={1} max={50} />
           <Button
             label={buttonLabel}
-            disabled={!canOrder}
+            disabled={!canAddToCart}
             onPress={confirm}
             className="flex-1"
           />
@@ -101,7 +117,39 @@ export const DishOptionSheet: React.FC<Props> = ({
       <ScrollView className="max-h-[520px]" keyboardShouldPersistTaps="handled" contentContainerClassName="gap-4 pb-4">
         <AppImage uri={item.imageUrl} className="h-44 w-full rounded-lg" fallbackIcon="fast-food-outline" />
         <View className="gap-1">
-          <Text variant="title">{item.name}</Text>
+          <View className="flex-row items-start gap-2">
+            <Text variant="title" className="flex-1">
+              {item.name}
+            </Text>
+            {onShare && (
+              <IconButton
+                icon="share-social-outline"
+                variant="subtle"
+                size="sm"
+                accessibilityLabel={`Chia sẻ món ${item.name}`}
+                onPress={() => onShare(item)}
+              />
+            )}
+          </View>
+          {availability?.isTimedDish && (
+            <View
+              className={cn(
+                'flex-row items-center gap-2 rounded-xl px-3 py-2',
+                availability.isAvailableNow ? 'bg-brand-50' : 'bg-accent-50',
+              )}
+            >
+              <Icon name="time-outline" size="sm" tone={availability.isAvailableNow ? 'brand' : 'accent'} />
+              <Text
+                variant="caption"
+                weight="medium"
+                tone={availability.isAvailableNow ? 'brand' : 'accent'}
+                className="flex-1"
+              >
+                Khung giờ mở bán: {item.availableFrom} – {item.availableTo}
+                {!availability.isAvailableNow ? ` · Bắt đầu bán từ ${item.availableFrom}` : ' · Đang mở bán'}
+              </Text>
+            </View>
+          )}
           {!!item.description && (
             <Text variant="body" tone="secondary">
               {item.description}

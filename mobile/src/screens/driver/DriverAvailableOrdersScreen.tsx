@@ -235,7 +235,7 @@ export const DriverAvailableOrdersScreen: React.FC = () => {
     onSuccess: (updated) => {
       queryClient.invalidateQueries({ queryKey: ['driver', 'available'] });
       queryClient.invalidateQueries({ queryKey: ['driver', 'deliveries'] });
-      toast(`Đã nhận chuyến #${updated.id.slice(0, 8).toUpperCase()}!`, 'success');
+      toast(`Đã nhận chuyến #${orderCode(updated.id)}!`, 'success');
       navigation.navigate('DriverDeliveryDetail', { orderId: updated.id });
     },
     onError: (err: any) => {

@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="utf-8" />
+    <meta httpEquiv="X-UA-Compatible" content="IE=edge" />
+    <!-- viewport-fit=cover: khi mở từ màn hình chính iPhone, nội dung tràn tới tai thỏ; app tự chừa vùng an toàn -->
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no, viewport-fit=cover" />
+    <title>ZomZom – Giao đồ ăn</title>
+    <meta name="description" content="ZomZom – đặt món ngon quanh bạn, giao tận nơi." />
+    <meta name="theme-color" content="#0E4A55" />
+
+    <!-- "Thêm vào Màn hình chính" trên iPhone: chạy toàn màn hình như app, có biểu tượng và tên riêng -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="ZomZom" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+    <link rel="icon" type="image/png" sizes="48x48" href="/icons/favicon-48.png" />
+    <link rel="manifest" href="/manifest.json" />
+
+    <!-- The `react-native-web` recommended style reset: https://necolas.github.io/react-native-web/docs/setup/#root-element -->
+    <style id="expo-reset">
+      /* These styles make the body full-height */
+      html,
+      body {
+        height: 100%;
+        background-color: #0E4A55;
+      }
+      /* These styles disable body scrolling if you are using <ScrollView> */
+      body {
+        overflow: hidden;
+        /* iOS: không cho kéo nảy cả trang / tự phóng to chữ khi xoay máy */
+        overscroll-behavior: none;
+        -webkit-text-size-adjust: 100%;
+      }
+      /* These styles make the root element full-height */
+      #root {
+        display: flex;
+        height: 100%;
+        flex: 1;
+      }
+    </style>
+  </head>
+
+  <body>
+    <noscript>Vui lòng bật JavaScript để dùng ZomZom.</noscript>
+    <div id="root"></div>
+  </body>
+</html>

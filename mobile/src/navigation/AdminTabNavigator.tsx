@@ -1,7 +1,12 @@
+import { NotificationCenterScreen } from '../screens/notifications/NotificationCenterScreen';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import React from 'react';
 import { FloatingTabBar, TabMeta } from '../components/ui/FloatingTabBar';
+import { AdminAuditLogScreen } from '../screens/admin/AdminAuditLogScreen';
+import { AdminSupportTicketsScreen } from '../screens/admin/AdminSupportTicketsScreen';
+import { VoucherManageScreen } from '../screens/voucher/VoucherManageScreen';
+import { AdminRefundsScreen } from '../screens/admin/AdminRefundsScreen';
 import { AdminBannersScreen } from '../screens/admin/AdminBannersScreen';
 import { AdminCuisinesScreen } from '../screens/admin/AdminCuisinesScreen';
 import { AdminDashboardScreen } from '../screens/admin/AdminDashboardScreen';
@@ -48,5 +53,10 @@ export const AdminTabNavigator: React.FC = () => (
     <Stack.Screen name="EditProfile" component={EditProfileScreen as React.ComponentType<any>} />
     <Stack.Screen name="AdminBanners" component={AdminBannersScreen} />
     <Stack.Screen name="AdminCuisines" component={AdminCuisinesScreen} />
+    <Stack.Screen name="AdminAuditLog" component={AdminAuditLogScreen} />
+    <Stack.Screen name="AdminSupportTickets" component={AdminSupportTicketsScreen} />
+    <Stack.Screen name="AdminVouchers" component={VoucherManageScreen} />
+    <Stack.Screen name="AdminRefunds" component={AdminRefundsScreen} />
+    <Stack.Screen name="NotificationCenter" component={NotificationCenterScreen} />
   </Stack.Navigator>
 );

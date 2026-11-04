@@ -80,6 +80,11 @@ export const ORDER_STEPS = [
 
 export const CANCEL_REASON_LABELS: Record<CancelReason, string> = {
   CUSTOMER_CHANGED_MIND: 'Khách hàng đổi ý',
+  CUSTOMER_WRONG_ITEMS: 'Khách đặt nhầm món / số lượng',
+  CUSTOMER_WRONG_ADDRESS: 'Khách nhập sai địa chỉ',
+  CUSTOMER_WAIT_TOO_LONG: 'Khách chờ quán xác nhận quá lâu',
+  CUSTOMER_FOUND_ALTERNATIVE: 'Khách chọn quán khác',
+  CUSTOMER_OTHER: 'Khách huỷ vì lý do khác',
   RESTAURANT_OUT_OF_STOCK: 'Nhà hàng hết món / nguyên liệu',
   RESTAURANT_CLOSED: 'Nhà hàng đóng cửa đột xuất',
   RESTAURANT_OTHER: 'Lý do khác từ nhà hàng',

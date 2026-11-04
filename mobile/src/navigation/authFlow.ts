@@ -1,6 +1,6 @@
 import { StackActions } from '@react-navigation/native';
 
-const AUTH_SCREENS = new Set(['Login', 'Register']);
+const AUTH_SCREENS = new Set(['Login', 'Register', 'ForgotPassword']);
 
 interface StackNavigationLike {
   getState: () => { routes: { name: string }[] } | undefined;

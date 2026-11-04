@@ -12,6 +12,8 @@ import {
   OrderQuoteResponse,
   OrderSummary,
   PaginatedResult,
+  CancelInfo,
+  RefundOrder,
 } from '../types/api';
 
 export interface OrderItemPayload {
@@ -28,6 +30,8 @@ export interface QuoteOrderPayload {
   restaurantId: string;
   items: OrderItemPayload[];
   addressId: string;
+  /** Tối đa 1 mã giảm giá + 1 mã freeship */
+  voucherCodes?: string[];
 }
 
 export interface CreateOrderPayload {
@@ -36,6 +40,7 @@ export interface CreateOrderPayload {
   addressId: string;
   quoteToken: string;
   note?: string;
+  voucherCodes?: string[];
 }
 
 export interface UpdateOrderStatusOptions {
@@ -59,12 +64,22 @@ export const ordersApi = {
 
   getDetail: (id: string) => apiClient.get<any, OrderDetail>(`/orders/${id}`),
 
-  cancel: (id: string, cancelNote?: string) =>
+  /** Khách huỷ đơn (chỉ khi quán chưa nhận), bắt buộc lý do */
+  cancel: (id: string, cancelReason: CancelReason = 'CUSTOMER_CHANGED_MIND', cancelNote?: string) =>
     apiClient.patch<any, OrderDetail>(`/orders/${id}/status`, {
       status: 'CANCELLED',
-      cancelReason: 'CUSTOMER_CHANGED_MIND',
+      cancelReason,
       cancelNote,
     }),
+
+  getCancelInfo: (id: string) => apiClient.get<any, CancelInfo>(`/orders/${id}/cancel-info`),
+
+  // ===================== ADMIN: HOÀN TIỀN =====================
+  listRefunds: (status: 'pending' | 'done') =>
+    apiClient.get<any, RefundOrder[]>('/admin/refunds', { params: { status } }),
+
+  confirmRefund: (orderId: string, note: string) =>
+    apiClient.post<any, unknown>(`/admin/refunds/${orderId}/confirm`, { note }),
 
   updateStatus: (id: string, status: string, opts?: UpdateOrderStatusOptions) =>
     apiClient.patch<any, OrderDetail>(`/orders/${id}/status`, { status, ...opts }),
@@ -95,7 +110,14 @@ export const ordersApi = {
   /** Khách chấm điểm quán (1–5 sao) cho đơn đã giao; điểm trung bình của quán được cập nhật. */
   review: (
     id: string,
-    data: { rating: number; comment?: string; driverRating?: number; driverComment?: string },
+    data: {
+      rating: number;
+      comment?: string;
+      driverRating?: number;
+      driverComment?: string;
+      /** Tối đa 3 ảnh (data URI) */
+      images?: string[];
+    },
   ) => apiClient.post<any, unknown>(`/orders/${id}/review`, data),
 
   /** Tin nhắn chat theo đơn hàng (Khách - Tài xế - Quán) */

@@ -5,6 +5,7 @@ import { KeyboardAvoidingView, Platform, Pressable, ScrollView, TextInput, View 
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { ordersApi } from '../../api/orders';
 import { orderCode } from '../../components/modules/partner/PartnerKit';
+import { ReviewPhotoPicker } from '../../components/modules/review/ReviewPhotoPicker';
 import { AppImage, Button, cn, Icon, IconName, Text, TopBar, useToast } from '../../components/ui';
 import { queryKeys } from '../../constants/queryKeys';
 import { useOrderDetail } from '../../services/useOrders';
@@ -45,6 +46,7 @@ export const RatingScreen: React.FC<Props> = ({ navigation, route }) => {
   const [stars, setStars] = useState(5);
   const [tags, setTags] = useState<string[]>([]);
   const [comment, setComment] = useState('');
+  const [photos, setPhotos] = useState<string[]>([]);
   const [driverStars, setDriverStars] = useState(5);
   const [driverTags, setDriverTags] = useState<string[]>([]);
   const [driverComment, setDriverComment] = useState('');
@@ -66,6 +68,7 @@ export const RatingScreen: React.FC<Props> = ({ navigation, route }) => {
       ordersApi.review(orderId, {
         rating: stars,
         comment: buildComment(tags, comment, 500),
+        images: photos.length ? photos : undefined,
         ...(hasDriver
           ? {
               driverRating: driverStars,
@@ -133,7 +136,9 @@ export const RatingScreen: React.FC<Props> = ({ navigation, route }) => {
             onComment={setComment}
             placeholder="Chia sẻ thêm về món ăn (không bắt buộc)"
             maxLength={500}
-          />
+          >
+            <ReviewPhotoPicker value={photos} onChange={setPhotos} />
+          </RatingSection>
 
           {hasDriver && (
             <RatingSection
@@ -189,6 +194,8 @@ const RatingSection: React.FC<{
   onComment: (v: string) => void;
   placeholder: string;
   maxLength: number;
+  /** Nội dung thêm dưới ô nhận xét (vd chọn ảnh món) */
+  children?: React.ReactNode;
 }> = ({
   icon,
   iconBox,
@@ -205,6 +212,7 @@ const RatingSection: React.FC<{
   onComment,
   placeholder,
   maxLength,
+  children,
 }) => {
   const label = STAR_LABEL[stars];
   return (
@@ -299,6 +307,7 @@ const RatingSection: React.FC<{
           {comment.length}/{maxLength}
         </Text>
       </View>
+      {children}
     </View>
   );
 };

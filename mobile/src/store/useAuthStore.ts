@@ -1,6 +1,10 @@
+import axios from 'axios';
 import { create } from 'zustand';
+import { API_BASE_URL } from '../constants/config';
 import { User } from '../types/api';
 import { appStorage } from '../utils/storage';
+import { useCartStore } from './useCartStore';
+import { useDeliveryAddressStore } from './useDeliveryAddressStore';
 
 const ACCESS_TOKEN_KEY = 'food_delivery_access_token';
 const REFRESH_TOKEN_KEY = 'food_delivery_refresh_token';
@@ -49,10 +53,21 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   logout: async () => {
+    // Báo server thu hồi phiên của thiết bị này (thiết bị khác vẫn đăng nhập). Gửi ngầm, lỗi mạng thì bỏ qua.
+    // Dùng axios thường (không qua apiClient) để tránh vòng lặp: 401 -> làm mới phiên thất bại -> logout -> 401...
+    const refreshToken = get().refreshToken;
+    if (refreshToken) {
+      axios.post(`${API_BASE_URL}/auth/logout`, { refreshToken }, { timeout: 5000 }).catch(() => undefined);
+    }
     await appStorage.deleteItem(ACCESS_TOKEN_KEY);
     await appStorage.deleteItem(REFRESH_TOKEN_KEY);
     await appStorage.deleteItem(USER_DATA_KEY);
     set({ user: null, accessToken: null, refreshToken: null, isAuthenticated: false, isLoading: false });
+    // Giỏ hàng và địa chỉ giao đang chọn lưu trên máy, thuộc về tài khoản vừa đăng xuất: xoá đi để
+    // người dùng sau (máy dùng chung, tài khoản khác) không thấy giỏ / địa chỉ của người trước.
+    // Giỏ thêm khi CHƯA đăng nhập vẫn giữ khi đăng nhập (để thanh toán tiếp), chỉ xoá lúc đăng xuất.
+    useCartStore.getState().clearCart();
+    await useDeliveryAddressStore.getState().resetSelection();
   },
 
   loadStoredAuth: async () => {

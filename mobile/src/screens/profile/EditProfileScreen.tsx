@@ -11,7 +11,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { usersApi } from '../../api/users';
-import { Button, Icon, Input, Text, TopBar, useToast } from '../../components/ui';
+import { Button, ConfirmDialog, Icon, Input, Text, TopBar, useToast } from '../../components/ui';
 import { useUpdateProfile, useUploadAvatar } from '../../services/useUser';
 import { useAuthStore } from '../../store/useAuthStore';
 import { RootStackParamList } from '../../types/navigation';
@@ -39,6 +39,26 @@ export const EditProfileScreen: React.FC<Props> = ({ navigation }) => {
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [isUpdatingPassword, setIsUpdatingPassword] = useState(false);
+
+  // Xoá tài khoản (Quy định Google Play / App Store)
+  const logout = useAuthStore((s) => s.logout);
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [isDeletingAccount, setIsDeletingAccount] = useState(false);
+
+  const handleDeleteAccount = async () => {
+    try {
+      setIsDeletingAccount(true);
+      await usersApi.deleteAccount();
+      setShowDeleteDialog(false);
+      toast('Tài khoản của bạn đã được xoá thành công.', 'success');
+      await logout();
+    } catch (err: any) {
+      const msg = err.response?.data?.message || err.message || 'Không thể xoá tài khoản. Vui lòng thử lại sau.';
+      toast(msg, 'error');
+    } finally {
+      setIsDeletingAccount(false);
+    }
+  };
 
   // Chọn ảnh từ thư viện
   const handlePickAvatar = async () => {
@@ -251,8 +271,31 @@ export const EditProfileScreen: React.FC<Props> = ({ navigation }) => {
               />
             </View>
           </View>
+
+          {/* Xoá tài khoản */}
+          <View className="mb-10">
+            <Button
+              label="Xoá tài khoản"
+              variant="dangerSoft"
+              size="md"
+              leftIcon="trash-outline"
+              onPress={() => setShowDeleteDialog(true)}
+            />
+          </View>
         </ScrollView>
       </KeyboardAvoidingView>
+
+      <ConfirmDialog
+        visible={showDeleteDialog}
+        title="Xác nhận xoá tài khoản?"
+        message="Hành động này không thể hoàn tác. Bạn sẽ bị đăng xuất ngay lập tức và toàn bộ thông tin cá nhân sẽ bị ẩn danh vĩnh viễn."
+        confirmLabel="Xoá vĩnh viễn"
+        cancelLabel="Giữ lại tài khoản"
+        destructive
+        loading={isDeletingAccount}
+        onConfirm={handleDeleteAccount}
+        onCancel={() => setShowDeleteDialog(false)}
+      />
     </SafeAreaView>
   );
 };

@@ -1,6 +1,6 @@
 import * as Device from 'expo-device';
 import * as Notifications from 'expo-notifications';
-import { AndroidImportance } from 'expo-notifications';
+import { AndroidImportance, AndroidNotificationVisibility } from 'expo-notifications';
 import { useEffect } from 'react';
 import { Platform } from 'react-native';
 import { usersApi } from '../api/users';
@@ -54,6 +54,14 @@ export function usePushNotifications() {
             importance: AndroidImportance.MAX,
             vibrationPattern: [0, 250, 250, 250],
             lightColor: '#FF7A30',
+          });
+          await Notifications.setNotificationChannelAsync('order_alerts', {
+            name: 'Chuông báo đơn mới (Chủ quán)',
+            importance: AndroidImportance.MAX,
+            vibrationPattern: [0, 500, 300, 500],
+            lightColor: '#FF5722',
+            lockscreenVisibility: AndroidNotificationVisibility.PUBLIC,
+            bypassDnd: true,
           });
         }
 

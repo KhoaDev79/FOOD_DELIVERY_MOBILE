@@ -5,7 +5,7 @@ import React, { useState } from 'react';
 import { FlatList, RefreshControl, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { driversApi } from '../../api/drivers';
-import { SegmentedTabs } from '../../components/modules/partner/PartnerKit';
+import { orderCode, SegmentedTabs } from '../../components/modules/partner/PartnerKit';
 import {
   Badge,
   Button,
@@ -144,7 +144,7 @@ export const DriverReviewsScreen: React.FC<Props> = ({ navigation }) => {
         {/* Thông tin đơn và quán */}
         <View className="flex-row items-center gap-2">
           <Badge
-            label={`Đơn #${item.orderId.slice(0, 8).toUpperCase()}`}
+            label={`Đơn #${orderCode(item.orderId)}`}
             tone="neutral"
             size="sm"
           />

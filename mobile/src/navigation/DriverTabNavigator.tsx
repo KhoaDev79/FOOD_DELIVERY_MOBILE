@@ -1,3 +1,4 @@
+import { NotificationCenterScreen } from '../screens/notifications/NotificationCenterScreen';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import React from 'react';
@@ -93,6 +94,10 @@ export const DriverTabNavigator: React.FC = () => {
       <Stack.Screen
         name="DriverReviews"
         component={DriverReviewsScreen as React.ComponentType<any>}
+      />
+      <Stack.Screen
+        name="NotificationCenter"
+        component={NotificationCenterScreen}
       />
       <Stack.Screen
         name="Chat"

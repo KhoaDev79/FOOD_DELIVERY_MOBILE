@@ -13,6 +13,7 @@ import {
   subscribeNavigationReady,
 } from '../../../navigation/navigationRef';
 import { useAuthStore } from '../../../store/useAuthStore';
+import { orderCode as baseOrderCode } from '../../../utils/format';
 import { ChatChannel, OrderMessage, UnreadMessagesSummary } from '../../../types/api';
 import { Icon } from '../../ui/Icon';
 import { IconButton } from '../../ui/IconButton';
@@ -42,7 +43,7 @@ interface Banner {
   recipientRole: string;
 }
 
-const orderCode = (orderId: string) => `#${orderId.slice(0, 8).toUpperCase()}`;
+const orderCode = (orderId: string) => `#${baseOrderCode(orderId)}`;
 
 function bannerFromMessage(msg: OrderMessage, restaurantName?: string | null): Omit<Banner, 'key' | 'count'> {
   const senderName =

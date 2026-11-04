@@ -7,6 +7,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { restaurantsApi } from '../../api/restaurants';
 import { ErrorState, Gradient, Icon, IconButton, IconName, LoadingSpinner, Text } from '../../components/ui';
 import { OwnerRestaurantSelector } from '../../components/modules/owner/OwnerRestaurantSelector';
+import { ExportCsvSheet } from '../../components/modules/partner/ExportCsvSheet';
 import { useOwnerRestaurantStore } from '../../store/useOwnerRestaurantStore';
 import { palette } from '../../theme';
 import { OwnerStackParamList } from '../../types/navigation';
@@ -34,6 +35,7 @@ const compactVND = (n: number) =>
 
 export const OwnerStatsScreen: React.FC<Props> = ({ navigation }) => {
   const [days, setDays] = useState<Range>(7);
+  const [exportOpen, setExportOpen] = useState(false);
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
 
   const { data: restaurants } = useQuery({
@@ -72,6 +74,14 @@ export const OwnerStatsScreen: React.FC<Props> = ({ navigation }) => {
               <Text variant="title" tone="inverse" accessibilityRole="header" className="flex-1">
                 Thống kê bán hàng
               </Text>
+              {restaurant && (
+                <IconButton
+                  icon="download-outline"
+                  variant="glass"
+                  accessibilityLabel="Xuất doanh thu ra file CSV"
+                  onPress={() => setExportOpen(true)}
+                />
+              )}
             </View>
             {restaurant && (
               <OwnerRestaurantSelector
@@ -253,6 +263,16 @@ export const OwnerStatsScreen: React.FC<Props> = ({ navigation }) => {
             )}
           </Section>
         </ScrollView>
+      )}
+      {restaurant && (
+        <ExportCsvSheet
+          visible={exportOpen}
+          onClose={() => setExportOpen(false)}
+          title="Xuất doanh thu (CSV)"
+          description={`Mỗi đơn của ${restaurant.name} một dòng: thời gian, trạng thái, món, thanh toán, doanh thu tiền món; dòng TỔNG ở cuối. Chỉ đơn giao thành công được tính tiền.`}
+          filePrefix="zomzom-doanh-thu"
+          fetchCsv={(from, to) => restaurantsApi.exportRevenueCsv(restaurant.id, from, to)}
+        />
       )}
     </View>
   );

@@ -67,5 +67,8 @@ export const usersApi = {
   addFavorite: (restaurantId: string) => apiClient.put(`/users/me/favorites/${restaurantId}`),
 
   removeFavorite: (restaurantId: string) => apiClient.delete(`/users/me/favorites/${restaurantId}`),
+
+  /** Xoá tài khoản cá nhân theo quy định kho ứng dụng */
+  deleteAccount: () => apiClient.delete<any, { ok: boolean; message: string }>('/users/me'),
 };
 
