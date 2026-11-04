@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useFavoritesSync } from '../hooks/useFavorites';
+import { useGoogleRedirectLogin } from '../hooks/useGoogleRedirectLogin';
 import { usePushNotifications } from '../hooks/usePushNotifications';
 import { CompleteProfileScreen } from '../screens/auth/CompleteProfileScreen';
 import { ZomZomSplashScreen } from '../screens/intro/ZomZomSplashScreen';
@@ -22,6 +23,8 @@ export const AppNavigator: React.FC = () => {
   usePushNotifications();
   // Yêu thích theo tài khoản: tải khi đăng nhập, xoá khi đăng xuất / đổi tài khoản
   useFavoritesSync();
+  // Bản web: vừa quay về từ trang đăng nhập Google thì hoàn tất đăng nhập
+  useGoogleRedirectLogin();
 
   // Hiển thị màn hình Loading / Intro ZomZom khi vừa mở ứng dụng
   if (showSplash) {

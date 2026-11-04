@@ -5,7 +5,6 @@ import { NavigationContainer } from '@react-navigation/native';
 import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query';
 import { useFonts } from 'expo-font';
 import { StatusBar } from 'expo-status-bar';
-import * as WebBrowser from 'expo-web-browser';
 import { useEffect, useRef } from 'react';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { ChatNotifier } from './src/components/modules/chat/ChatNotifier';
@@ -16,9 +15,6 @@ import { markNavigationReady, navigationRef } from './src/navigation/navigationR
 import { useAuthStore } from './src/store/useAuthStore';
 import { fontAssets } from './src/theme';
 import { installWebAlert } from './src/utils/webAlert';
-
-// Web: cửa sổ đăng nhập Google quay về chính trang app; dòng này gửi kết quả về trang gốc rồi tự đóng cửa sổ
-WebBrowser.maybeCompleteAuthSession();
 
 // Alert.alert có nút không chạy trên web: thay bằng hộp thoại của trình duyệt (xem utils/webAlert.ts)
 installWebAlert();

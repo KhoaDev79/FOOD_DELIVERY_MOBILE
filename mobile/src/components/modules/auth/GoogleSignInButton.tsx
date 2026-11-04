@@ -3,6 +3,7 @@ import React, { useState } from 'react';
 import { ActivityIndicator, Image, Platform, Pressable, View } from 'react-native';
 import { authApi, AuthResponse } from '../../../api/auth';
 import { palette } from '../../../theme';
+import { startGoogleRedirect } from '../../../utils/googleWebAuth';
 import { Text } from '../../ui';
 
 const CLIENT_IDS = {
@@ -22,8 +23,6 @@ export const isGoogleSignInAvailable = !!Platform.select({
   default: undefined,
 });
 
-const WEB_REDIRECT_URI = Platform.OS === 'web' && typeof window !== 'undefined' ? window.location.origin : undefined;
-
 export type GoogleLoginResult = AuthResponse & { isNewUser: boolean };
 
 interface Props {
@@ -33,17 +32,32 @@ interface Props {
 }
 
 /** "Tiếp tục với Google": nút trắng viền mảnh + logo G nhiều màu (đúng hướng dẫn thương hiệu của Google). */
-export const GoogleSignInButton: React.FC<Props> = (props) =>
-  isGoogleSignInAvailable ? <GoogleSignInButtonInner {...props} /> : null;
+export const GoogleSignInButton: React.FC<Props> = (props) => {
+  if (!isGoogleSignInAvailable) return null;
+  return Platform.OS === 'web' ? <WebGoogleButton disabled={props.disabled} /> : <NativeGoogleButton {...props} />;
+};
 
-const GoogleSignInButtonInner: React.FC<Props> = ({ onSuccess, onError, disabled }) => {
-  const [request, , promptAsync] = Google.useIdTokenAuthRequest({
-    ...CLIENT_IDS,
-    selectAccount: true,
-    // Web: cố định về gốc trang (vd http://localhost:8081) thay vì theo trang đang mở, để khớp đúng
-    // "Authorized redirect URIs" đã khai báo trên Google Cloud
-    ...(WEB_REDIRECT_URI ? { redirectUri: WEB_REDIRECT_URI } : {}),
-  });
+/**
+ * Web: chuyển hẳn trang sang Google rồi quay lại (không dùng popup, vì iPhone mở app từ "Màn hình chính"
+ * thì popup không gửi được kết quả về). Kết quả được xử lý ở gốc app: hooks/useGoogleRedirectLogin.
+ */
+const WebGoogleButton: React.FC<{ disabled?: boolean }> = ({ disabled }) => {
+  const [leaving, setLeaving] = useState(false);
+  return (
+    <GoogleButtonView
+      loading={leaving}
+      disabled={disabled}
+      onPress={() => {
+        setLeaving(true);
+        startGoogleRedirect(CLIENT_IDS.webClientId!);
+      }}
+    />
+  );
+};
+
+/** Android / iOS: cửa sổ đăng nhập của hệ điều hành (expo-auth-session), kết quả trả thẳng về nút. */
+const NativeGoogleButton: React.FC<Props> = ({ onSuccess, onError, disabled }) => {
+  const [request, , promptAsync] = Google.useIdTokenAuthRequest({ ...CLIENT_IDS, selectAccount: true });
   const [loading, setLoading] = useState(false);
 
   const handlePress = async () => {
@@ -71,14 +85,21 @@ const GoogleSignInButtonInner: React.FC<Props> = ({ onSuccess, onError, disabled
     }
   };
 
-  const busy = loading || !request;
+  return <GoogleButtonView loading={loading} disabled={disabled || !request} onPress={handlePress} />;
+};
+
+const GoogleButtonView: React.FC<{ loading: boolean; disabled?: boolean; onPress: () => void }> = ({
+  loading,
+  disabled,
+  onPress,
+}) => {
   return (
     <Pressable
       accessibilityRole="button"
       accessibilityLabel="Tiếp tục với Google"
-      accessibilityState={{ disabled: disabled || busy, busy: loading }}
-      disabled={disabled || busy}
-      onPress={handlePress}
+      accessibilityState={{ disabled: disabled || loading, busy: loading }}
+      disabled={disabled || loading}
+      onPress={onPress}
       className="h-14 flex-row items-center justify-center gap-3 rounded-full border-[1.5px] border-line bg-surface active:bg-canvas-subtle"
     >
       {loading ? (
