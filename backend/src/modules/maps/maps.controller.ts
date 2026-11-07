@@ -1,4 +1,4 @@
-import { Controller, Get, HttpException, HttpStatus, Query } from '@nestjs/common';
+import { Controller, Get, HttpException, HttpStatus, Ip, Query } from '@nestjs/common';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Public } from '../../common/decorators/public.decorator';
 import { LruCache } from '../../common/utils/lru-cache.util';
@@ -12,21 +12,25 @@ class UserMapRateLimiter {
   private userRequests = new LruCache<number[]>(60 * 1000, 10000);
   private readonly windowMs = 60 * 1000; // 60 giây
   private readonly maxPerWindow = 30; // Tối đa 30 request / phút / user
+  /** Khách chưa đăng nhập đếm theo IP và chặt hơn, vì gói miễn phí Goong có hạn mức theo ngày */
+  private readonly maxGuestPerWindow = 20;
 
-  check(userId: string) {
+  check(userId: string | undefined, ip = 'unknown') {
+    const key = userId ? `u:${userId}` : `ip:${ip}`;
+    const limit = userId ? this.maxPerWindow : this.maxGuestPerWindow;
     const now = Date.now();
-    const history = this.userRequests.get(userId) || [];
+    const history = this.userRequests.get(key) || [];
     const active = history.filter((t) => now - t < this.windowMs);
 
-    if (active.length >= this.maxPerWindow) {
+    if (active.length >= limit) {
       throw new HttpException(
-        'Bạn đã gửi quá nhiều yêu cầu tra cứu bản đồ (vượt hạn mức 30 yêu cầu/phút). Vui lòng chờ giây lát.',
+        'Bạn đã tra cứu bản đồ quá nhiều lần trong một phút. Vui lòng chờ giây lát.',
         HttpStatus.TOO_MANY_REQUESTS,
       );
     }
 
     active.push(now);
-    this.userRequests.set(userId, active, this.windowMs);
+    this.userRequests.set(key, active, this.windowMs);
   }
 }
 
@@ -48,13 +52,16 @@ export class MapsController {
     };
   }
 
+  // 3 API chọn địa chỉ công khai: khách chưa đăng nhập cũng chọn được vị trí để xem quán quanh mình
+  @Public()
   @Get('reverse-geocode')
   async reverseGeocode(
-    @CurrentUser('id') userId: string,
+    @CurrentUser('id') userId: string | undefined,
+    @Ip() ip: string,
     @Query('lat') latStr: string,
     @Query('lng') lngStr: string,
   ) {
-    this.rateLimiter.check(userId);
+    this.rateLimiter.check(userId, ip);
     const lat = parseFloat(latStr);
     const lng = parseFloat(lngStr);
     if (isNaN(lat) || isNaN(lng)) {
@@ -73,14 +80,16 @@ export class MapsController {
     }
   }
 
+  @Public()
   @Get('autocomplete')
   async autocomplete(
-    @CurrentUser('id') userId: string,
+    @CurrentUser('id') userId: string | undefined,
+    @Ip() ip: string,
     @Query('q') query: string,
     @Query('lat') latStr?: string,
     @Query('lng') lngStr?: string,
   ) {
-    this.rateLimiter.check(userId);
+    this.rateLimiter.check(userId, ip);
     if (!query || !query.trim()) return [];
     const lat = latStr ? parseFloat(latStr) : undefined;
     const lng = lngStr ? parseFloat(lngStr) : undefined;
@@ -94,12 +103,14 @@ export class MapsController {
     }
   }
 
+  @Public()
   @Get('place-detail')
   async getPlaceDetail(
-    @CurrentUser('id') userId: string,
+    @CurrentUser('id') userId: string | undefined,
+    @Ip() ip: string,
     @Query('placeId') placeId: string,
   ) {
-    this.rateLimiter.check(userId);
+    this.rateLimiter.check(userId, ip);
     if (!placeId) return null;
     return this.mapsService.getPlaceDetail(placeId);
   }

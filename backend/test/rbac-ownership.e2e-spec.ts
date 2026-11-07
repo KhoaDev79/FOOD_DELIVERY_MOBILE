@@ -21,6 +21,7 @@ describe('RBAC & Resource Ownership (Supertest E2E)', () => {
 
   let restaurant1Id: string;
   let menuItem1Id: string;
+  let restaurant1Coords: { lat: number; lng: number };
 
   beforeAll(async () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({
@@ -50,6 +51,12 @@ describe('RBAC & Resource Ownership (Supertest E2E)', () => {
     // Driver 1
     const d1 = await login('driver@fooddelivery.com');
     driver1Token = d1.token;
+    // Tài xế mẫu có thể đang giao đủ số đơn tối đa (dữ liệu seed / lần chạy trước) → hoàn tất các đơn đó
+    // để test nhận đơn không bị chặn bởi giới hạn số đơn cùng lúc. Chỉ chạy trên database thử nghiệm.
+    await app.get(PrismaService).order.updateMany({
+      where: { driverId: d1.id, status: { in: ['READY_FOR_PICKUP', 'PICKED_UP'] } },
+      data: { status: 'DELIVERED' },
+    });
 
     // Customer 1
     const c1 = await login('customer@fooddelivery.com');
@@ -107,8 +114,52 @@ describe('RBAC & Resource Ownership (Supertest E2E)', () => {
     if (r1) {
       restaurant1Id = r1.id;
       menuItem1Id = r1.menuItems[0]?.id;
+      restaurant1Coords = { lat: r1.latitude, lng: r1.longitude };
+      // Kết quả không phụ thuộc giờ chạy test: quán thử mở 24/24, không tạm nghỉ, món còn bán, không giới hạn khung giờ.
+      // CHỈ chạy e2e trên database thử nghiệm (vd food_delivery_e2e), không chạy trên dữ liệu thật.
+      await prisma.restaurant.update({
+        where: { id: r1.id },
+        data: { status: 'ACTIVE', isOpen: true, pausedUntil: null, openTime: '00:00', closeTime: '23:59' },
+      });
+      await prisma.restaurantOpeningHour.deleteMany({ where: { restaurantId: r1.id } });
+      await prisma.restaurantSpecialClosing.deleteMany({ where: { restaurantId: r1.id } });
+      await prisma.menuItem.update({
+        where: { id: menuItem1Id },
+        data: { isAvailable: true, soldOutUntil: null, availableFrom: null, availableTo: null, options: undefined },
+      });
     }
   });
+
+  /**
+   * Đặt đơn theo đúng luồng của app: địa chỉ đã lưu (gần quán) → báo giá → tạo đơn kèm quoteToken.
+   * Trả về id đơn.
+   */
+  const placeOrder = async (token: string): Promise<string> => {
+    const server = app.getHttpServer();
+    const addrRes = await request(server)
+      .post('/api/v1/users/me/addresses')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        label: 'E2E',
+        addressLine: '45 Lê Duẩn, Phường Bến Nghé, Quận 1, TP. Hồ Chí Minh',
+        latitude: restaurant1Coords.lat + 0.002,
+        longitude: restaurant1Coords.lng + 0.002,
+      });
+    expect(addrRes.status).toBe(201);
+    const addressId = addrRes.body.data.id;
+    const body = { restaurantId: restaurant1Id, addressId, items: [{ menuItemId: menuItem1Id, quantity: 1 }] };
+
+    const quoteRes = await request(server).post('/api/v1/orders/quote').set('Authorization', `Bearer ${token}`).send(body);
+    expect(quoteRes.status).toBe(201);
+
+    const createRes = await request(server)
+      .post('/api/v1/orders')
+      .set('Authorization', `Bearer ${token}`)
+      .set('Idempotency-Key', `e2e-${Date.now()}-${Math.random().toString(36).slice(2)}`)
+      .send({ ...body, quoteToken: quoteRes.body.data.quoteToken });
+    expect(createRes.status).toBe(201);
+    return createRes.body.data.id;
+  };
 
   afterAll(async () => {
     await app.close();
@@ -132,20 +183,7 @@ describe('RBAC & Resource Ownership (Supertest E2E)', () => {
   // =========================================================================
   it('Khách A không được phép đọc chi tiết đơn hàng của Khách B', async () => {
     // Khách 2 tạo một đơn hàng
-    const createRes = await request(app.getHttpServer())
-      .post('/api/v1/orders')
-      .set('Authorization', `Bearer ${customer2Token}`)
-      .send({
-        restaurantId: restaurant1Id,
-        items: [{ menuItemId: menuItem1Id, quantity: 1 }],
-        deliveryAddress: '45 Lê Duẩn, Phường Bến Nghé, TP. Hồ Chí Minh',
-        deliveryLat: 10.778,
-        deliveryLng: 106.702,
-        paymentMethod: 'COD',
-      });
-
-    expect(createRes.status).toBe(201);
-    const orderId = createRes.body.data.id;
+    const orderId = await placeOrder(customer2Token);
 
     // Khách 1 cố tình đọc đơn của Khách 2 -> Bị chặn (403/404 không lộ dữ liệu)
     const getRes = await request(app.getHttpServer())
@@ -161,18 +199,7 @@ describe('RBAC & Resource Ownership (Supertest E2E)', () => {
   // =========================================================================
   it('Tài xế 2 không được đổi trạng thái đơn do Tài xế 1 đã nhận giao', async () => {
     // Tạo đơn và chuyển trạng thái qua các bước chuẩn: PENDING -> CONFIRMED -> PREPARING -> READY_FOR_PICKUP
-    const createRes = await request(app.getHttpServer())
-      .post('/api/v1/orders')
-      .set('Authorization', `Bearer ${customer1Token}`)
-      .send({
-        restaurantId: restaurant1Id,
-        items: [{ menuItemId: menuItem1Id, quantity: 1 }],
-        deliveryAddress: '45 Lê Duẩn, Phường Bến Nghé, TP. Hồ Chí Minh',
-        deliveryLat: 10.778,
-        deliveryLng: 106.702,
-        paymentMethod: 'COD',
-      });
-    const orderId = createRes.body.data.id;
+    const orderId = await placeOrder(customer1Token);
 
     // Quán xác nhận đơn
     await request(app.getHttpServer())
@@ -212,41 +239,19 @@ describe('RBAC & Resource Ownership (Supertest E2E)', () => {
   // 4. KHÁCH CHỈ ĐƯỢC HUỶ KHI CHỜ XÁC NHẬN (PENDING) (403/400)
   // =========================================================================
   it('Khách huỷ đơn thành công khi đơn đang PENDING', async () => {
-    const createRes = await request(app.getHttpServer())
-      .post('/api/v1/orders')
-      .set('Authorization', `Bearer ${customer1Token}`)
-      .send({
-        restaurantId: restaurant1Id,
-        items: [{ menuItemId: menuItem1Id, quantity: 1 }],
-        deliveryAddress: '45 Lê Duẩn, Phường Bến Nghé, TP. Hồ Chí Minh',
-        deliveryLat: 10.778,
-        deliveryLng: 106.702,
-        paymentMethod: 'COD',
-      });
-    const orderId = createRes.body.data.id;
+    const orderId = await placeOrder(customer1Token);
 
     const cancelRes = await request(app.getHttpServer())
       .patch(`/api/v1/orders/${orderId}/status`)
       .set('Authorization', `Bearer ${customer1Token}`)
-      .send({ status: 'CANCELLED' });
+      .send({ status: 'CANCELLED', cancelReason: 'CUSTOMER_CHANGED_MIND' });
 
     expect(cancelRes.status).toBe(200);
     expect(cancelRes.body.data.status).toBe('CANCELLED');
   });
 
   it('Khách bị từ chối huỷ khi quán đã CONFIRMED đơn hàng', async () => {
-    const createRes = await request(app.getHttpServer())
-      .post('/api/v1/orders')
-      .set('Authorization', `Bearer ${customer1Token}`)
-      .send({
-        restaurantId: restaurant1Id,
-        items: [{ menuItemId: menuItem1Id, quantity: 1 }],
-        deliveryAddress: '45 Lê Duẩn, Phường Bến Nghé, TP. Hồ Chí Minh',
-        deliveryLat: 10.778,
-        deliveryLng: 106.702,
-        paymentMethod: 'COD',
-      });
-    const orderId = createRes.body.data.id;
+    const orderId = await placeOrder(customer1Token);
 
     // Quán xác nhận đơn
     await request(app.getHttpServer())
@@ -258,7 +263,7 @@ describe('RBAC & Resource Ownership (Supertest E2E)', () => {
     const cancelRes = await request(app.getHttpServer())
       .patch(`/api/v1/orders/${orderId}/status`)
       .set('Authorization', `Bearer ${customer1Token}`)
-      .send({ status: 'CANCELLED' });
+      .send({ status: 'CANCELLED', cancelReason: 'CUSTOMER_CHANGED_MIND' });
 
     expect(cancelRes.status).toBe(403);
     expect(cancelRes.body.message || cancelRes.body.error).toContain('Bạn không có quyền cập nhật trạng thái này');
