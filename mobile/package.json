@@ -13,6 +13,7 @@
     "lint": "eslint . --ext .ts,.tsx",
     "typecheck": "tsc --noEmit",
     "test": "jest",
+    "build:web": "node scripts/build-web.js",
     "deploy:web": "node scripts/deploy-web.js"
   },
   "dependencies": {

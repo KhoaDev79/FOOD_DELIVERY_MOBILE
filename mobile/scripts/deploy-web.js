@@ -44,26 +44,11 @@ const run = (cmd, cmdArgs, extraEnv = {}) => {
   if (res.status !== 0) process.exit(res.status ?? 1);
 };
 
-// 1) Đóng gói. Biến môi trường có sẵn được ưu tiên hơn file .env (Expo không ghi đè).
+// 1) Đóng gói (kèm đổi tên assets/node_modules). Biến môi trường có sẵn được ưu tiên hơn file .env (Expo không ghi đè).
 console.log(apiUrl ? `Đóng gói bản web, backend: ${apiUrl}` : 'Đóng gói bản web, backend theo mobile/.env');
-run('npx', ['expo', 'export', '-p', 'web'], apiUrl ? { EXPO_PUBLIC_API_URL: apiUrl } : {});
+run('node', [path.join('scripts', 'build-web.js')], apiUrl ? { EXPO_PUBLIC_API_URL: apiUrl } : {});
 
-/**
- * 2) Vercel luôn bỏ qua mọi thư mục tên "node_modules" khi tải lên, mà Expo lại để font biểu tượng (Ionicons...)
- * ở dist/assets/node_modules/... → trên web biểu tượng thành ô vuông.
- * Đổi tên thành "vendor"; vercel.json chuyển đường dẫn cũ /assets/node_modules/* sang /assets/vendor/*.
- * KHÔNG sửa file JS: tên file JS có mã hash và được trình duyệt lưu 1 năm, sửa nội dung mà giữ tên sẽ bị dùng bản cũ.
- */
-const distDir = path.join(root, 'dist');
-const from = path.join(distDir, 'assets', 'node_modules');
-if (fs.existsSync(from)) {
-  const to = path.join(distDir, 'assets', 'vendor');
-  fs.rmSync(to, { recursive: true, force: true });
-  fs.renameSync(from, to);
-  console.log('Đã chuyển font/ảnh trong assets/node_modules sang assets/vendor.');
-}
-
-// 3) Tải lên Vercel
+// 2) Tải lên Vercel
 run('npx', ['vercel', 'deploy', 'dist', '--yes', ...(preview ? [] : ['--prod'])], {
   VERCEL_ORG_ID: orgId,
   VERCEL_PROJECT_ID: projectId,
