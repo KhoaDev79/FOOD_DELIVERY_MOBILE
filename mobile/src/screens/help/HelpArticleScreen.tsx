@@ -16,6 +16,7 @@ import {
   Text,
   useToast,
 } from '../../components/ui';
+import { ArticleBody } from '../../components/modules/help/ArticleBody';
 import { useHelpArticle, useSubmitArticleFeedback } from '../../services/useHelp';
 import { useAuthStore } from '../../store/useAuthStore';
 import { RootStackParamList } from '../../types/navigation';
@@ -59,73 +60,6 @@ export const HelpArticleScreen: React.FC = () => {
         },
       },
     );
-  };
-
-  // Render nội dung bài viết dạng văn bản có cấu trúc
-  const renderFormattedBody = (rawBody: string) => {
-    const lines = rawBody.split('\n');
-    return lines.map((line, idx) => {
-      const trimmed = line.trim();
-
-      if (!trimmed) {
-        return <View key={idx} className="h-2" />;
-      }
-
-      // H3
-      if (trimmed.startsWith('### ')) {
-        return (
-          <Text key={idx} variant="title" weight="bold" className="mt-3 mb-1 text-ink">
-            {trimmed.replace('### ', '')}
-          </Text>
-        );
-      }
-
-      // H2
-      if (trimmed.startsWith('## ')) {
-        return (
-          <Text key={idx} variant="headline" weight="bold" className="mt-4 mb-1.5 text-ink">
-            {trimmed.replace('## ', '')}
-          </Text>
-        );
-      }
-
-      // Bullet points
-      if (trimmed.startsWith('- ') || trimmed.startsWith('* ')) {
-        const textContent = trimmed.slice(2);
-        return (
-          <View key={idx} className="flex-row items-start gap-2 my-0.5 pl-1">
-            <View className="h-1.5 w-1.5 rounded-full bg-brand-500 mt-2" />
-            <Text variant="body" tone="default" className="flex-1 leading-relaxed">
-              {textContent}
-            </Text>
-          </View>
-        );
-      }
-
-      // Numbered list
-      if (/^\d+\.\s/.test(trimmed)) {
-        const match = trimmed.match(/^(\d+\.)\s(.*)/);
-        if (match) {
-          return (
-            <View key={idx} className="flex-row items-start gap-2 my-0.5 pl-1">
-              <Text variant="body" weight="bold" tone="brand">
-                {match[1]}
-              </Text>
-              <Text variant="body" tone="default" className="flex-1 leading-relaxed">
-                {match[2]}
-              </Text>
-            </View>
-          );
-        }
-      }
-
-      // Regular paragraph
-      return (
-        <Text key={idx} variant="body" tone="default" className="my-1 leading-relaxed text-ink/90">
-          {trimmed}
-        </Text>
-      );
-    });
   };
 
   return (
@@ -187,7 +121,7 @@ export const HelpArticleScreen: React.FC = () => {
 
           {/* Nội dung bài viết */}
           <View className="rounded-2xl bg-surface border border-line p-4 shadow-card">
-            {renderFormattedBody(article.body)}
+            <ArticleBody body={article.body} />
           </View>
 
           {/* Khu vực đánh giá độ hữu ích */}

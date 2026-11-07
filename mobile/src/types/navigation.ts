@@ -114,6 +114,12 @@ export type AdminStackParamList = {
   AdminAuditLog: undefined;
   NotificationCenter: undefined;
   AdminSupportTickets: undefined;
+  AdminHelpArticles: undefined;
+  AdminHelpArticleEdit:
+    | { articleId?: string; audience?: 'CUSTOMER' | 'DRIVER' | 'OWNER'; categoryId?: string; draftQuestion?: string }
+    | undefined;
+  AdminBotInsights: undefined;
+  AdminBotConversation: { conversationId: string };
   AdminVouchers: undefined;
   AdminRefunds: undefined;
 };

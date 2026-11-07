@@ -137,6 +137,22 @@ export const AdminProfileScreen: React.FC = () => {
       />
       <Divider inset />
       <ListRow
+        leading={<ColorIcon name="book" tone="success" />}
+        title="Bài viết trợ giúp (FAQ)"
+        subtitle="Soạn bài, xem lượt đọc và 👍👎"
+        trailing={<Pending />}
+        onPress={() => navigation.navigate('AdminHelpArticles')}
+      />
+      <Divider inset />
+      <ListRow
+        leading={<ColorIcon name="sparkles" tone="violet" />}
+        title="Trợ lý tự động"
+        subtitle="Thống kê chatbot, câu hỏi chưa trả lời được"
+        trailing={<Pending />}
+        onPress={() => navigation.navigate('AdminBotInsights')}
+      />
+      <Divider inset />
+      <ListRow
         leading={<ColorIcon name="pricetags" tone="accent" />}
         title="Voucher & khuyến mãi"
         subtitle="Mã giảm giá, freeship toàn sàn; voucher bồi thường"

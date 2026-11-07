@@ -1,3 +1,4 @@
+import { Platform } from 'react-native';
 import { apiClient } from './client';
 import type { FavoriteRestaurant } from '../store/useFavoritesStore';
 import { Address, CreateRoleRequestPayload, RoleUpgradeRequest, User } from '../types/api';
@@ -16,18 +17,28 @@ export const usersApi = {
   updateProfile: (data: { fullName?: string; phone?: string; email?: string; avatarUrl?: string }) =>
     apiClient.patch<any, User>('/users/me', data),
 
-  uploadAvatar: (fileUri: string) => {
+  uploadAvatar: async (fileUri: string) => {
     const formData = new FormData();
-    const cleanUri = fileUri.split('?')[0];
-    const filename = cleanUri.split('/').pop() || `avatar-${Date.now()}.jpg`;
-    const match = /\.(\w+)$/.exec(filename);
-    const ext = match ? match[1].toLowerCase() : 'jpg';
-    const type = ext === 'png' ? 'image/png' : ext === 'webp' ? 'image/webp' : 'image/jpeg';
-    formData.append('file', {
-      uri: fileUri,
-      name: filename,
-      type,
-    } as any);
+
+    if (Platform.OS === 'web') {
+      // Trình duyệt không hiểu kiểu { uri, name, type } của React Native (sẽ gửi "[object Object]"),
+      // nên phải đọc ảnh (data: / blob: URI) thành file thật rồi mới gửi.
+      const blob = await (await fetch(fileUri)).blob();
+      const type = /^image\/(png|webp)$/.test(blob.type) ? blob.type : 'image/jpeg';
+      const ext = type === 'image/png' ? 'png' : type === 'image/webp' ? 'webp' : 'jpg';
+      formData.append('file', new Blob([blob], { type }), `avatar-${Date.now()}.${ext}`);
+    } else {
+      const cleanUri = fileUri.split('?')[0];
+      const filename = cleanUri.split('/').pop() || `avatar-${Date.now()}.jpg`;
+      const match = /\.(\w+)$/.exec(filename);
+      const ext = match ? match[1].toLowerCase() : 'jpg';
+      const type = ext === 'png' ? 'image/png' : ext === 'webp' ? 'image/webp' : 'image/jpeg';
+      formData.append('file', {
+        uri: fileUri,
+        name: filename,
+        type,
+      } as any);
+    }
 
     return apiClient.post<any, User>('/users/me/avatar', formData, {
       transformRequest: (data) => data,

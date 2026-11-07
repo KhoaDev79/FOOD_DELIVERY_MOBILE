@@ -1,5 +1,6 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { helpApi } from '../api/help';
+import { HelpArticleInput } from '../types/api';
 import { queryKeys } from '../constants/queryKeys';
 import { useAuthStore } from '../store/useAuthStore';
 
@@ -252,5 +253,75 @@ export function useAdminAddTicketMessage() {
       queryClient.invalidateQueries({ queryKey: queryKeys.help.ticketDetail(vars.id) });
       queryClient.invalidateQueries({ queryKey: ['admin', 'help'] });
     },
+  });
+}
+
+// =========================================================================
+//  ADMIN: SOẠN FAQ & TRỢ LÝ TỰ ĐỘNG (chức năng 18)
+// =========================================================================
+
+export function useAdminHelpCategories() {
+  return useQuery({
+    queryKey: ['admin', 'help', 'categories'],
+    queryFn: () => helpApi.adminListCategories(),
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+export function useAdminHelpArticles() {
+  return useQuery({
+    queryKey: ['admin', 'help', 'articles'],
+    queryFn: () => helpApi.adminListArticles(),
+    staleTime: 30 * 1000,
+  });
+}
+
+/** Lưu (thêm / sửa) hoặc xoá bài: làm mới danh sách admin và trang Trợ giúp của khách. */
+export function useAdminSaveArticle() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }: { id?: string; data: HelpArticleInput }) =>
+      id ? helpApi.adminUpdateArticle(id, data) : helpApi.adminCreateArticle(data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin', 'help'] });
+      queryClient.invalidateQueries({ queryKey: queryKeys.help.all });
+    },
+  });
+}
+
+export function useAdminDeleteArticle() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => helpApi.adminDeleteArticle(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin', 'help'] });
+      queryClient.invalidateQueries({ queryKey: queryKeys.help.all });
+    },
+  });
+}
+
+export function useAdminBotStats(days: number) {
+  return useQuery({
+    queryKey: ['admin', 'help', 'bot', 'stats', days],
+    queryFn: () => helpApi.adminBotStats(days),
+    staleTime: 60 * 1000,
+  });
+}
+
+export function useAdminBotConversations(onlyProblems: boolean) {
+  return useInfiniteQuery({
+    queryKey: ['admin', 'help', 'bot', 'conversations', onlyProblems],
+    queryFn: ({ pageParam }) => helpApi.adminBotConversations({ page: pageParam, limit: 15, onlyProblems }),
+    initialPageParam: 1,
+    getNextPageParam: (last) => (last.hasMore ? last.page + 1 : undefined),
+    staleTime: 30 * 1000,
+  });
+}
+
+export function useAdminBotConversation(id: string) {
+  return useQuery({
+    queryKey: ['admin', 'help', 'bot', 'conversation', id],
+    queryFn: () => helpApi.adminBotConversation(id),
+    enabled: !!id,
   });
 }

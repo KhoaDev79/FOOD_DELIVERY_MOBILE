@@ -1,7 +1,13 @@
 import { ConfigService } from '@nestjs/config';
 import { Test, TestingModule } from '@nestjs/testing';
 import { PrismaService } from '../prisma/prisma.service';
-import { extractOrderCode, faqExcerpt, maskPii, SupportBotService } from './support-bot.service';
+import {
+  extractFoodSearchQuery,
+  extractOrderCode,
+  faqExcerpt,
+  maskPii,
+  SupportBotService,
+} from './support-bot.service';
 import { SupportTicketService } from './support-ticket.service';
 
 const OWN_ORDER = {
@@ -13,6 +19,31 @@ const OWN_ORDER = {
   estimatedDeliveryAt: new Date(Date.now() + 20 * 60_000),
   restaurant: { name: 'Cơm Tấm Ba Ghiền', imageUrl: null },
   items: [{ name: 'Cơm tấm sườn bì', quantity: 1 }],
+};
+
+const BUN_BO_RESTAURANT = {
+  id: 'rest-bun-bo-1',
+  name: 'Bún Bò Huế O Xuân',
+  description: 'Đặc sản bún bò Huế nước dùng đậm đà chuẩn vị cố đô',
+  imageUrl: 'https://example.com/bun-bo.jpg',
+  isOpen: true,
+  rating: 4.8,
+  ratingCount: 120,
+  latitude: 10.7769,
+  longitude: 106.7009,
+  deliveryRadiusKm: 10,
+  priceRange: '45.000 ₫ - 75.000 ₫',
+  categories: [{ name: 'Bún - Phở - Mì' }],
+  menuItems: [
+    {
+      id: 'dish-bun-bo-1',
+      name: 'Bún bò tái nạm',
+      description: 'Nước dùng xương hầm ngọt thanh',
+      price: 55_000,
+      discountPrice: 49_000,
+      imageUrl: 'https://example.com/dish-bun-bo.jpg',
+    },
+  ],
 };
 
 const geminiText = (text: string) => ({
@@ -59,6 +90,12 @@ describe('SupportBotService', () => {
         update: jest.fn().mockResolvedValue({}),
       },
       order: { findMany: jest.fn().mockResolvedValue([OWN_ORDER]) },
+      address: {
+        findFirst: jest.fn().mockResolvedValue({ latitude: 10.775, longitude: 106.702 }),
+      },
+      restaurant: {
+        findMany: jest.fn().mockResolvedValue([BUN_BO_RESTAURANT]),
+      },
       helpArticle: {
         findMany: jest.fn().mockResolvedValue([
           {
@@ -104,6 +141,14 @@ describe('SupportBotService', () => {
     it('rút gọn bài FAQ, bỏ markdown', () => {
       expect(faqExcerpt('### Tiêu đề\n**Đậm** nội dung')).toBe('Đậm nội dung');
     });
+
+    it('nhận diện câu hỏi tìm quán và món ăn', () => {
+      expect(extractFoodSearchQuery('tìm giúp tôi quán bún bò')).toBe('bun bo');
+      expect(extractFoodSearchQuery('cho tôi món bún')).toBe('bun');
+      expect(extractFoodSearchQuery('cho tôi món ăn về nước dùng')).toBe('nuoc dung');
+      expect(extractFoodSearchQuery('Đơn của tôi đang ở đâu rồi?')).toBeNull();
+      expect(extractFoodSearchQuery('Cho mình hỏi phí ship tính sao?')).toBeNull();
+    });
   });
 
   describe('bot kịch bản (chưa có Gemini)', () => {
@@ -147,6 +192,32 @@ describe('SupportBotService', () => {
       const res = await service.sendMessage('user-1', { content: 'Alo bot ơi' });
       expect(res.isRateLimited).toBe(true);
       expect(res.cards?.[0].type).toBe('HANDOVER');
+    });
+
+    it('tìm quán bún bò và trả thẻ RESTAURANT kèm món, giá, khoảng cách', async () => {
+      const res = await service.sendMessage('user-1', { content: 'tìm giúp tôi quán bún bò' });
+      expect(res.source).toBe('SCRIPT');
+      expect(res.content).toContain('Bún Bò Huế O Xuân');
+      expect(res.content).toContain('Bún bò tái nạm');
+      expect(res.cards?.[0]).toMatchObject({
+        type: 'RESTAURANT',
+        restaurantId: 'rest-bun-bo-1',
+        dishId: 'dish-bun-bo-1',
+        title: 'Bún Bò Huế O Xuân',
+        isOpen: true,
+      });
+      const saved = prisma.botMessage.create.mock.calls.at(-1)[0].data;
+      expect(saved.meta.unresolved).toBe(false);
+    });
+
+    it('hiểu câu hỏi ngữ nghĩa "cho tôi món ăn về nước dùng"', async () => {
+      const res = await service.sendMessage('user-1', { content: 'cho tôi món ăn về nước dùng' });
+      expect(res.cards?.[0]).toMatchObject({
+        type: 'RESTAURANT',
+        restaurantId: 'rest-bun-bo-1',
+      });
+      const saved = prisma.botMessage.create.mock.calls.at(-1)[0].data;
+      expect(saved.meta.unresolved).toBe(false);
     });
   });
 
@@ -211,6 +282,19 @@ describe('SupportBotService', () => {
       expect(w.mode).toBe('AI');
       expect(w.greeting).toContain('Khoa');
       expect(w.remainingToday).toBe(20);
+    });
+
+    it('Gemini gọi công cụ search_restaurants trả về thẻ RESTAURANT', async () => {
+      fetchMock
+        .mockResolvedValueOnce(geminiCall('search_restaurants', { query: 'bún bò' }))
+        .mockResolvedValueOnce(geminiText('Mình tìm thấy quán Bún Bò Huế O Xuân đang mở cửa gần bạn nhé!'));
+      const res = await service.sendMessage('user-1', { content: 'tìm giúp tôi quán bún bò' });
+      expect(res.source).toBe('GEMINI');
+      expect(res.cards?.[0]).toMatchObject({
+        type: 'RESTAURANT',
+        restaurantId: 'rest-bun-bo-1',
+        dishId: 'dish-bun-bo-1',
+      });
     });
   });
 

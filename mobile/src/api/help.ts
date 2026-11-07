@@ -1,8 +1,12 @@
 import { apiClient } from './client';
 import {
+  BotConversationDetail,
+  BotConversationSummary,
+  BotInsightsStats,
   BotReplyResult,
   BotWelcome,
   HelpArticle,
+  HelpArticleInput,
   HelpCategory,
   SupportMessage,
   SupportTicket,
@@ -115,4 +119,30 @@ export const helpApi = {
         byCategory: { category: string; count: number }[];
       }
     >('/admin/help/stats'),
+  // =========================================================================
+  //  ADMIN: SOẠN FAQ & TRỢ LÝ TỰ ĐỘNG (chức năng 18)
+  // =========================================================================
+
+  adminListCategories: () => apiClient.get<any, HelpCategory[]>('/help/admin/categories'),
+
+  adminListArticles: (categoryId?: string) =>
+    apiClient.get<any, HelpArticle[]>('/help/admin/articles', { params: categoryId ? { categoryId } : undefined }),
+
+  adminCreateArticle: (data: HelpArticleInput) => apiClient.post<any, HelpArticle>('/help/admin/articles', data),
+
+  adminUpdateArticle: (id: string, data: Partial<HelpArticleInput>) =>
+    apiClient.put<any, HelpArticle>(`/help/admin/articles/${id}`, data),
+
+  adminDeleteArticle: (id: string) => apiClient.delete<any, unknown>(`/help/admin/articles/${id}`),
+
+  adminBotStats: (days: number) => apiClient.get<any, BotInsightsStats>('/admin/help/bot/stats', { params: { days } }),
+
+  adminBotConversations: (params: { page?: number; limit?: number; onlyProblems?: boolean }) =>
+    apiClient.get<
+      any,
+      { items: BotConversationSummary[]; total: number; page: number; limit: number; hasMore: boolean }
+    >('/admin/help/bot/conversations', { params }),
+
+  adminBotConversation: (id: string) =>
+    apiClient.get<any, BotConversationDetail>(`/admin/help/bot/conversations/${id}`),
 };

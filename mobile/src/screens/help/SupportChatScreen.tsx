@@ -41,12 +41,12 @@ type ChatMessage = BotReplyResult & { failed?: boolean; local?: boolean };
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-/i;
 
 const WELCOME_TOPICS: { label: string; icon: IconName; box: string; tone: IconTone }[] = [
-  { label: 'Đơn của tôi đang ở đâu?', icon: 'bicycle-outline', box: 'bg-brand-50', tone: 'brand' },
+  { label: 'Tìm giúp tôi quán bún bò', icon: 'restaurant-outline', box: 'bg-brand-50', tone: 'brand' },
+  { label: 'Đơn của tôi đang ở đâu?', icon: 'bicycle-outline', box: 'bg-info-soft', tone: 'info' },
   { label: 'Phí ship tính thế nào?', icon: 'cash-outline', box: 'bg-success-soft', tone: 'success' },
   { label: 'Tôi muốn huỷ đơn', icon: 'close-circle-outline', box: 'bg-danger-soft', tone: 'danger' },
   { label: 'Món bị thiếu hoặc sai', icon: 'fast-food-outline', box: 'bg-warning-soft', tone: 'warning' },
-  { label: 'Thanh toán khi nhận hàng', icon: 'wallet-outline', box: 'bg-violet-soft', tone: 'violet' },
-  { label: 'Gặp nhân viên CSKH', icon: 'headset-outline', box: 'bg-info-soft', tone: 'info' },
+  { label: 'Gặp nhân viên CSKH', icon: 'headset-outline', box: 'bg-violet-soft', tone: 'violet' },
 ];
 
 const BotAvatar: React.FC<{ size?: 'sm' | 'lg' }> = ({ size = 'sm' }) => (
@@ -127,6 +127,77 @@ const BotCard: React.FC<{
           <View className="flex-row items-center gap-0.5">
             <Text variant="caption" weight="bold" tone="brand">
               Theo dõi đơn
+            </Text>
+            <Icon name="chevron-forward" size={12} tone="brand" />
+          </View>
+        </View>
+      </Pressable>
+    );
+  }
+
+  if (card.type === 'RESTAURANT') {
+    const isClosed = card.isOpen === false;
+    return (
+      <Pressable
+        accessibilityRole="button"
+        onPress={() => onPress(card)}
+        className="gap-2.5 rounded-2xl bg-surface p-3 shadow-card active:opacity-80"
+      >
+        <View className="flex-row items-center gap-3">
+          <AppImage uri={card.imageUrl} className="h-14 w-14 rounded-xl" fallbackIcon="restaurant" />
+          <View className="flex-1 gap-1">
+            <View className="flex-row items-center gap-1.5">
+              <Text variant="body" weight="bold" numberOfLines={1} className="flex-1">
+                {card.title}
+              </Text>
+              <View
+                className={`rounded-full px-2 py-0.5 ${isClosed ? 'bg-canvas-muted' : 'bg-success-soft'}`}
+              >
+                <Text variant="micro" weight="bold" tone={isClosed ? 'muted' : 'success'}>
+                  {isClosed ? 'Tạm đóng' : 'Đang mở'}
+                </Text>
+              </View>
+            </View>
+            {!!card.matchedDish && (
+              <View className="flex-row items-center gap-1">
+                <Icon name="fast-food-outline" size={12} tone="brand" />
+                <Text variant="caption" weight="semibold" tone="brand" numberOfLines={1} className="flex-1">
+                  {card.matchedDish}
+                </Text>
+              </View>
+            )}
+            <View className="flex-row items-center gap-2">
+              {typeof card.rating === 'number' && card.rating > 0 && (
+                <View className="flex-row items-center gap-0.5">
+                  <Icon name="star" size={12} tone="warning" />
+                  <Text variant="micro" weight="semibold" tone="secondary">
+                    {card.rating.toFixed(1)}
+                  </Text>
+                </View>
+              )}
+              {typeof card.distanceKm === 'number' && (
+                <View className="flex-row items-center gap-0.5">
+                  <Icon name="location-outline" size={12} tone="muted" />
+                  <Text variant="micro" weight="regular" tone="muted">
+                    {card.distanceKm.toFixed(1)} km
+                  </Text>
+                </View>
+              )}
+              {!card.matchedDish && !!card.subtitle && (
+                <Text variant="micro" weight="regular" tone="muted" numberOfLines={1} className="flex-1">
+                  {card.subtitle}
+                </Text>
+              )}
+            </View>
+          </View>
+        </View>
+        <View className="flex-row items-center justify-between border-t border-line-subtle pt-2">
+          <Text variant="micro" weight="regular" tone="muted">
+            {card.priceText ? `Giá món: ${card.priceText}` : 'Chạm để mở thực đơn quán'}
+          </Text>
+          <View className="flex-row items-center gap-0.5">
+            <Text variant="caption" weight="bold" tone="brand">
+              Xem quán & đặt món
             </Text>
             <Icon name="chevron-forward" size={12} tone="brand" />
           </View>
@@ -305,6 +376,14 @@ export const SupportChatScreen: React.FC = () => {
     switch (card.type) {
       case 'ORDER_STATUS':
         if (card.orderId) navigation.navigate('OrderTracking', { orderId: card.orderId });
+        break;
+      case 'RESTAURANT':
+        if (card.restaurantId) {
+          navigation.navigate('RestaurantDetail', {
+            restaurantId: card.restaurantId,
+            openDishId: card.dishId,
+          });
+        }
         break;
       case 'FAQ_ARTICLE':
         if (card.articleId) navigation.navigate('HelpArticle', { articleId: card.articleId, title: card.title });

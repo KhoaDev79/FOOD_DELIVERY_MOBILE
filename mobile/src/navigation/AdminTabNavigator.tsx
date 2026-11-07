@@ -5,6 +5,10 @@ import React from 'react';
 import { FloatingTabBar, TabMeta } from '../components/ui/FloatingTabBar';
 import { AdminAuditLogScreen } from '../screens/admin/AdminAuditLogScreen';
 import { AdminSupportTicketsScreen } from '../screens/admin/AdminSupportTicketsScreen';
+import { AdminHelpArticlesScreen } from '../screens/admin/AdminHelpArticlesScreen';
+import { AdminHelpArticleEditScreen } from '../screens/admin/AdminHelpArticleEditScreen';
+import { AdminBotInsightsScreen } from '../screens/admin/AdminBotInsightsScreen';
+import { AdminBotConversationScreen } from '../screens/admin/AdminBotConversationScreen';
 import { VoucherManageScreen } from '../screens/voucher/VoucherManageScreen';
 import { AdminRefundsScreen } from '../screens/admin/AdminRefundsScreen';
 import { AdminBannersScreen } from '../screens/admin/AdminBannersScreen';
@@ -55,6 +59,10 @@ export const AdminTabNavigator: React.FC = () => (
     <Stack.Screen name="AdminCuisines" component={AdminCuisinesScreen} />
     <Stack.Screen name="AdminAuditLog" component={AdminAuditLogScreen} />
     <Stack.Screen name="AdminSupportTickets" component={AdminSupportTicketsScreen} />
+    <Stack.Screen name="AdminHelpArticles" component={AdminHelpArticlesScreen} />
+    <Stack.Screen name="AdminHelpArticleEdit" component={AdminHelpArticleEditScreen as React.ComponentType<any>} />
+    <Stack.Screen name="AdminBotInsights" component={AdminBotInsightsScreen} />
+    <Stack.Screen name="AdminBotConversation" component={AdminBotConversationScreen as React.ComponentType<any>} />
     <Stack.Screen name="AdminVouchers" component={VoucherManageScreen} />
     <Stack.Screen name="AdminRefunds" component={AdminRefundsScreen} />
     <Stack.Screen name="NotificationCenter" component={NotificationCenterScreen} />

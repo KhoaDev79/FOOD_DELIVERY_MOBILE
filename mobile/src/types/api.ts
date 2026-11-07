@@ -415,6 +415,7 @@ export interface HelpArticle {
     code: string;
     name: string;
     icon?: string | null;
+    audience?: 'CUSTOMER' | 'DRIVER' | 'OWNER';
   };
   userFeedback?: boolean | null;
 }
@@ -935,7 +936,13 @@ export interface SupportTicket {
   messages?: SupportMessage[];
 }
 
-export type BotCardType = 'ORDER_STATUS' | 'FAQ_ARTICLE' | 'START_ISSUE' | 'CONTACT_SUPPORT' | 'HANDOVER';
+export type BotCardType =
+  | 'ORDER_STATUS'
+  | 'FAQ_ARTICLE'
+  | 'START_ISSUE'
+  | 'CONTACT_SUPPORT'
+  | 'HANDOVER'
+  | 'RESTAURANT';
 
 export interface BotActionCard {
   type: BotCardType;
@@ -948,6 +955,13 @@ export interface BotActionCard {
   articleId?: string;
   issueType?: string;
   summary?: string;
+  restaurantId?: string;
+  dishId?: string;
+  rating?: number;
+  distanceKm?: number;
+  matchedDish?: string;
+  priceText?: string;
+  isOpen?: boolean;
 }
 
 export interface BotWelcome {
@@ -969,4 +983,72 @@ export interface BotReplyResult {
   isRateLimited?: boolean;
   createdAt?: string;
   feedback?: 'HELPFUL' | 'UNHELPFUL' | null;
+}
+
+// =========================================================================
+//  ADMIN: SOẠN FAQ & THỐNG KÊ TRỢ LÝ TỰ ĐỘNG (chức năng 18)
+// =========================================================================
+
+export type HelpAudience = 'CUSTOMER' | 'DRIVER' | 'OWNER';
+
+export interface HelpArticleInput {
+  categoryId: string;
+  title: string;
+  body: string;
+  keywords?: string[];
+  sortOrder?: number;
+  isActive?: boolean;
+}
+
+export interface BotUnansweredQuestion {
+  question: string;
+  count: number;
+  lastAskedAt: string;
+  reasons: ('UNRESOLVED' | 'UNHELPFUL')[];
+}
+
+export interface BotInsightsStats {
+  days: number;
+  conversations: number;
+  userMessages: number;
+  botReplies: number;
+  helpful: number;
+  unhelpful: number;
+  helpfulRate: number | null;
+  handovers: number;
+  handoverRate: number | null;
+  unresolvedReplies: number;
+  unresolvedRate: number | null;
+  avgLatencyMs: number | null;
+  bySource: { source: string; count: number }[];
+  daily: { date: string; conversations: number; handovers: number }[];
+  unanswered: BotUnansweredQuestion[];
+}
+
+export interface BotConversationSummary {
+  id: string;
+  createdAt: string;
+  customerName: string;
+  messageCount: number;
+  lastMessageAt: string;
+  firstQuestion: string;
+  unhelpfulCount: number;
+  helpfulCount: number;
+  unresolved: boolean;
+}
+
+export interface BotConversationDetail {
+  id: string;
+  createdAt: string;
+  customerName: string;
+  messages: {
+    id: string;
+    role: 'user' | 'assistant';
+    content: string;
+    source?: string | null;
+    latencyMs?: number | null;
+    feedback?: 'HELPFUL' | 'UNHELPFUL' | null;
+    createdAt: string;
+    unresolved: boolean;
+  }[];
 }
