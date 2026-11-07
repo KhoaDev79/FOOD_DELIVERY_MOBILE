@@ -394,7 +394,8 @@ export const HomeScreen: React.FC = () => {
                   <Icon name="location" size="md" tone="inverse" />
                 </View>
                 <View className="flex-1">
-                  <Text variant="caption" weight="regular" tone="inverse" className="opacity-80">
+                  {/* Chữ trắng đậm, không làm trong suốt: nhãn nhỏ trên nền xanh cần đủ tương phản để đọc */}
+                  <Text variant="caption" weight="semibold" tone="inverse">
                     Giao đến
                   </Text>
                   <View className="flex-row items-center gap-1">

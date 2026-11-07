@@ -14,8 +14,11 @@ const PRESETS = {
   dealFrame: `linear-gradient(160deg, ${palette.accent['50']} 0%, ${palette.canvas.DEFAULT} 55%, ${palette.accent['100']} 100%)`,
   /** Dải tiêu đề "Quán gần tôi": xanh ngọc nhạt dần vào nền danh sách brand-50. */
   nearbyBand: `linear-gradient(180deg, ${palette.brand['200']} 0%, ${palette.brand['100']} 45%, ${palette.brand['50']} 100%)`,
-  /** Đầu trang các tab khách hàng (Đơn hàng, Yêu thích, Tài khoản, Giỏ hàng). */
-  tabHeader: `linear-gradient(160deg, ${palette.brand['900']} 0%, ${palette.brand['700']} 55%, ${palette.brand['500']} 100%)`,
+  /**
+   * Đầu trang các tab (Đơn hàng, Yêu thích, Tài khoản...). Chuyển màu THẲNG từ trên xuống: mép trên đều một màu
+   * xanh đậm, liền với thanh trạng thái khi mở bản web từ Màn hình chính iPhone (chéo thì góc phải bị lệch màu).
+   */
+  tabHeader: `linear-gradient(180deg, ${palette.brand['900']} 0%, ${palette.brand['700']} 55%, ${palette.brand['500']} 100%)`,
   /** Nền khối chủ đề màu cam nhạt (ảnh mẫu 4, 5). */
   sectionAccent: `linear-gradient(180deg, ${palette.accent['50']} 0%, ${palette.canvas.DEFAULT} 70%)`,
   /** Thẻ minh hoạ trạng thái rỗng (ảnh mẫu 8). */
@@ -26,8 +29,8 @@ const PRESETS = {
   splash: `linear-gradient(180deg, ${palette.brand['900']} 0%, ${palette.brand['700']} 55%, ${palette.brand['700']} 100%)`,
   /** Quầng sáng sau logo màn khởi động (màu brand-300, mờ dần). */
   splashGlow: 'radial-gradient(circle at 50% 45%, rgba(127,224,236,0.38) 0%, rgba(127,224,236,0) 48%)',
-  /** Đầu các màn Đăng nhập / Đăng ký / Quên mật khẩu: xanh ngọc đậm chéo sang sáng. */
-  authHero: `linear-gradient(150deg, ${palette.brand['900']} 0%, ${palette.brand['700']} 55%, ${palette.brand['500']} 120%)`,
+  /** Đầu các màn Đăng nhập / Đăng ký / Quên mật khẩu: xanh ngọc đậm sang sáng, thẳng từ trên xuống (lý do như tabHeader). */
+  authHero: `linear-gradient(180deg, ${palette.brand['900']} 0%, ${palette.brand['700']} 55%, ${palette.brand['500']} 120%)`,
   /** Nút chính màn xác thực: đủ đậm để chữ trắng dễ đọc ở cả hai đầu. */
   authButton: `linear-gradient(135deg, ${palette.brand['700']} 0%, ${palette.brand['800']} 100%)`,
   /** Lớp tối dưới chữ phủ trên ảnh. */

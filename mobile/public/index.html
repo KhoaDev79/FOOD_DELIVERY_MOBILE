@@ -13,7 +13,10 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-title" content="ZomZom" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <!-- Thanh trạng thái ĐẶC màu (theo theme-color ở trên), không dùng "black-translucent":
+         kiểu trong suốt làm iPhone tính thiếu chiều cao app (hở dải ở đáy, thanh tab bị đẩy lên)
+         và phủ lớp mờ trắng lên header nằm dưới giờ/pin. -->
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
     <link rel="icon" type="image/png" sizes="48x48" href="/icons/favicon-48.png" />
     <link rel="manifest" href="/manifest.json" />
@@ -21,14 +24,15 @@
     <!-- The `react-native-web` recommended style reset: https://necolas.github.io/react-native-web/docs/setup/#root-element -->
     <style id="expo-reset">
       /* These styles make the body full-height */
-      /* iPhone mở từ màn hình chính (thanh trạng thái trong suốt): "100%" thiếu đúng chiều cao thanh trạng thái
-         → lộ dải màu ở đáy. 100dvh = đúng chiều cao màn hình (Safari có thanh công cụ thì tự trừ ra). */
+      /* 100dvh = chiều cao vùng hiển thị thật (Safari có thanh công cụ thì tự trừ ra). */
       html,
       body {
         height: 100%;
         height: 100vh;
         height: 100dvh;
-        background-color: #F2F3F5;
+        /* iOS lấy màu nền trang để tô vùng thanh trạng thái: dùng xanh đậm của header cho liền màu.
+           Khung app đã phủ kín màn hình nên màu này không lộ ra ở đáy. */
+        background-color: #0E4A55;
       }
       /* These styles disable body scrolling if you are using <ScrollView> */
       body {
@@ -44,6 +48,20 @@
         height: 100vh;
         height: 100dvh;
         flex: 1;
+        box-sizing: border-box;
+      }
+      /* iPhone: kéo quá đầu/cuối danh sách làm cả vùng cuộn "nảy" và lộ nền trắng phía trên header xanh.
+         Tắt hiệu ứng nảy theo chiều dọc cho mọi vùng cuộn của app (cuộn bình thường không ảnh hưởng;
+         trên web cũng không có kéo-để-làm-mới nên không mất tính năng). */
+      #root div {
+        overscroll-behavior-y: none;
+      }
+      /* Chỉ khi mở từ "Màn hình chính": iOS phủ một dải mờ ngay dưới thanh trạng thái lên nội dung.
+         Đẩy app xuống 10px; phần hở cùng màu xanh với thanh trạng thái nên trông như thanh cao hơn một chút. */
+      @media (display-mode: standalone) {
+        #root {
+          padding-top: 10px;
+        }
       }
     </style>
   </head>
