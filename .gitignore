@@ -21,6 +21,5 @@ backend/public/uploads/
 *.dump
 *.old
 
-# Báo cáo, slide đồ án (chỉ giữ trên máy, không đưa lên Git)
-docs/*.docx
-docs/*.pptx
+# Tài liệu, prompt, báo cáo, slide trong docs/: chỉ giữ trên máy, không đưa lên Git
+docs/
