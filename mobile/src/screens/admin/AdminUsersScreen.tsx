@@ -174,7 +174,8 @@ export const AdminUsersScreen: React.FC = () => {
         onPress={() => openProfile(item)}
         className={cn(
           'min-h-[72px] flex-row items-center gap-3 px-4 py-3',
-          selected ? 'bg-brand-50' : 'bg-surface active:bg-canvas-subtle',
+          // Cả hai nhánh đều có active: — thêm/bỏ hiệu ứng nhấn động làm NativeWind dựng lại thành phần trên điện thoại
+          selected ? 'bg-brand-50 active:bg-brand-100' : 'bg-surface active:bg-canvas-subtle',
           first && 'rounded-t-2xl',
           last ? 'rounded-b-2xl' : 'border-b border-line-subtle',
         )}

@@ -11,7 +11,7 @@ import { ChatNotifier } from './src/components/modules/chat/ChatNotifier';
 import { NewOrderAlertModal } from './src/components/modules/owner/NewOrderAlertModal';
 import { ToastProvider } from './src/components/ui/Overlays';
 import { AppNavigator } from './src/navigation/AppNavigator';
-import { markNavigationReady, navigationRef } from './src/navigation/navigationRef';
+import { handleUnhandledNavigationAction, markNavigationReady, navigationRef } from './src/navigation/navigationRef';
 import { useAuthStore } from './src/store/useAuthStore';
 import { fontAssets } from './src/theme';
 import { installWebAlert } from './src/utils/webAlert';
@@ -77,7 +77,12 @@ export default function App() {
       <QueryClientProvider client={queryClient}>
         <ResetCacheOnAccountChange />
         <ToastProvider>
-          <NavigationContainer ref={navigationRef} linking={linking} onReady={markNavigationReady}>
+          <NavigationContainer
+            ref={navigationRef}
+            linking={linking}
+            onReady={markNavigationReady}
+            onUnhandledAction={handleUnhandledNavigationAction}
+          >
             <StatusBar style="dark" />
             <AppNavigator />
             {/* Thông báo nổi tin nhắn chat: đặt sau AppNavigator để nằm trên mọi màn hình */}

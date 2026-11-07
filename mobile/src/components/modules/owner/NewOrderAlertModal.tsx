@@ -103,7 +103,8 @@ export const NewOrderAlertModal: React.FC = () => {
     // Chuyển tới màn hình đơn hàng của quán
     try {
       if (navigationRef.isReady()) {
-        navigationRef.navigate('OwnerOrdersTab' as never);
+        // React Navigation 7: tab nằm trong khung "OwnerTabs", phải ghi rõ khung cha khi điều hướng từ ngoài vào
+        (navigationRef.navigate as (name: string, params?: object) => void)('OwnerTabs', { screen: 'OwnerOrdersTab' });
       }
     } catch {
       // Bỏ qua nếu navigator chưa sẵn sàng

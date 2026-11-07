@@ -29,6 +29,8 @@ if (Platform.OS !== 'web') {
 export const AddressPickerScreen: React.FC<Props> = ({ navigation, route }) => {
   const mapRef = useRef<any>(null);
   const debounceTimerRef = useRef<any>(null);
+  // Vị trí vừa tra tên đường gần nhất: kéo lệch dưới ~5 m thì không tra lại (tránh gọi lặp khi bản đồ tự xê dịch)
+  const lastGeocodedRef = useRef<{ lat: number; lng: number } | null>(null);
   // Bỏ qua một lần tra ngược địa chỉ khi bản đồ tự di chuyển tới kết quả vừa chọn (giữ tên địa điểm đã chọn)
   const skipReverseRef = useRef(false);
   // Toast thay cho Alert.alert: Alert không hiện gì trên web.
@@ -59,7 +61,7 @@ export const AddressPickerScreen: React.FC<Props> = ({ navigation, route }) => {
 
     try {
       setIsGeocoding(true);
-      setGeocodingError(null);
+      lastGeocodedRef.current = { lat, lng };
 
       // Gọi proxy Backend trước (đã có rate limiter, cache và error message tiếng Việt)
       const data = await mapsApi.reverseGeocode(lat, lng);
@@ -68,6 +70,7 @@ export const AddressPickerScreen: React.FC<Props> = ({ navigation, route }) => {
         const shortTitle = parts[0] || 'Vị trí đã ghim';
         setSelectedAddress(shortTitle);
         setAddressDetails(data.addressLine);
+        setGeocodingError(null);
         return;
       }
 
@@ -88,6 +91,7 @@ export const AddressPickerScreen: React.FC<Props> = ({ navigation, route }) => {
           if (fullText && !isCoordinateAddressString(fullText)) {
             setSelectedAddress(shortTitle || 'Vị trí đã chọn');
             setAddressDetails(fullText);
+            setGeocodingError(null);
             return;
           }
         }
@@ -98,7 +102,14 @@ export const AddressPickerScreen: React.FC<Props> = ({ navigation, route }) => {
     } catch (err: any) {
       setSelectedAddress('Vị trí đã chọn');
       setAddressDetails('Không thể lấy tên đường tự động. Bạn hãy bấm "Tự gõ tên đường" bên dưới.');
-      setGeocodingError(err.response?.data?.message || err.message || 'Dịch vụ bản đồ hiện không phản hồi.');
+      // Câu báo tiếng Việt; lỗi phiên đăng nhập (401) không có ý nghĩa với người dùng ở màn này
+      const status = err.response?.status;
+      const serverMsg = err.response?.data?.message;
+      setGeocodingError(
+        status === 401 || !serverMsg || serverMsg === 'Unauthorized'
+          ? 'Chưa lấy được tên đường tự động. Bạn có thể bấm "Gõ tay".'
+          : serverMsg,
+      );
     } finally {
       setIsGeocoding(false);
     }
@@ -127,6 +138,10 @@ export const AddressPickerScreen: React.FC<Props> = ({ navigation, route }) => {
       return;
     }
     if (isManualMode) return; // Nếu đang gõ tay, không gọi reverse geocode đè
+    const last = lastGeocodedRef.current;
+    if (last && Math.abs(last.lat - region.latitude) < 0.00005 && Math.abs(last.lng - region.longitude) < 0.00005) {
+      return;
+    }
 
     if (debounceTimerRef.current) {
       clearTimeout(debounceTimerRef.current);
@@ -295,24 +310,6 @@ export const AddressPickerScreen: React.FC<Props> = ({ navigation, route }) => {
         </Pressable>
       </View>
 
-      {/* Thông báo lỗi khi dịch vụ bản đồ lỗi hoặc chưa có key */}
-      {geocodingError && (
-        <View className="z-10 flex-row items-center gap-2 bg-danger-soft px-3.5 py-2">
-          <Icon name="alert-circle-outline" size={18} tone="danger" />
-          <Text variant="caption" tone="danger" numberOfLines={2} className="flex-1">
-            {geocodingError}
-          </Text>
-          <Pressable
-            onPress={() => setIsManualMode(true)}
-            className="rounded bg-surface px-2.5 py-1 shadow-card active:opacity-75"
-          >
-            <Text variant="micro" weight="bold" tone="brand">
-              Gõ tay
-            </Text>
-          </Pressable>
-        </View>
-      )}
-
       {/* Dropdown danh sách gợi ý tìm kiếm */}
       {searchResults.length > 0 && (
         <View className="absolute left-3 right-3 top-16 z-20 max-h-72 rounded-xl border border-line bg-surface shadow-raised">
@@ -342,6 +339,25 @@ export const AddressPickerScreen: React.FC<Props> = ({ navigation, route }) => {
 
       {/* Map View */}
       <View style={{ flex: 1 }} className="relative flex-1">
+        {/* Thông báo lỗi lấy tên đường: NỔI trên bản đồ. Trước đây nằm phía trên và đẩy bản đồ xuống, mỗi lần
+            hiện/ẩn làm khung bản đồ đổi kích thước → bản đồ xê dịch → gọi lại → lỗi lại → bản đồ giật liên tục. */}
+        {geocodingError && (
+          <View className="absolute left-3 right-3 top-3 z-10 flex-row items-center gap-2 rounded-2xl bg-surface px-3.5 py-2.5 shadow-raised">
+            <Icon name="alert-circle-outline" size={18} tone="danger" />
+            <Text variant="caption" weight="medium" numberOfLines={2} className="flex-1">
+              {geocodingError}
+            </Text>
+            <Pressable
+              onPress={() => setIsManualMode(true)}
+              hitSlop={6}
+              className="rounded-full bg-brand-50 px-3 py-1.5 active:opacity-75"
+            >
+              <Text variant="micro" weight="bold" tone="brand">
+                Gõ tay
+              </Text>
+            </Pressable>
+          </View>
+        )}
         {Platform.OS !== 'web' && NativeMapView ? (
           <NativeMapView
             ref={mapRef}

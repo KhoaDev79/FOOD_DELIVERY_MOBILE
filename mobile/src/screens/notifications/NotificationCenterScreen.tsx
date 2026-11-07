@@ -91,16 +91,18 @@ export const NotificationCenterScreen: React.FC = () => {
     }
 
     const orderId = (item.data?.orderId as string) || undefined;
+    // React Navigation 7: màn Thông báo nằm ngoài khung tab → phải ghi rõ khung cha (OwnerTabs / DriverTabs / AdminTabs)
+    // rồi mới tới tab; gọi thẳng tên tab sẽ báo "action NAVIGATE was not handled by any navigator".
     if (orderId) {
       switch (user?.role) {
         case 'RESTAURANT_OWNER':
-          navigation.navigate('OwnerOrdersTab');
+          navigation.navigate('OwnerTabs', { screen: 'OwnerOrdersTab' });
           return;
         case 'DRIVER':
-          navigation.navigate('DriverDeliveriesTab');
+          navigation.navigate('DriverTabs', { screen: 'DriverDeliveriesTab' });
           return;
         case 'ADMIN':
-          navigation.navigate('AdminOrdersTab', { orderId });
+          navigation.navigate('AdminTabs', { screen: 'AdminOrdersTab', params: { orderId } });
           return;
         case 'CUSTOMER':
         default:
@@ -115,7 +117,7 @@ export const NotificationCenterScreen: React.FC = () => {
     }
 
     if (item.type === 'driver_offline' && user?.role === 'DRIVER') {
-      navigation.navigate('DriverProfileTab');
+      navigation.navigate('DriverTabs', { screen: 'DriverProfileTab' });
     }
   };
 

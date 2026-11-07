@@ -7,9 +7,21 @@ import Animated, {
   withSequence,
   withTiming,
 } from 'react-native-reanimated';
+import { palette } from '../../../theme';
 import { cn, Text } from '../../ui';
 
 const LENGTH = 6;
+
+/** Ô mã đang chờ nhập: viền xanh + quầng sáng */
+const ACTIVE_BOX = {
+  borderColor: palette.brand['500'],
+  backgroundColor: palette.surface,
+  shadowColor: palette.brand['500'],
+  shadowOffset: { width: 0, height: 6 },
+  shadowOpacity: 0.3,
+  shadowRadius: 10,
+  elevation: 3,
+} as const;
 
 /**
  * Ô nhập mã OTP 6 số kiểu các app lớn: 6 ô vuông, ô đang nhập viền màu thương hiệu.
@@ -63,14 +75,12 @@ export const OtpCodeInput: React.FC<{
                 key={i}
                 className={cn(
                   'h-14 flex-1 items-center justify-center rounded-[14px] border-[1.5px]',
-                  error
-                    ? 'border-danger bg-danger-soft'
-                    : active
-                      ? 'border-brand-500 bg-surface shadow-glow'
-                      : digit
-                        ? 'border-brand-300 bg-brand-50'
-                        : 'border-line bg-surface',
+                  // Ô đang nhập (con trỏ) đổi bằng style, không đổi class: đổi class lúc đang nhập làm NativeWind
+                  // dựng lại thành phần trên điện thoại → mất tiêu điểm / bàn phím đóng mở liên tục
+                  error ? 'border-danger bg-danger-soft' : digit ? 'border-brand-300 bg-brand-50' : 'border-line bg-surface',
                 )}
+                // NGOẠI LỆ style: ô đang nhập, xem ghi chú ở trên
+                style={active && !error ? ACTIVE_BOX : undefined}
               >
                 {digit ? (
                   <Text variant="title" weight="bold" tone={error ? 'danger' : 'default'}>

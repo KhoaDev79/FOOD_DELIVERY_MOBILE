@@ -1,12 +1,17 @@
 import React, { forwardRef, useState } from 'react';
 import { Control, Controller, FieldPath, FieldValues } from 'react-hook-form';
 import { Pressable, TextInput, TextInputProps, View } from 'react-native';
+import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import { palette } from '../../theme';
 import { cn } from './cn';
 import { Icon, IconName } from './Icon';
 import { Text } from './Text';
 
 type TextInputRef = React.ComponentRef<typeof TextInput>;
+
+/** Chiều cao 1 dòng chữ cỡ body-lg (tokens: 16/22) */
+const LINE_HEIGHT = 22;
+
 
 export interface InputProps extends TextInputProps {
   label?: string;
@@ -29,12 +34,60 @@ export interface InputProps extends TextInputProps {
 
 export const Input = forwardRef<TextInputRef, InputProps>(
   (
-    { label, error, hint, leftIcon, password, prefix, valid, variant = 'filled', editable = true, className, onFocus, onBlur, ...rest },
+    {
+      label,
+      error,
+      hint,
+      leftIcon,
+      password,
+      prefix,
+      valid,
+      variant = 'filled',
+      editable = true,
+      className,
+      onFocus,
+      onBlur,
+      onContentSizeChange,
+      style,
+      ...rest
+    },
     ref,
   ) => {
     const outlined = variant === 'outlined';
-    const [focused, setFocused] = useState(false);
+    // Ô nhiều dòng (mô tả, ghi chú): khung cao ~3 dòng; phần chữ chỉ cao đúng nội dung và được căn GIỮA khung,
+    // nên dòng gợi ý "VD: ..." nằm giữa thay vì dính lên trên. Gõ nhiều dòng thì phần chữ (và khung) tự cao lên.
+    const multiline = !!rest.multiline;
+    const [contentHeight, setContentHeight] = useState(LINE_HEIGHT);
     const [hidden, setHidden] = useState(true);
+
+    /*
+     * Viền xanh lúc đang nhập = một lớp viền phủ sẵn trên khung, chỉ đổi độ mờ bằng Reanimated (chạy trên luồng
+     * giao diện). KHÔNG dùng state React cho "đang nhập": mỗi lần render lại khi bấm vào ô, NativeWind trên điện thoại
+     * có thể dựng lại khung → ô mất tiêu điểm (phải chạm 2 lần mới có bàn phím, hoặc treo / lỗi ngữ cảnh điều hướng).
+     */
+    const focus = useSharedValue(0);
+    const borderWidth = outlined ? 1.5 : 1;
+    const radius = outlined ? 16 : 12;
+    const ringStyle = useAnimatedStyle(() => ({
+      position: 'absolute',
+      // Phủ đúng lên viền của khung (vị trí tuyệt đối tính từ bên trong viền)
+      top: -borderWidth,
+      left: -borderWidth,
+      right: -borderWidth,
+      bottom: -borderWidth,
+      borderRadius: radius,
+      borderWidth,
+      borderColor: palette.brand['500'],
+      opacity: focus.get(),
+      ...(outlined
+        ? {
+            shadowColor: palette.brand['500'],
+            shadowOffset: { width: 0, height: 6 },
+            shadowOpacity: 0.3 * focus.get(),
+            shadowRadius: 10,
+          }
+        : {}),
+    }));
 
     return (
       <View className={cn('gap-1.5', className)}>
@@ -46,21 +99,21 @@ export const Input = forwardRef<TextInputRef, InputProps>(
         <View
           className={cn(
             outlined
-              ? 'h-search-lg flex-row items-center gap-2.5 rounded-lg border-[1.5px] px-3.5'
-              : 'h-button-lg flex-row items-center gap-2 rounded-md border px-3',
+              ? 'flex-row gap-2.5 rounded-lg border-[1.5px] px-3.5'
+              : 'flex-row gap-2 rounded-md border px-3',
+            multiline ? 'min-h-[104px] items-center py-3' : outlined ? 'h-search-lg items-center' : 'h-button-lg items-center',
+            // className không phụ thuộc trạng thái "đang nhập" (xem ghi chú ở ringStyle)
             error
               ? 'border-danger bg-danger-soft'
-              : focused
-                ? outlined
-                  ? 'border-brand-500 bg-surface shadow-glow'
-                  : 'border-brand-500 bg-surface'
-                : outlined
-                  ? 'border-line bg-surface'
-                  : 'border-transparent bg-canvas-subtle',
+              : outlined
+                ? 'border-line bg-surface'
+                : 'border-transparent bg-canvas-subtle',
             !editable && 'opacity-60',
           )}
         >
-          {leftIcon && <Icon name={leftIcon} size="md" tone={error ? 'danger' : focused ? 'brand' : 'muted'} />}
+          {/* Viền xanh lúc đang nhập (ẩn khi có lỗi: viền đỏ ưu tiên) */}
+          {!error && <Animated.View pointerEvents="none" style={ringStyle} />}
+          {leftIcon && <Icon name={leftIcon} size="md" tone={error ? 'danger' : 'muted'} />}
           {prefix && (
             <View className="flex-row items-center gap-2 border-r border-line pr-2">
               {typeof prefix === 'string' ? (
@@ -79,13 +132,25 @@ export const Input = forwardRef<TextInputRef, InputProps>(
             placeholderTextColor={palette.ink.muted}
             accessibilityLabel={rest.accessibilityLabel ?? label}
             maxFontSizeMultiplier={1.4}
-            className="h-full flex-1 font-body text-body-lg text-ink web:outline-none"
+            textAlignVertical={multiline ? 'center' : undefined}
+            className={cn('flex-1 font-body text-body-lg text-ink web:outline-none', multiline ? 'p-0' : 'h-full')}
+            // NGOẠI LỆ style: chiều cao ô nhiều dòng thay đổi theo nội dung, không viết được bằng className
+            style={multiline ? [style, { height: Math.max(LINE_HEIGHT, contentHeight) }] : style}
+            // Chỉ ô nhiều dòng mới cần đo chiều cao nội dung
+            onContentSizeChange={
+              multiline
+                ? (e) => {
+                    setContentHeight(Math.ceil(e.nativeEvent.contentSize.height));
+                    onContentSizeChange?.(e);
+                  }
+                : onContentSizeChange
+            }
             onFocus={(e) => {
-              setFocused(true);
+              focus.set(withTiming(1, { duration: 120 }));
               onFocus?.(e);
             }}
             onBlur={(e) => {
-              setFocused(false);
+              focus.set(withTiming(0, { duration: 120 }));
               onBlur?.(e);
             }}
             {...rest}

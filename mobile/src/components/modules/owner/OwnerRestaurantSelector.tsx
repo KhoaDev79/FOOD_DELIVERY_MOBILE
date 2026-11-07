@@ -109,8 +109,8 @@ export const OwnerRestaurantSelector: React.FC<OwnerRestaurantSelectorProps> = (
                       onPress={() => handleSelect(item)}
                       className={`flex-row items-center gap-3 rounded-2xl p-3 border transition-colors ${
                         isSelected
-                          ? 'border-brand-500 bg-brand-50/70 shadow-sm'
-                          : 'border-line bg-surface active:bg-canvas-subtle'
+                          ? 'border-brand-500 bg-brand-50/70 shadow-sm active:bg-brand-50'
+                          : 'border-line bg-surface shadow-none active:bg-canvas-subtle'
                       }`}
                     >
                       {/* Ảnh đại diện quán */}
