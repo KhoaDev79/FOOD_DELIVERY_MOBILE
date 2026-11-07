@@ -442,7 +442,7 @@ export class SupportTicketService {
       void this.notifications.sendToUsers([ticket.userId], {
         title: `Phản hồi phiếu hỗ trợ #${ticket.code}`,
         body: dto.content.length > 80 ? `${dto.content.slice(0, 80)}...` : dto.content,
-        data: { type: 'support_ticket', ticketId: ticket.id },
+        data: { type: 'support_ticket', ticketId: ticket.id, ticketCode: ticket.code },
       });
     }
 
@@ -494,7 +494,7 @@ export class SupportTicketService {
       void this.notifications.sendToUsers([ticket.userId], {
         title: `Phiếu hỗ trợ #${ticket.code} đã giải quyết`,
         body: 'Vấn đề của bạn đã được giải quyết. Vui lòng đánh giá chất lượng phục vụ nhé!',
-        data: { type: 'support_ticket', ticketId: ticket.id },
+        data: { type: 'support_ticket', ticketId: ticket.id, ticketCode: ticket.code },
       });
     }
 
@@ -648,7 +648,7 @@ export class SupportTicketService {
     void this.notifications.sendToUsers([ticket.userId], {
       title: `Phiếu hỗ trợ #${ticket.code} cập nhật`,
       body: `Trạng thái mới: ${dto.status}`,
-      data: { type: 'support_ticket', ticketId: ticket.id, status: dto.status },
+      data: { type: 'support_ticket', ticketId: ticket.id, ticketCode: ticket.code, status: dto.status },
     });
 
     return updated;
@@ -707,7 +707,7 @@ export class SupportTicketService {
     void this.notifications.sendToUsers([ticket.userId], {
       title: 'Bạn nhận được voucher bồi thường',
       body: `Yêu cầu #${ticket.code} đã được giải quyết: voucher ${dto.amount.toLocaleString('vi-VN')} ₫ đã vào Ví voucher.`,
-      data: { type: 'support_ticket', ticketId: ticket.id, status: 'RESOLVED' },
+      data: { type: 'support_ticket', ticketId: ticket.id, ticketCode: ticket.code, status: 'RESOLVED' },
     });
     return updated;
   }

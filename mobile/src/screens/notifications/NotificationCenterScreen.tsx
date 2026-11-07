@@ -15,22 +15,49 @@ import {
   useNotificationsList,
 } from '../../services/useNotifications';
 import { useAuthStore } from '../../store/useAuthStore';
-import { AppNotification } from '../../types/api';
+import { AppNotification, ChatChannel, Role } from '../../types/api';
 import { formatNotificationTime, getDateCategory } from '../../utils/notificationFormat';
 
 type FilterTab = 'all' | 'orders' | 'activity';
 
+const VALID_CHAT_CHANNELS: readonly ChatChannel[] = [
+  'CUSTOMER_DRIVER',
+  'CUSTOMER_RESTAURANT',
+  'RESTAURANT_DRIVER',
+];
+
+/** Suy luận vai trò người đối thoại từ kênh chat khi thông báo cũ chưa lưu sẵn recipientRole */
+function inferChatRecipientRole(channel?: ChatChannel, currentUserRole?: Role): string | undefined {
+  if (!channel) return undefined;
+  if (channel === 'CUSTOMER_RESTAURANT') {
+    return currentUserRole === 'RESTAURANT_OWNER' ? 'Khách hàng' : 'Quán ăn';
+  }
+  if (channel === 'CUSTOMER_DRIVER') {
+    return currentUserRole === 'DRIVER' ? 'Khách hàng' : 'Tài xế giao hàng';
+  }
+  if (channel === 'RESTAURANT_DRIVER') {
+    return currentUserRole === 'DRIVER' ? 'Quán ăn' : 'Tài xế giao hàng';
+  }
+  return undefined;
+}
+
 /** Biểu tượng và màu nền tương ứng loại thông báo */
 function getNotificationVisuals(type: string): { icon: IconName; bgColor: string; iconColor: string } {
   switch (type) {
+    case 'order_chat':
+      return { icon: 'chatbubble-ellipses', bgColor: 'bg-accent-50', iconColor: '#FF7A30' };
+    case 'support_ticket':
+      return { icon: 'headset', bgColor: 'bg-violet-soft', iconColor: '#6D28D9' };
     case 'order':
       return { icon: 'receipt', bgColor: 'bg-brand-50', iconColor: '#00A896' };
+    case 'order_reminder':
+      return { icon: 'alarm', bgColor: 'bg-warning-soft', iconColor: '#D97706' };
     case 'order_available':
-      return { icon: 'bicycle', bgColor: 'bg-blue-50', iconColor: '#0284C7' };
+      return { icon: 'bicycle', bgColor: 'bg-info-soft', iconColor: '#0284C7' };
     case 'review_reply':
-      return { icon: 'chatbubbles', bgColor: 'bg-amber-50', iconColor: '#D97706' };
+      return { icon: 'chatbubbles', bgColor: 'bg-warning-soft', iconColor: '#D97706' };
     case 'driver_offline':
-      return { icon: 'warning', bgColor: 'bg-rose-50', iconColor: '#E11D48' };
+      return { icon: 'warning', bgColor: 'bg-danger-soft', iconColor: '#E11D48' };
     default:
       return { icon: 'notifications', bgColor: 'bg-canvas-subtle', iconColor: '#00A896' };
   }
@@ -84,22 +111,102 @@ export const NotificationCenterScreen: React.FC = () => {
     return groups;
   }, [filteredNotifications]);
 
-  // Điều hướng sâu theo ngữ cảnh thông báo và vai trò
+  // Điều hướng sâu theo ngữ cảnh thông báo và vai trò (ưu tiên kiểm tra đúng item.type trước)
   const handleItemPress = (item: AppNotification) => {
     if (!item.readAt) {
       markAsReadMutation.mutate(item.id);
     }
 
     const orderId = (item.data?.orderId as string) || undefined;
+    const rawChannel = item.data?.channel as ChatChannel | undefined;
+    const channel = rawChannel && VALID_CHAT_CHANNELS.includes(rawChannel) ? rawChannel : undefined;
+
+    // 1. Tin nhắn chat trong đơn hàng -> mở thẳng phòng Chat của cuộc trò chuyện đó
+    if (item.type === 'order_chat') {
+      if (orderId && channel && user?.role !== 'ADMIN') {
+        const fallbackSender = item.title.replace(/^Tin nhắn mới từ\s+/i, '').trim();
+        const recipientName =
+          (typeof item.data?.recipientName === 'string' && item.data.recipientName.trim()) ||
+          fallbackSender ||
+          undefined;
+        const recipientRole =
+          (typeof item.data?.recipientRole === 'string' && item.data.recipientRole.trim()) ||
+          inferChatRecipientRole(channel, user?.role);
+
+        navigation.navigate('Chat', {
+          orderId,
+          channel,
+          recipientName,
+          recipientRole,
+        });
+        return;
+      }
+
+      // Dự phòng cho thông báo cũ không có channel: mở Hộp thư tin nhắn theo vai trò
+      switch (user?.role) {
+        case 'RESTAURANT_OWNER':
+          navigation.navigate('OwnerTabs', { screen: 'OwnerInboxTab' });
+          return;
+        case 'DRIVER':
+          navigation.navigate('DriverTabs', { screen: 'DriverInboxTab' });
+          return;
+        case 'CUSTOMER':
+          navigation.navigate('Inbox');
+          return;
+        default:
+          break;
+      }
+    }
+
+    // 2. Phản hồi phiếu hỗ trợ CSKH / tặng voucher bồi thường -> mở chi tiết phiếu hỗ trợ
+    if (item.type === 'support_ticket') {
+      if (user?.role === 'ADMIN') {
+        navigation.navigate('AdminSupportTickets');
+        return;
+      }
+      const ticketId = (item.data?.ticketId as string) || undefined;
+      const ticketCode = (item.data?.ticketCode as string) || undefined;
+      if (ticketId) {
+        navigation.navigate('SupportTicketDetail', { ticketId, code: ticketCode });
+        return;
+      }
+      navigation.navigate('SupportTicketList');
+      return;
+    }
+
+    // 3. Phản hồi đánh giá từ nhà hàng -> kiểm tra trước orderId để không bị nhảy nhầm sang OrderTracking
+    if (item.type === 'review_reply') {
+      if (user?.role === 'RESTAURANT_OWNER') {
+        navigation.navigate('OwnerReviews');
+        return;
+      }
+      const restaurantId = (item.data?.restaurantId as string) || undefined;
+      const restaurantName = (item.data?.restaurantName as string) || undefined;
+      if (restaurantId) {
+        navigation.navigate('RestaurantReviews', { restaurantId, restaurantName });
+        return;
+      }
+      if (orderId) {
+        navigation.navigate('OrderTracking', { orderId });
+        return;
+      }
+    }
+
+    // 4. Thông báo chuyến giao mới gần tài xế -> mở tab Săn chuyến (DriverAvailableTab)
+    if (item.type === 'order_available' && user?.role === 'DRIVER') {
+      navigation.navigate('DriverTabs', { screen: 'DriverAvailableTab' });
+      return;
+    }
+
+    // 5. Cập nhật trạng thái đơn hàng / nhắc xác nhận đơn
     // React Navigation 7: màn Thông báo nằm ngoài khung tab → phải ghi rõ khung cha (OwnerTabs / DriverTabs / AdminTabs)
-    // rồi mới tới tab; gọi thẳng tên tab sẽ báo "action NAVIGATE was not handled by any navigator".
     if (orderId) {
       switch (user?.role) {
         case 'RESTAURANT_OWNER':
           navigation.navigate('OwnerTabs', { screen: 'OwnerOrdersTab' });
           return;
         case 'DRIVER':
-          navigation.navigate('DriverTabs', { screen: 'DriverDeliveriesTab' });
+          navigation.navigate('DriverDeliveryDetail', { orderId });
           return;
         case 'ADMIN':
           navigation.navigate('AdminTabs', { screen: 'AdminOrdersTab', params: { orderId } });
@@ -111,11 +218,7 @@ export const NotificationCenterScreen: React.FC = () => {
       }
     }
 
-    if (item.type === 'review_reply' && user?.role === 'RESTAURANT_OWNER') {
-      navigation.navigate('OwnerReviews');
-      return;
-    }
-
+    // 6. Cảnh báo tự động chuyển ngoại tuyến cho tài xế
     if (item.type === 'driver_offline' && user?.role === 'DRIVER') {
       navigation.navigate('DriverTabs', { screen: 'DriverProfileTab' });
     }
@@ -267,14 +370,26 @@ export const NotificationCenterScreen: React.FC = () => {
                     {/* Nội dung thông báo */}
                     <View className="flex-1 pt-0.5">
                       <View className="flex-row items-center justify-between gap-2">
-                        <Text
-                          variant="body"
-                          weight={isUnread ? 'bold' : 'medium'}
-                          numberOfLines={1}
-                          className="flex-1 text-ink"
-                        >
-                          {item.title}
-                        </Text>
+                        <View className="flex-1 flex-row items-center gap-1.5">
+                          <Text
+                            variant="body"
+                            weight={isUnread ? 'bold' : 'medium'}
+                            numberOfLines={1}
+                            className="shrink text-ink"
+                          >
+                            {item.title}
+                          </Text>
+                          {isUnread &&
+                            item.type === 'order_chat' &&
+                            typeof item.data?.unreadCount === 'number' &&
+                            item.data.unreadCount > 1 && (
+                              <View className="rounded-full bg-accent-500 px-1.5 py-0.5">
+                                <Text variant="micro" weight="bold" tone="inverse">
+                                  {item.data.unreadCount}
+                                </Text>
+                              </View>
+                            )}
+                        </View>
                         <Text variant="micro" tone="muted">
                           {formatNotificationTime(item.createdAt)}
                         </Text>

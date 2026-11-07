@@ -90,11 +90,14 @@ export const ChatScreen: React.FC = () => {
   useEffect(() => {
     if (!orderId || !channel) return;
 
-    // Đang mở cuộc trò chuyện thì coi như đã đọc (để lần đăng nhập sau không báo lại)
+    // Đang mở cuộc trò chuyện thì coi như đã đọc (để lần đăng nhập sau không báo lại và đồng bộ chuông thông báo)
     const markRead = () => {
       ordersApi
         .markMessagesRead(orderId, channel)
-        .then(() => queryClient.invalidateQueries({ queryKey: queryKeys.chat.all }))
+        .then(() => {
+          queryClient.invalidateQueries({ queryKey: queryKeys.chat.all });
+          queryClient.invalidateQueries({ queryKey: queryKeys.notifications.all });
+        })
         .catch(() => {});
     };
     markRead();

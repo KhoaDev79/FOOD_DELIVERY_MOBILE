@@ -1213,11 +1213,23 @@ export class OrdersService {
         : side === 'DRIVER'
           ? order.driver?.fullName || 'Tài xế'
           : order.customer?.fullName || 'Khách hàng';
+    const senderRoleLabel =
+      side === 'RESTAURANT'
+        ? 'Quán ăn'
+        : side === 'DRIVER'
+          ? 'Tài xế giao hàng'
+          : 'Khách hàng';
     if (recipientIds.length > 0) {
       void this.notifications.sendToUsers(recipientIds, {
         title: `Tin nhắn mới từ ${senderName}`,
         body: content,
-        data: { type: 'order_chat', orderId, channel },
+        data: {
+          type: 'order_chat',
+          orderId,
+          channel,
+          recipientName: senderName,
+          recipientRole: senderRoleLabel,
+        },
       });
     }
     return message;
@@ -1227,6 +1239,7 @@ export class OrdersService {
   async markMessagesRead(orderId: string, user: AuthUser, channel: ChatChannel) {
     await this.getChatOrder(orderId, user, channel, 'write');
     const lastReadAt = await this.touchChatRead(orderId, user.id, channel, new Date());
+    void this.notifications?.markOrderChatNotificationsAsRead?.(user.id, orderId, channel);
     return { orderId, channel, lastReadAt };
   }
 

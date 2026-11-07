@@ -834,6 +834,7 @@ export class RestaurantsService {
         id: review.id,
         orderId: review.orderId,
         customerId: review.customerId,
+        restaurantId: review.restaurant.id,
         restaurantName: review.restaurant.name,
       });
     }

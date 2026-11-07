@@ -542,4 +542,63 @@ describe('OrdersService (V4 C4 Ledger & C5 Failed Delivery)', () => {
       await expect(service.confirmRefund('o1', 'admin-1', 'lần 2')).rejects.toThrow(ConflictException);
     });
   });
+
+  describe('Thông báo tin nhắn đơn hàng (order_chat) & đồng bộ đã đọc', () => {
+    it('sendOrderMessage đính kèm recipientName và recipientRole vào thông báo order_chat', async () => {
+      (prisma as any).orderMessage = {
+        create: jest.fn().mockResolvedValue({
+          id: 'msg-1',
+          orderId: baseOrder.id,
+          channel: 'CUSTOMER_RESTAURANT',
+          senderId: 'owner-1',
+          senderRole: Role.RESTAURANT_OWNER,
+          content: 'Món của bạn xong rồi ạ',
+          createdAt: new Date(),
+        }),
+      };
+      (prisma as any).orderChatRead = {
+        upsert: jest.fn().mockResolvedValue({ lastReadAt: new Date() }),
+      };
+      (gateway as any).emitOrderMessage = jest.fn();
+      (notifications as any).sendToUsers = jest.fn().mockResolvedValue(undefined);
+
+      await service.sendOrderMessage(
+        baseOrder.id,
+        { id: 'owner-1', email: 'owner@test.com', role: Role.RESTAURANT_OWNER },
+        'CUSTOMER_RESTAURANT',
+        'Món của bạn xong rồi ạ',
+      );
+
+      expect((notifications as any).sendToUsers).toHaveBeenCalledWith(['cust-1'], {
+        title: 'Tin nhắn mới từ Quán Ngon',
+        body: 'Món của bạn xong rồi ạ',
+        data: {
+          type: 'order_chat',
+          orderId: baseOrder.id,
+          channel: 'CUSTOMER_RESTAURANT',
+          recipientName: 'Quán Ngon',
+          recipientRole: 'Quán ăn',
+        },
+      });
+    });
+
+    it('markMessagesRead tự động gọi markOrderChatNotificationsAsRead để đồng bộ chuông thông báo', async () => {
+      (prisma as any).orderChatRead = {
+        upsert: jest.fn().mockResolvedValue({ lastReadAt: new Date() }),
+      };
+      (notifications as any).markOrderChatNotificationsAsRead = jest.fn().mockResolvedValue(1);
+
+      await service.markMessagesRead(
+        baseOrder.id,
+        { id: 'cust-1', email: 'c@test.com', role: Role.CUSTOMER },
+        'CUSTOMER_RESTAURANT',
+      );
+
+      expect((notifications as any).markOrderChatNotificationsAsRead).toHaveBeenCalledWith(
+        'cust-1',
+        baseOrder.id,
+        'CUSTOMER_RESTAURANT',
+      );
+    });
+  });
 });

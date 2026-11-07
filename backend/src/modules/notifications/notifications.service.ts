@@ -214,11 +214,23 @@ export class NotificationsService {
     ]).then(() => undefined);
   }
 
-  notifyReviewReplied(review: { id: string; orderId: string; customerId: string; restaurantName: string }) {
+  notifyReviewReplied(review: {
+    id: string;
+    orderId: string;
+    customerId: string;
+    restaurantId?: string;
+    restaurantName: string;
+  }) {
     return this.sendToUsers([review.customerId], {
       title: `${review.restaurantName} đã phản hồi đánh giá`,
       body: 'Nhà hàng vừa gửi phản hồi cho đánh giá đơn hàng của bạn',
-      data: { type: 'review_reply', reviewId: review.id, orderId: review.orderId },
+      data: {
+        type: 'review_reply',
+        reviewId: review.id,
+        orderId: review.orderId,
+        restaurantId: review.restaurantId,
+        restaurantName: review.restaurantName,
+      },
     });
   }
 
@@ -244,19 +256,61 @@ export class NotificationsService {
     const validUserIds = Array.from(new Set(userIds.filter(Boolean)));
     if (!validUserIds.length) return;
 
-    // 1. Lưu bản ghi Notification vào database & phát Socket.IO
+    // 1. Lưu bản ghi Notification vào database (gộp thông báo chat chưa đọc cùng hội thoại) & phát Socket.IO
+    const isOrderChat =
+      payload.data?.type === 'order_chat' &&
+      typeof payload.data?.orderId === 'string' &&
+      typeof payload.data?.channel === 'string';
+
     await Promise.all(
       validUserIds.map(async (userId) => {
         try {
-          const record = await this.prisma.notification.create({
-            data: {
-              userId,
-              type: (payload.data?.type as string) || 'system',
-              title: payload.title,
-              body: payload.body,
-              data: payload.data ? (payload.data as Prisma.InputJsonValue) : Prisma.JsonNull,
-            },
-          });
+          let record = null;
+
+          if (isOrderChat && typeof this.prisma.notification.findMany === 'function') {
+            const unreadChats = await this.prisma.notification.findMany({
+              where: { userId, type: 'order_chat', readAt: null },
+              orderBy: { createdAt: 'desc' },
+              take: 20,
+            });
+            const existing = (unreadChats ?? []).find((n) => {
+              const d = n.data as Record<string, unknown> | null;
+              return d?.orderId === payload.data?.orderId && d?.channel === payload.data?.channel;
+            });
+
+            if (existing && typeof this.prisma.notification.update === 'function') {
+              const prevData = (existing.data as Record<string, unknown> | null) ?? {};
+              const prevCount = Number(prevData.unreadCount ?? 1);
+              const nextData = {
+                ...prevData,
+                ...payload.data,
+                unreadCount: prevCount + 1,
+              };
+              record = await this.prisma.notification.update({
+                where: { id: existing.id },
+                data: {
+                  title: payload.title,
+                  body: payload.body,
+                  data: nextData as Prisma.InputJsonValue,
+                  createdAt: new Date(),
+                },
+              });
+            }
+          }
+
+          if (!record) {
+            const initialData = isOrderChat ? { ...payload.data, unreadCount: 1 } : payload.data;
+            record = await this.prisma.notification.create({
+              data: {
+                userId,
+                type: (payload.data?.type as string) || 'system',
+                title: payload.title,
+                body: payload.body,
+                data: initialData ? (initialData as Prisma.InputJsonValue) : Prisma.JsonNull,
+              },
+            });
+          }
+
           this.gateway?.emitNotification(userId, record);
         } catch (err) {
           this.logger.warn(`Lưu thông báo database thất bại cho user ${userId}: ${err instanceof Error ? err.message : String(err)}`);
@@ -366,6 +420,37 @@ export class NotificationsService {
       data: { readAt: new Date() },
     });
     return { count: result.count };
+  }
+
+  /**
+   * Đồng bộ trạng thái đã đọc cho thông báo tin nhắn đơn hàng (`order_chat`)
+   * khi người dùng mở trực tiếp cuộc trò chuyện trong màn Chat.
+   */
+  async markOrderChatNotificationsAsRead(userId: string, orderId: string, channel?: string): Promise<number> {
+    try {
+      const unreadChats = await this.prisma.notification.findMany({
+        where: { userId, type: 'order_chat', readAt: null },
+        select: { id: true, data: true },
+      });
+      const matchingIds = (unreadChats ?? [])
+        .filter((n) => {
+          const d = n.data as Record<string, unknown> | null;
+          return d?.orderId === orderId && (!channel || d?.channel === channel);
+        })
+        .map((n) => n.id);
+      if (!matchingIds.length) return 0;
+
+      const result = await this.prisma.notification.updateMany({
+        where: { id: { in: matchingIds }, userId, readAt: null },
+        data: { readAt: new Date() },
+      });
+      return result.count;
+    } catch (err) {
+      this.logger.warn(
+        `Đồng bộ đã đọc thông báo chat thất bại cho user ${userId}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      return 0;
+    }
   }
 
   /** Dọn dẹp các thông báo cũ hơn N ngày (mặc định 90 ngày) */

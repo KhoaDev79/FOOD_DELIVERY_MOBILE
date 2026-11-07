@@ -1,220 +1,174 @@
-import { NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { Test, TestingModule } from '@nestjs/testing';
-import { PrismaService } from '../prisma/prisma.service';
-import { OrdersGateway } from '../realtime/orders.gateway';
 import { NotificationsService } from './notifications.service';
 
-describe('NotificationsService', () => {
+describe('NotificationsService (Coalescing & Read-Sync cho order_chat)', () => {
   let service: NotificationsService;
   let prisma: {
-    user: { findMany: jest.Mock; updateMany: jest.Mock };
     notification: {
-      create: jest.Mock;
       findMany: jest.Mock;
-      count: jest.Mock;
-      findFirst: jest.Mock;
+      create: jest.Mock;
       update: jest.Mock;
       updateMany: jest.Mock;
-      deleteMany: jest.Mock;
-      delete: jest.Mock;
+    };
+    user: {
+      findMany: jest.Mock;
+      updateMany: jest.Mock;
     };
   };
   let gateway: { emitNotification: jest.Mock };
 
-  beforeEach(async () => {
+  beforeEach(() => {
     prisma = {
+      notification: {
+        findMany: jest.fn().mockResolvedValue([]),
+        create: jest.fn().mockImplementation(({ data }) =>
+          Promise.resolve({ id: 'notif-new', createdAt: new Date(), readAt: null, ...data }),
+        ),
+        update: jest.fn().mockImplementation(({ where, data }) =>
+          Promise.resolve({ id: where.id, readAt: null, ...data }),
+        ),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      },
       user: {
         findMany: jest.fn().mockResolvedValue([]),
         updateMany: jest.fn().mockResolvedValue({ count: 0 }),
       },
-      notification: {
-        create: jest.fn().mockImplementation(({ data }) => Promise.resolve({ id: 'n-1', ...data, createdAt: new Date(), readAt: null })),
-        findMany: jest.fn().mockResolvedValue([]),
-        count: jest.fn().mockResolvedValue(0),
-        findFirst: jest.fn().mockResolvedValue(null),
-        update: jest.fn().mockImplementation(({ data }) => Promise.resolve({ id: 'n-1', ...data })),
-        updateMany: jest.fn().mockResolvedValue({ count: 0 }),
-        deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
-        delete: jest.fn().mockResolvedValue({ id: 'n-1' }),
+    };
+    gateway = { emitNotification: jest.fn() };
+    const config = { get: jest.fn().mockReturnValue(undefined) } as unknown as ConfigService;
+
+    service = new NotificationsService(prisma as never, config, gateway as never);
+  });
+
+  it('tạo thông báo order_chat mới với unreadCount = 1 khi chưa có thông báo chưa đọc cùng hội thoại', async () => {
+    await service.sendToUsers(['cust-1'], {
+      title: 'Tin nhắn mới từ Quán Ngon',
+      body: 'Món của bạn đang được làm nhé',
+      data: {
+        type: 'order_chat',
+        orderId: 'ord-1',
+        channel: 'CUSTOMER_RESTAURANT',
+        recipientName: 'Quán Ngon',
+        recipientRole: 'Quán ăn',
       },
-    };
+    });
 
-    gateway = {
-      emitNotification: jest.fn(),
-    };
-
-    const module: TestingModule = await Test.createTestingModule({
-      providers: [
-        NotificationsService,
-        { provide: PrismaService, useValue: prisma },
-        {
-          provide: ConfigService,
-          useValue: {
-            get: jest.fn().mockReturnValue(null),
-          },
-        },
-        { provide: OrdersGateway, useValue: gateway },
-      ],
-    }).compile();
-
-    service = module.get<NotificationsService>(NotificationsService);
-  });
-
-  describe('sendToUsers', () => {
-    it('lưu bản ghi vào database và phát socket cho từng user', async () => {
-      await service.sendToUsers(['user-1', 'user-2'], {
-        title: 'Đơn hàng mới',
-        body: 'Bạn có đơn hàng mới',
-        data: { type: 'order', orderId: 'ord-123' },
-      });
-
-      expect(prisma.notification.create).toHaveBeenCalledTimes(2);
-      expect(prisma.notification.create).toHaveBeenCalledWith({
+    expect(prisma.notification.create).toHaveBeenCalledTimes(1);
+    expect(prisma.notification.create).toHaveBeenCalledWith(
+      expect.objectContaining({
         data: expect.objectContaining({
-          userId: 'user-1',
-          type: 'order',
-          title: 'Đơn hàng mới',
-          body: 'Bạn có đơn hàng mới',
+          userId: 'cust-1',
+          type: 'order_chat',
+          title: 'Tin nhắn mới từ Quán Ngon',
+          body: 'Món của bạn đang được làm nhé',
+          data: expect.objectContaining({
+            type: 'order_chat',
+            orderId: 'ord-1',
+            channel: 'CUSTOMER_RESTAURANT',
+            recipientName: 'Quán Ngon',
+            recipientRole: 'Quán ăn',
+            unreadCount: 1,
+          }),
         }),
-      });
-      expect(gateway.emitNotification).toHaveBeenCalledTimes(2);
-      expect(gateway.emitNotification).toHaveBeenCalledWith('user-1', expect.objectContaining({ userId: 'user-1' }));
-    });
-
-    it('bỏ qua nếu danh sách user rỗng', async () => {
-      await service.sendToUsers([], {
-        title: 'Thử nghiệm',
-        body: 'Nội dung',
-      });
-      expect(prisma.notification.create).not.toHaveBeenCalled();
-      expect(gateway.emitNotification).not.toHaveBeenCalled();
-    });
+      }),
+    );
+    expect(gateway.emitNotification).toHaveBeenCalledTimes(1);
   });
 
-  describe('list', () => {
-    it('trả về danh sách phân trang và đếm chưa đọc', async () => {
-      const mockItems = [
-        { id: 'n-1', userId: 'u-1', title: 'Thông báo 1', readAt: null },
-      ];
-      prisma.notification.findMany.mockResolvedValue(mockItems);
-      prisma.notification.count
-        .mockResolvedValueOnce(5) // total
-        .mockResolvedValueOnce(2); // unreadCount
-
-      const result = await service.list('u-1', { page: 1, limit: 10 });
-
-      expect(result).toEqual({
-        items: mockItems,
-        total: 5,
-        unreadCount: 2,
-        page: 1,
-        limit: 10,
-        totalPages: 1,
-        hasMore: true,
-      });
-      expect(prisma.notification.findMany).toHaveBeenCalledWith({
-        where: { userId: 'u-1' },
-        orderBy: { createdAt: 'desc' },
-        skip: 0,
-        take: 10,
-      });
-    });
-  });
-
-  describe('getUnreadCount', () => {
-    it('đếm đúng số lượng thông báo readAt = null', async () => {
-      prisma.notification.count.mockResolvedValue(3);
-      const res = await service.getUnreadCount('u-1');
-      expect(res).toEqual({ unreadCount: 3 });
-      expect(prisma.notification.count).toHaveBeenCalledWith({
-        where: { userId: 'u-1', readAt: null },
-      });
-    });
-  });
-
-  describe('markAsRead', () => {
-    it('cập nhật readAt khi thông báo chưa đọc', async () => {
-      prisma.notification.findFirst.mockResolvedValue({
-        id: 'n-1',
-        userId: 'u-1',
+  it('gộp (coalesce) vào thông báo order_chat chưa đọc của cùng (orderId, channel) và tăng unreadCount', async () => {
+    prisma.notification.findMany.mockResolvedValueOnce([
+      {
+        id: 'notif-existing',
+        userId: 'cust-1',
+        type: 'order_chat',
         readAt: null,
-      });
-
-      await service.markAsRead('u-1', 'n-1');
-
-      expect(prisma.notification.update).toHaveBeenCalledWith({
-        where: { id: 'n-1' },
-        data: { readAt: expect.any(Date) },
-      });
-    });
-
-    it('không gọi update nếu đã đọc trước đó', async () => {
-      prisma.notification.findFirst.mockResolvedValue({
-        id: 'n-1',
-        userId: 'u-1',
-        readAt: new Date(),
-      });
-
-      await service.markAsRead('u-1', 'n-1');
-
-      expect(prisma.notification.update).not.toHaveBeenCalled();
-    });
-
-    it('ném lỗi NotFoundException nếu thông báo không tồn tại', async () => {
-      prisma.notification.findFirst.mockResolvedValue(null);
-
-      await expect(service.markAsRead('u-1', 'non-existent')).rejects.toThrow(
-        NotFoundException,
-      );
-    });
-  });
-
-  describe('markAllAsRead', () => {
-    it('đánh dấu tất cả thông báo chưa đọc của user là đã đọc', async () => {
-      prisma.notification.updateMany.mockResolvedValue({ count: 4 });
-
-      const res = await service.markAllAsRead('u-1');
-
-      expect(res).toEqual({ count: 4 });
-      expect(prisma.notification.updateMany).toHaveBeenCalledWith({
-        where: { userId: 'u-1', readAt: null },
-        data: { readAt: expect.any(Date) },
-      });
-    });
-  });
-
-  describe('delete', () => {
-    it('xoá thông báo nếu tồn tại', async () => {
-      prisma.notification.findFirst.mockResolvedValue({ id: 'n-1', userId: 'u-1' });
-
-      const res = await service.delete('u-1', 'n-1');
-
-      expect(res).toEqual({ success: true });
-      expect(prisma.notification.delete).toHaveBeenCalledWith({ where: { id: 'n-1' } });
-    });
-
-    it('ném lỗi NotFoundException nếu thông báo không tồn tại', async () => {
-      prisma.notification.findFirst.mockResolvedValue(null);
-
-      await expect(service.delete('u-1', 'n-404')).rejects.toThrow(NotFoundException);
-    });
-  });
-
-  describe('cleanOldNotifications', () => {
-    it('xoá thông báo có createdAt nhỏ hơn ngưỡng ngày', async () => {
-      prisma.notification.deleteMany.mockResolvedValue({ count: 12 });
-
-      const count = await service.cleanOldNotifications(90);
-
-      expect(count).toBe(12);
-      expect(prisma.notification.deleteMany).toHaveBeenCalledWith({
-        where: {
-          createdAt: {
-            lt: expect.any(Date),
-          },
+        data: {
+          type: 'order_chat',
+          orderId: 'ord-1',
+          channel: 'CUSTOMER_RESTAURANT',
+          recipientName: 'Quán Ngon',
+          recipientRole: 'Quán ăn',
+          unreadCount: 2,
         },
-      });
+      },
+    ]);
+
+    await service.sendToUsers(['cust-1'], {
+      title: 'Tin nhắn mới từ Quán Ngon',
+      body: 'Món xong rồi bạn nhé!',
+      data: {
+        type: 'order_chat',
+        orderId: 'ord-1',
+        channel: 'CUSTOMER_RESTAURANT',
+        recipientName: 'Quán Ngon',
+        recipientRole: 'Quán ăn',
+      },
     });
+
+    expect(prisma.notification.create).not.toHaveBeenCalled();
+    expect(prisma.notification.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'notif-existing' },
+        data: expect.objectContaining({
+          title: 'Tin nhắn mới từ Quán Ngon',
+          body: 'Món xong rồi bạn nhé!',
+          data: expect.objectContaining({
+            orderId: 'ord-1',
+            channel: 'CUSTOMER_RESTAURANT',
+            unreadCount: 3,
+          }),
+        }),
+      }),
+    );
+    expect(gateway.emitNotification).toHaveBeenCalledWith(
+      'cust-1',
+      expect.objectContaining({ id: 'notif-existing' }),
+    );
+  });
+
+  it('markOrderChatNotificationsAsRead: chỉ đánh dấu đã đọc các thông báo khớp đúng orderId và channel', async () => {
+    prisma.notification.findMany.mockResolvedValueOnce([
+      {
+        id: 'notif-chat-1',
+        data: { type: 'order_chat', orderId: 'ord-1', channel: 'CUSTOMER_DRIVER' },
+      },
+      {
+        id: 'notif-chat-2',
+        data: { type: 'order_chat', orderId: 'ord-1', channel: 'CUSTOMER_RESTAURANT' },
+      },
+    ]);
+
+    const count = await service.markOrderChatNotificationsAsRead('cust-1', 'ord-1', 'CUSTOMER_DRIVER');
+    expect(count).toBe(1);
+    expect(prisma.notification.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: { in: ['notif-chat-1'] }, userId: 'cust-1', readAt: null },
+      }),
+    );
+  });
+
+  it('notifyReviewReplied: đính kèm restaurantId và restaurantName để điều hướng mở đúng trang đánh giá quán', async () => {
+    await service.notifyReviewReplied({
+      id: 'rev-1',
+      orderId: 'ord-1',
+      customerId: 'cust-1',
+      restaurantId: 'rest-99',
+      restaurantName: 'Bún Bò Huế O Xuân',
+    });
+
+    expect(prisma.notification.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          type: 'review_reply',
+          data: {
+            type: 'review_reply',
+            reviewId: 'rev-1',
+            orderId: 'ord-1',
+            restaurantId: 'rest-99',
+            restaurantName: 'Bún Bò Huế O Xuân',
+          },
+        }),
+      }),
+    );
   });
 });

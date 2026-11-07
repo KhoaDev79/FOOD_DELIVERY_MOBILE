@@ -14,7 +14,15 @@ const handledResponseIds = new Set<string>();
 const CHAT_CHANNELS: readonly ChatChannel[] = ['CUSTOMER_DRIVER', 'CUSTOMER_RESTAURANT', 'RESTAURANT_DRIVER'];
 
 /** Push tin nhắn chat hợp lệ phải có đơn và cuộc trò chuyện; push cũ không có kênh thì bỏ qua. */
-const isChatPush = (data: unknown): data is { type: 'order_chat'; orderId: string; channel: ChatChannel } =>
+const isChatPush = (
+  data: unknown,
+): data is {
+  type: 'order_chat';
+  orderId: string;
+  channel: ChatChannel;
+  recipientName?: string;
+  recipientRole?: string;
+} =>
   !!data &&
   typeof data === 'object' &&
   (data as { type?: unknown }).type === 'order_chat' &&
@@ -99,7 +107,14 @@ export function usePushNotifications() {
       if (handledResponseIds.has(id) || tooOld) return;
       handledResponseIds.add(id);
       const data = response.notification.request.content.data;
-      if (isChatPush(data)) openChat({ orderId: data.orderId, channel: data.channel });
+      if (isChatPush(data)) {
+        openChat({
+          orderId: data.orderId,
+          channel: data.channel,
+          recipientName: typeof data.recipientName === 'string' ? data.recipientName : undefined,
+          recipientRole: typeof data.recipientRole === 'string' ? data.recipientRole : undefined,
+        });
+      }
     };
     Notifications.getLastNotificationResponseAsync()
       .then(openFromResponse)
